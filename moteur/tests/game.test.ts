@@ -11,7 +11,7 @@ const newGame = (over: Parameters<typeof createGame>[0]['config'] = {}) =>
   createGame({
     players: [{ id: 'a', name: 'Alice' }, { id: 'b', name: 'Bob', bot: true }],
     plots: [{ id: 'T1', parcel: lot(0) }, { id: 'T2', parcel: lot(20) }, { id: 'T3', parcel: lot(40), existingSdp: 200 }],
-    config: { marketVolatility: 0, startCash: 3_000_000, ...over },
+    config: { marketVolatility: 0, eventChance: 0, holdingCostRate: 0, rateVolatility: 0, startCash: 3_000_000, ...over },
     seed: 7,
   });
 const play = (s: GameState, a: Action): GameState => {
@@ -91,8 +91,8 @@ describe('état de partie', () => {
   });
 
   it('refuse un lancement quand les fonds propres manquent', () => {
-    let s = newGame({ startCash: 400_000 });
-    s = play(s, { type: 'buy', player: 'a', plot: 'T1' });
+    let s = play(newGame(), { type: 'buy', player: 'a', plot: 'T1' });
+    s = { ...s, players: s.players.map((p) => ({ ...p, cash: 0 })), plots: s.plots.map((p) => (p.id === 'T1' ? { ...p, paid: 1000 } : p)) };
     expect(err(s, { type: 'launch', player: 'a', plot: 'T1', criteria: { ...crit, levels: 6 } })).toMatch(/fonds propres/);
   });
 
@@ -124,5 +124,49 @@ describe('état de partie', () => {
     const s = play(newGame(), { type: 'buy', player: 'a', plot: 'T1' });
     expect(netWorth(s, 'b')).toBe(3_000_000);
     expect(netWorth(s, 'a')).toBeLessThan(3_000_000);
+  });
+
+  it('chaque achat renchérit les terrains, puis la demande retombe', () => {
+    let s = newGame();
+    const before = s.plots.find((p) => p.id === 'T2')!.askingPrice;
+    s = play(s, { type: 'buy', player: 'a', plot: 'T1' });
+    const hot = s.plots.find((p) => p.id === 'T2')!.askingPrice;
+    expect(hot).toBeGreaterThan(before);
+    for (let i = 0; i < 12; i++) s = both(s);
+    expect(s.landHeat).toBeCloseTo(1, 1);
+    expect(s.plots.find((p) => p.id === 'T2')!.askingPrice).toBeLessThan(hot);
+  });
+
+  it('un terrain qui dort coûte du portage', () => {
+    let s = play(newGame({ holdingCostRate: 0.01 }), { type: 'buy', player: 'a', plot: 'T1' });
+    const cash = s.players[0].cash;
+    s = both(s);
+    expect(s.players[0].cash).toBeCloseTo(cash - s.plots[0].paid * 0.01, 4);
+  });
+
+  it('les prix de vente suivent l’indice de marché, pas les coûts', () => {
+    let s = newGame();
+    s = { ...s, marketIndex: 0.8 };
+    const r = applyAction(play(s, { type: 'buy', player: 'a', plot: 'T1' }), { type: 'launch', player: 'a', plot: 'T1', criteria: crit });
+    const low = r.ok ? r.state.projects[0].bilan : null;
+    let f = newGame();
+    f = play(f, { type: 'buy', player: 'a', plot: 'T1' });
+    const full = (play(f, { type: 'launch', player: 'a', plot: 'T1', criteria: crit })).projects[0].bilan;
+    expect(low).not.toBeNull();
+    expect(low!.revenue.total).toBeCloseTo(full.revenue.total * 0.8, 0);
+    expect(low!.costs.works).toBeCloseTo(full.costs.works, 4);
+  });
+
+  it('des événements surviennent (log), sans jamais fausser les comptes', () => {
+    let s = newGame({ eventChance: 1, startCash: 20_000_000 });
+    s = play(s, { type: 'buy', player: 'a', plot: 'T1' });
+    s = play(s, { type: 'launch', player: 'a', plot: 'T1', criteria: crit });
+    let guard = 0;
+    while (!s.over && guard++ < 60) s = both(s);
+    expect(s.over).toBe(true);
+    expect(s.log.length).toBeGreaterThan(5);
+    expect(s.players.every((p) => Number.isFinite(p.cash))).toBe(true);
+    expect(s.interestRate).toBeGreaterThanOrEqual(s.config.minRate);
+    expect(s.interestRate).toBeLessThanOrEqual(s.config.maxRate);
   });
 });

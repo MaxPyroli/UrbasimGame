@@ -106,16 +106,27 @@ collectivité jouent le rôle des enchères du Monopoly.
   chantier mis sous séquestre, solde encaissé à la fin des ventes ; à marché stable le gain = marge du bilan (testé).
   Après livraison le terrain redevient achetable avec le bâti existant (démolition-reconstruction, surélévation).
   Limites : premier arrivé premier servi pour un même terrain (les appels d'offres viendront), pas de faillite
-  (le séquestre garantit le chantier), pas d'événements, pas de zonage/PLU de jeu.
+  (le séquestre garantit le chantier), pas de zonage/PLU de jeu.
 - Fait : `moteur/src/game/bot.ts` — concurrents ordinateur (`playBotTurn`, `playBots`, `simulateAllBots`,
   `bestPlan`, `BOT_PROFILES`). Trois tempéraments (prudent / équilibré / agressif : marge minimale, R+x maximal,
   réserve de trésorerie, achats par trimestre). Un bot lance d'abord ses terrains, puis achète le terrain à plus forte
   marge absolue, puis passe. Fonction pure de l'état (pas de hasard propre) ; mélangeable avec des humains
   (le trimestre attend les humains). Simulation d'une partie de 40 trimestres : ~0,1 s.
-- **Équilibrage à faire** : en simulation bots seuls (24 terrains, 3 bots, 40 trimestres, 2 M€ de départ), le
-  patrimoine est multiplié par ~3 à 7 (petite couronne / grande ville) et ~18 (Paris) : trop facile. Pistes : prix des
-  terrains qui montent quand on achète, frais/aléas, événements (taux, recours), concurrence sur les terrains.
-- À faire ensuite : équilibrage, serveur multijoueur, règles de zone, appels d'offres, événements.
+- Fait : équilibrage (v1). Mécanismes ajoutés dans `game.ts` :
+  - prix de terrain = prix de référence × indice de marché × « chaleur » de la demande (chaque achat +2 % sur tous les
+    terrains, retombe de 20 %/tour) ; le prix de départ est ce que le meilleur projet jusqu'à R+5 peut payer en
+    gardant 7 % de marge (`askMargin`), ±8 % selon le terrain ; trésorerie de départ automatique = 2,5 × prix médian ;
+  - les prix de vente suivent l'indice de marché, pas les coûts (cycles : acheter quand le marché est bas) ;
+  - crédit à taux variable (marche aléatoire rappelée vers 4,5 %, bornes 1,5–9 %) : intérêts à la livraison selon
+    le taux moyen constaté ;
+  - portage des terrains sans opération (0,5 %/tour du prix payé) ;
+  - événements (40 %/tour, tirés dans l'état) : retournement ou regain de marché, recours (permis +1 tour), sol
+    pollué (+3 à 8 % des travaux), fouilles (+2 tours), hausse/baisse des taux. Surcoûts retranchés à la livraison.
+  Résultats (24 terrains de 10×30 m, 3 bots, 40 tours, 12 graines) : patrimoine final / départ, médiane ≈ 1,3–1,7
+  (prudent, équilibré, avec des pertes possibles, min 0,3–0,6) et ≈ 2,3–4,5 (agressif, dispersion la plus forte).
+  Limites : en « ville moyenne » les parties restent trop faciles (terrains très bon marché) ; le profil agressif
+  domine encore en moyenne ; les bots ignorent le cycle de marché (n'achètent pas exprès quand il est bas) ;
+  parcelles de test identiques (rectangles) — à refaire sur de vraies parcelles cadastrales.
 
 ## 6. Pour démarrer la nouvelle session
 Donnez-lui ce fichier et dites par exemple : « Reprends le moteur de `./moteur`, crée la structure du jeu, et

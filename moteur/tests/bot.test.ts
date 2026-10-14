@@ -74,4 +74,18 @@ describe('concurrents ordinateur', () => {
     expect(after.plots.every((p) => p.owner === null)).toBe(true);
     expect(after.round).toBe(1);
   });
+
+  it('équilibrage : sur 6 parties, ni argent facile ni ruine systématique', () => {
+    const ratios: Record<string, number[]> = { p: [], e: [], a: [] };
+    for (let seed = 1; seed <= 6; seed++) {
+      const s = simulateAllBots(createGame({ players: bots(), plots, config: { market: MARKETS['petite-couronne'], rounds: 40 }, seed }));
+      for (const k of Object.keys(ratios)) ratios[k].push(netWorth(s, k) / s.config.startCash);
+    }
+    const median = (a: number[]) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
+    for (const k of ['p', 'e']) expect(median(ratios[k])).toBeGreaterThan(0.7), expect(median(ratios[k])).toBeLessThan(3);
+    expect(median(ratios.a)).toBeLessThan(8);
+    // Le profil agressif prend plus de risque : sa dispersion est la plus forte.
+    const spread = (a: number[]) => Math.max(...a) - Math.min(...a);
+    expect(spread(ratios.a)).toBeGreaterThan(spread(ratios.p));
+  }, 60_000);
 });

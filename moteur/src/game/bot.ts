@@ -1,5 +1,5 @@
 import { DEFAULT_CRITERIA, computeBilan, computeProject, type Bilan, type Criteria, type Parcel, type Project } from '../engine';
-import { applyAction } from './game';
+import { applyAction, currentMarket, currentParams } from './game';
 import type { BotProfileName, GameState, Plot, Player } from './types';
 
 export interface BotProfile {
@@ -14,9 +14,9 @@ export interface BotProfile {
 }
 
 export const BOT_PROFILES: Record<BotProfileName, BotProfile> = {
-  prudent: { minMargin: 0.12, maxLevels: 4, reserve: 0.25, maxBuys: 1 },
-  equilibre: { minMargin: 0.08, maxLevels: 5, reserve: 0.1, maxBuys: 1 },
-  agressif: { minMargin: 0.04, maxLevels: 7, reserve: 0, maxBuys: 2 },
+  prudent: { minMargin: 0.05, maxLevels: 5, reserve: 0.25, maxBuys: 1 },
+  equilibre: { minMargin: 0.04, maxLevels: 5, reserve: 0.1, maxBuys: 1 },
+  agressif: { minMargin: 0.02, maxLevels: 7, reserve: 0, maxBuys: 2 },
 };
 
 export interface Plan {
@@ -39,13 +39,12 @@ function projectFor(parcel: Parcel, levels: number, attic: boolean): { criteria:
 
 /** Meilleur projet (marge absolue maximale) respectant le seuil de marge, pour un terrain acheté à `landPrice`. */
 export function bestPlan(state: GameState, plot: Plot, landPrice: number, profile: BotProfile): Plan | null {
-  const { config } = state;
   let best: Plan | null = null;
   for (let levels = 0; levels <= profile.maxLevels; levels++) {
     for (const attic of levels >= 2 ? [false, true] : [false]) {
       const { criteria, project } = projectFor(plot.parcel, levels, attic);
       if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
-      const bilan = computeBilan({ project, market: config.market, landPrice, existingSdp: plot.existingSdp, params: config.bilanParams });
+      const bilan = computeBilan({ project, market: currentMarket(state), landPrice, existingSdp: plot.existingSdp, params: currentParams(state) });
       if (bilan.marginRate < profile.minMargin) continue;
       if (!best || bilan.margin > best.bilan.margin) best = { criteria, bilan };
     }

@@ -9,6 +9,8 @@ export interface GameConfig {
   bilanParams: BilanParams;
   /** Trésorerie de départ de chaque joueur (€). */
   startCash: number;
+  /** Marge sur chiffre d'affaires qu'un terrain « au prix du marché » laisse au meilleur projet. */
+  askMargin: number;
   /** Nombre de tours (trimestres) ; la partie s'arrête ensuite. */
   rounds: number;
   /** Frais de revente d'un terrain à la banque : on récupère `1 - plotSpread` du prix affiché. */
@@ -16,6 +18,18 @@ export interface GameConfig {
   /** Volatilité trimestrielle de l'indice de marché et force de rappel vers 1. */
   marketVolatility: number;
   marketReversion: number;
+  /** Chaque terrain acheté renchérit tous les terrains de `landHeatStep` ; cet écart se résorbe de `landHeatDecay` par tour. */
+  landHeatStep: number;
+  landHeatDecay: number;
+  /** Coût de portage d'un terrain sans opération, par tour, en fraction du prix payé (taxe foncière, immobilisation). */
+  holdingCostRate: number;
+  /** Probabilité qu'un événement survienne à chaque tour. */
+  eventChance: number;
+  /** Le taux du crédit marche au hasard (±) et revient vers `bilanParams.interestRate` ; bornes. */
+  rateVolatility: number;
+  rateReversion: number;
+  minRate: number;
+  maxRate: number;
 }
 
 export interface Plot {
@@ -25,6 +39,8 @@ export interface Plot {
   /** SDP du bâti existant (m²) : démoli au lancement d'une opération. */
   existingSdp: number;
   askingPrice: number;
+  /** Prix de référence (indice de marché et demande à 1) ; le prix affiché en découle. */
+  basePrice: number;
   /** Prix payé par le propriétaire actuel, frais compris (0 si sans propriétaire). */
   paid: number;
   projectId: string | null;
@@ -63,6 +79,12 @@ export interface ProjectRun {
   installment: number;
   /** Solde reçu à la fin des ventes si l'indice de marché est inchangé (hors effet marché). */
   loanRepayment: number;
+  /** Taux du crédit au lancement, cumul des taux trimestriels et nombre de trimestres écoulés (crédit à taux variable). */
+  rateAtLaunch: number;
+  rateAccum: number;
+  roundsRun: number;
+  /** Surcoûts subis (sol pollué, retards, recours) : retranchés du solde à la livraison. */
+  extraCost: number;
   /** Fonds propres totalement investis (terrain + travaux), pour la valorisation. */
   equityInvested: number;
 }
@@ -82,6 +104,10 @@ export interface GameState {
   projects: ProjectRun[];
   /** Indice des prix de vente (1 = référence), évolue au fil des tours. */
   marketIndex: number;
+  /** Renchérissement des terrains dû à la demande (1 = calme). */
+  landHeat: number;
+  /** Taux annuel actuel du crédit promoteur. */
+  interestRate: number;
   rng: number;
   nextProjectId: number;
   log: GameEvent[];
