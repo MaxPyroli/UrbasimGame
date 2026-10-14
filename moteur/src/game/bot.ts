@@ -1,6 +1,8 @@
 import { DEFAULT_CRITERIA, computeBilan, computeProject, type Bilan, type Criteria, type Parcel, type Project } from '../engine';
 import { MAX_PRICE_POLICY, MIN_PRICE_POLICY, applyAction, criteriaFor, currentMarket, currentParams } from './game';
+import { buildDuration } from '../engine';
 import { minOfferPrice, offerOf } from './market';
+import { MAX_SOCIAL_SHARE, openTenders, programmeParams, scoreBid, tenderBidOf } from './tender';
 import { lotsLeft, marketDemand, sellingPace, unitsOnOffer } from './sales';
 import type { BotProfileName, GameState, Plot, Player } from './types';
 
@@ -19,12 +21,15 @@ export interface BotProfile {
   maxOffers: number;
   bidShare: number;
   prospects: number;
+  /** Appels d'offres de la commune : propositions simultanées au plus, et part de la marge qu'on accepte de céder pour mieux noter. */
+  maxTenderBids: number;
+  tenderGenerosity: number;
 }
 
 export const BOT_PROFILES: Record<BotProfileName, BotProfile> = {
-  prudent: { minMargin: 0.05, maxLevels: 5, reserve: 0.25, maxBuys: 1, supplyHorizon: 5, maxOffers: 2, bidShare: 0.3, prospects: 0 },
-  equilibre: { minMargin: 0.04, maxLevels: 5, reserve: 0.1, maxBuys: 1, supplyHorizon: 7, maxOffers: 3, bidShare: 0.5, prospects: 1 },
-  agressif: { minMargin: 0.02, maxLevels: 7, reserve: 0, maxBuys: 2, supplyHorizon: 12, maxOffers: 5, bidShare: 0.8, prospects: 2 },
+  prudent: { minMargin: 0.05, maxLevels: 5, reserve: 0.25, maxBuys: 1, supplyHorizon: 5, maxOffers: 2, bidShare: 0.3, prospects: 0, maxTenderBids: 1, tenderGenerosity: 0.5 },
+  equilibre: { minMargin: 0.04, maxLevels: 5, reserve: 0.1, maxBuys: 1, supplyHorizon: 7, maxOffers: 3, bidShare: 0.5, prospects: 1, maxTenderBids: 2, tenderGenerosity: 0.3 },
+  agressif: { minMargin: 0.02, maxLevels: 7, reserve: 0, maxBuys: 2, supplyHorizon: 12, maxOffers: 5, bidShare: 0.8, prospects: 2, maxTenderBids: 2, tenderGenerosity: 0.1 },
 };
 
 export interface Plan {
@@ -41,7 +46,8 @@ const projectCache = new WeakMap<Parcel, Map<string, Project>>();
 
 function projectFor(plot: Plot, levels: number, attic: boolean): { criteria: Criteria; project: Project } {
   const parcel: Parcel = plot.parcel;
-  const criteria: Criteria = criteriaFor(plot, { ...DEFAULT_CRITERIA, levels, attic });
+  const ob = plot.obligation;
+  const criteria: Criteria = criteriaFor(plot, { ...DEFAULT_CRITERIA, levels, attic, ...(ob?.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) }, ob?.programme.bonusLevels ?? 0);
   let byKey = projectCache.get(parcel);
   if (!byKey) projectCache.set(parcel, (byKey = new Map()));
   const key = `${levels}/${attic}`;
@@ -54,11 +60,12 @@ function projectFor(plot: Plot, levels: number, attic: boolean): { criteria: Cri
 export function bestPlan(state: GameState, plot: Plot, landPrice: number, profile: BotProfile): Plan | null {
   let best: Plan | null = null;
   if (plot.issue) return null;
-  for (let levels = 0; levels <= profile.maxLevels; levels++) {
-    for (const attic of levels >= 2 ? [false, true] : [false]) {
+  const cap = plot.obligation ? plot.obligation.maxLevels : Infinity;
+  for (let levels = 0; levels <= Math.min(profile.maxLevels, cap); levels++) {
+    for (const attic of levels >= 2 && levels + 1 <= cap ? [false, true] : [false]) {
       const { criteria, project } = projectFor(plot, levels, attic);
       if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
-      const bilan = computeBilan({ project, market: currentMarket(state, plot), landPrice, existingSdp: plot.existingSdp, params: { ...currentParams(state), targetMargin: profile.minMargin } });
+      const bilan = computeBilan({ project, market: currentMarket(state, plot), landPrice, existingSdp: plot.existingSdp, params: { ...programmeParams(currentParams(state), plot.obligation?.programme), targetMargin: profile.minMargin }, ...(plot.obligation ? { socialShare: plot.obligation.socialShare, quality: plot.obligation.quality, salesPremium: plot.obligation.programme.salesPremium } : {}) });
       if (bilan.marginRate < profile.minMargin) continue;
       if (!best || bilan.margin > best.bilan.margin) best = { criteria, bilan, lots: Math.max(1, project.indicators.dwellings), maxLand: bilan.maxLandPrice };
     }
@@ -124,7 +131,7 @@ function bid(state: GameState, playerId: string, profile: BotProfile): GameState
   type Cand = { plot: Plot; plan: Plan; price: number; score: number };
   const cands: Cand[] = [];
   for (const plot of s.plots) {
-    if (plot.owner !== null || offerOf(s, plot.id, playerId)) continue;
+    if (plot.owner !== null || plot.municipal || offerOf(s, plot.id, playerId)) continue;
     const listed = !!plot.listing;
     const floor = minOfferPrice(plot);
     const plan = bestPlan(s, plot, listed ? floor : plot.askingPrice, profile);
@@ -155,6 +162,55 @@ function bid(state: GameState, playerId: string, profile: BotProfile): GameState
   return s;
 }
 
+/**
+ * Appels d'offres de la commune : le bot cherche la proposition la mieux notée qui lui laisse sa marge (part sociale,
+ * qualité, délai réaliste), au prix maximal qu'il peut payer ; les prudents cèdent davantage de marge pour mieux noter.
+ */
+function tenderTurn(state: GameState, playerId: string, profile: BotProfile): GameState {
+  let s = state;
+  const me = () => s.players.find((p) => p.id === playerId)!;
+  const mineCount = () => openTenders(s).filter((t) => tenderBidOf(t, playerId)).length;
+  const rate = s.config.bilanParams.acquisitionFeeRate;
+  for (const t of openTenders(s)) {
+    if (mineCount() >= profile.maxTenderBids) break;
+    if (tenderBidOf(t, playerId) || s.round >= t.closesAt) continue;
+    const plot = s.plots.find((p) => p.id === t.plotId)!;
+    const spec = t.spec;
+    let best: { price: number; share: number; quality: 0 | 1 | 2; delivery: number; score: number; equity: number } | null = null;
+    for (let levels = 0; levels <= Math.min(profile.maxLevels, spec.maxLevels); levels++) {
+      for (const attic of levels >= 2 && levels < spec.maxLevels ? [false, true] : [false]) {
+        const base = { ...DEFAULT_CRITERIA, levels, attic, groundFloorUse: spec.groundCommerce ? ('commerce' as const) : DEFAULT_CRITERIA.groundFloorUse };
+        const criteria = criteriaFor(plot, base, spec.programme.bonusLevels);
+        const project = computeProject(plot.parcel, criteria);
+        if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
+        const d = buildDuration(project, programmeParams(s.config.bilanParams, spec.programme));
+        const planned = Math.ceil(d.permit / 3) + Math.ceil(d.build / 3);
+        const delivery = Math.max(spec.minDelivery, planned + 1);
+        if (delivery > spec.maxDelivery) continue;
+        for (const extra of [0, 0.1, 0.2]) {
+          const share = Math.min(MAX_SOCIAL_SHARE, spec.minSocialShare + extra * (1 + profile.tenderGenerosity));
+          for (const quality of [spec.minQuality, Math.min(2, spec.minQuality + 1)] as (0 | 1 | 2)[]) {
+            const bilan = computeBilan({ project, market: currentMarket(s, plot), landPrice: 0, existingSdp: plot.existingSdp, params: { ...programmeParams(currentParams(s), spec.programme), targetMargin: profile.minMargin }, socialShare: share, quality, salesPremium: spec.programme.salesPremium });
+            const maxLand = bilan.maxLandPrice;
+            if (maxLand < spec.minPrice) continue;
+            const price = Math.round(Math.min(maxLand, spec.minPrice * 1.5) * (0.92 + 0.08 * profile.bidShare));
+            if (price < spec.minPrice) continue;
+            const score = scoreBid(spec, { price, socialShare: share, quality, delivery }).total;
+            const c = bilan.costs;
+            const equity = (c.demolition + c.works + c.fixed + c.design + c.insurance + c.contingency + c.taxes) * (1 - s.config.bilanParams.loanShare);
+            if (!best || score > best.score) best = { price, share, quality, delivery, score, equity };
+          }
+        }
+      }
+    }
+    if (!best) continue;
+    if (me().cash - best.price * (1 + rate) < best.equity + me().cash * profile.reserve) continue;
+    const r = applyAction(s, { type: 'tenderBid', player: playerId, tender: t.id, price: best.price, socialShare: best.share, quality: best.quality, delivery: best.delivery });
+    if (r.ok) s = r.state;
+  }
+  return s;
+}
+
 /** Joue le trimestre d'un joueur ordinateur, puis le déclare prêt (ce qui peut résoudre le trimestre). */
 export function playBotTurn(state: GameState, playerId: string): GameState {
   let s = state;
@@ -165,13 +221,14 @@ export function playBotTurn(state: GameState, playerId: string): GameState {
   s = adjustPrices(s, playerId);
   s = tryLaunch(s, me(), profile);
 
+  if (s.config.communeTenders) s = tenderTurn(s, playerId, profile);
   if (s.config.landMarket === 'auction') s = bid(s, playerId, profile);
   else for (let buys = 0; buys < profile.maxBuys; buys++) {
     const { bilanParams: bp } = s.config;
     const cash = me().cash;
     let pick: { plot: Plot; plan: Plan } | null = null;
     for (const plot of s.plots) {
-      if (plot.owner !== null) continue;
+      if (plot.owner !== null || plot.municipal) continue;
       const total = plot.askingPrice * (1 + bp.acquisitionFeeRate);
       if (total > cash) continue;
       const plan = bestPlan(s, plot, plot.askingPrice, profile);

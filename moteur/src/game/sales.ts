@@ -20,7 +20,8 @@ export const lotsLeft = (p: ProjectRun) => p.lots - p.lotsSold;
 
 /** Prix d'un lot aujourd'hui : prix du lancement, suivi du marché, ajusté par la politique de prix de l'opération. */
 export function lotPrice(s: GameState, p: ProjectRun): number {
-  return (p.bilan.revenue.total / p.lots) * (s.marketIndex / p.marketIndexAtLaunch) * (1 + p.pricePolicy);
+  // Les logements sociaux sont déjà cédés ; le prix des autres lots est le prix du marché.
+  return ((p.bilan.revenue.total - p.socialRevenue) / Math.max(1, p.lots - p.socialLots)) * (s.marketIndex / p.marketIndexAtLaunch) * (1 + p.pricePolicy);
 }
 
 /** Part des lots vendus. */

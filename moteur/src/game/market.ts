@@ -39,6 +39,7 @@ export function placeOffer(s: GameState, playerId: string, plotId: string, rawPr
   const plot = s.plots.find((p) => p.id === plotId);
   if (!plot) return fail('terrain inconnu');
   if (plot.owner !== null) return fail('ce terrain a déjà un propriétaire');
+  if (plot.municipal) return fail('terrain communal : il ne se vend que par appel d’offres');
   if (player.bankrupt) return fail('vous êtes en faillite');
   if (player.debt > 0) return fail('la banque refuse tout engagement tant que votre découvert n’est pas remboursé');
   if (!Number.isFinite(rawPrice) || rawPrice <= 0) return fail('prix invalide');
@@ -114,7 +115,7 @@ export function resolveMarket(state: GameState): GameState {
 /** Met en vente `count` terrains libres tirés au hasard (dans l'état : rejouable). */
 export function listPlots(state: GameState, count: number): GameState {
   let s = state;
-  const pool = s.plots.filter((p) => p.owner === null && !p.listing && !p.projectId && p.issue !== 'zone' && offersOn(s, p.id).length === 0);
+  const pool = s.plots.filter((p) => p.owner === null && !p.municipal && !p.listing && !p.projectId && p.issue !== 'zone' && offersOn(s, p.id).length === 0);
   const picked: string[] = [];
   const n = Math.min(count, pool.length);
   for (let k = 0; k < n; k++) {
@@ -128,4 +129,4 @@ export function listPlots(state: GameState, count: number): GameState {
 }
 
 /** Nombre de terrains à mettre en vente ce trimestre. */
-export const listingCount = (s: GameState) => Math.max(1, Math.round(s.config.listingShare * s.plots.filter((p) => p.owner === null && !p.issue).length));
+export const listingCount = (s: GameState) => Math.max(1, Math.round(s.config.listingShare * s.plots.filter((p) => p.owner === null && !p.municipal && !p.issue).length));

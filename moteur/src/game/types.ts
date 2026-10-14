@@ -55,6 +55,12 @@ export interface GameConfig {
   debtSpread: number;
   /** Objectif : patrimoine final en multiple de la trésorerie de départ (0 = aucun). */
   goalMultiple: number;
+  /** Appels d'offres de la commune sur ses propres terrains (cahier des charges, sélection par pondération annoncée). */
+  communeTenders: boolean;
+  /** Nombre de terrains communaux au départ, délai de réponse (trimestres) et intervalle entre deux appels d'offres. */
+  municipalPlots: number;
+  tenderRounds: number;
+  tenderEvery: number;
   /** Multiplicateur de la trésorerie de départ automatique (difficulté). */
   startCashFactor: number;
   difficulty: Difficulty;
@@ -84,6 +90,10 @@ export interface Plot {
   /** Familles de zones du PLU qui touchent ce terrain (plusieurs après un assemblage à cheval) et code de la zone principale. */
   zones: ZoneFamily[];
   zoneCode?: string;
+  /** Terrain de la commune : il ne se vend que par appel d'offres (ni enchères ni prospection). */
+  municipal?: boolean;
+  /** Engagements pris auprès de la commune en remportant un appel d'offres. */
+  obligation?: TenderTerms;
   /** Terrain mis en vente : ouvert aux offres jusqu'à ce tour (non compris), prix minimum figé à la mise en vente. */
   listing?: { until: number; minPrice: number };
   /** Si présent, le terrain n'est pas constructible tel quel (voir `PlotIssue`). */
@@ -163,6 +173,11 @@ export interface ProjectRun {
   installment: number;
   /** Solde reçu à la fin des ventes si l'indice de marché est inchangé (hors effet marché). */
   loanRepayment: number;
+  /** Engagements de l'appel d'offres de la commune (social, qualité, délai) ; absent pour une opération libre. */
+  terms?: TenderTerms;
+  /** Lots cédés en bloc à un bailleur social au lancement, et leur prix total. */
+  socialLots: number;
+  socialRevenue: number;
   phase: ProjectPhase;
   /** Vrai une fois le seuil de préventes atteint : la banque a débloqué le crédit (refinancement du terrain, chantier). */
   financed: boolean;
@@ -191,6 +206,91 @@ export interface ProjectRun {
   equityInvested: number;
 }
 
+/** Niveau de qualité environnementale : 0 standard, 1 performant, 2 bas carbone. */
+export type Quality = 0 | 1 | 2;
+
+/** Cadre juridique de l'opération : ZAC, projet urbain partenarial ou quartier en renouvellement urbain. */
+export type ProgrammeKind = 'zac' | 'pup' | 'npnru';
+
+/** Avantages (et contreparties) que la commune accorde au lauréat, tels que le bilan les applique. */
+export interface Programme {
+  kind: ProgrammeKind;
+  label: string;
+  /** Une phrase qui dit ce que le programme change pour le promoteur. */
+  summary: string;
+  /** Prix de cession minimal = cette part de la valeur du terrain sous le cahier des charges. */
+  landDiscount: number;
+  /** Taxe d'aménagement et participations (€/m² de SDP) à la place du régime normal. */
+  taxPerSdp: number;
+  /** Délai d'instruction du permis (mois). */
+  permitMonths: number;
+  /** Niveaux supplémentaires accordés au-delà du PLU (bonus de constructibilité). */
+  bonusLevels: number;
+  /** Hausse des prix de vente du libre (TVA à 5,5 % pour les acquéreurs). */
+  salesPremium: number;
+}
+
+/** Cahier des charges d'un appel d'offres de la commune. */
+export interface TenderSpec {
+  /** Part minimale de logements sociaux (cédés en bloc à un bailleur à un prix réduit). */
+  minSocialShare: number;
+  /** Commerces obligatoires en rez-de-chaussée. */
+  groundCommerce: boolean;
+  /** Hauteur maximale imposée (R+x, attique compris), éventuellement inférieure à celle du PLU. */
+  maxLevels: number;
+  minQuality: Quality;
+  /** Délai de livraison : de `minDelivery` à `maxDelivery` trimestres entre le lancement de l'opération et la livraison. */
+  minDelivery: number;
+  maxDelivery: number;
+  /** Cadre de l'opération : avantages accordés en échange du cahier des charges. */
+  programme: Programme;
+  /** Prix de cession minimal du terrain. */
+  minPrice: number;
+  /** Pondération annoncée de la sélection (somme = 1). */
+  weights: { price: number; social: number; quality: number; delay: number };
+}
+
+/** Proposition d'un promoteur : tout se note, pas seulement le prix. */
+export interface TenderBid {
+  player: PlayerId;
+  /** Prix proposé pour le terrain, hors frais de notaire. */
+  price: number;
+  socialShare: number;
+  quality: Quality;
+  /** Délai de livraison promis (trimestres entre lancement et livraison). */
+  delivery: number;
+  /** Somme bloquée : prix et frais de notaire. */
+  reserved: number;
+  round: number;
+}
+
+export interface Tender {
+  id: string;
+  plotId: PlotId;
+  opensAt: number;
+  /** L'appel d'offres se clôt à ce tour (non compris). */
+  closesAt: number;
+  spec: TenderSpec;
+  bids: TenderBid[];
+  status: 'open' | 'awarded' | 'void';
+  winner?: PlayerId;
+}
+
+/** Engagements du lauréat, qui s'imposent à son projet. */
+export interface TenderTerms {
+  tenderId: string;
+  socialShare: number;
+  quality: Quality;
+  delivery: number;
+  maxLevels: number;
+  groundCommerce: boolean;
+  programme: Programme;
+  /** L'opération doit être lancée avant ce tour, sinon la commune reprend le terrain et garde une pénalité. */
+  launchBy: number;
+  /** Prix payé pour le terrain (hors frais), pour calculer la pénalité de reprise. */
+  price: number;
+}
+
 /** Offre d'achat sous pli fermé sur un terrain (les autres joueurs en voient le nombre, pas le prix). */
 export interface Offer {
   plot: PlotId;
@@ -216,6 +316,8 @@ export interface GameState {
   plots: Plot[];
   projects: ProjectRun[];
   offers: Offer[];
+  tenders: Tender[];
+  nextTenderId: number;
   /** Indice des prix de vente (1 = référence), évolue au fil des tours. */
   marketIndex: number;
   /** Choc de demande des ménages (retournement ou regain de confiance), qui s'estompe de 25 % par trimestre. */
@@ -234,6 +336,9 @@ export type Action =
   /** Dépose ou remplace une offre sur un terrain libre (mode enchères). */
   | { type: 'offer'; player: PlayerId; plot: PlotId; price: number }
   | { type: 'withdraw'; player: PlayerId; plot: PlotId }
+  /** Propose un projet à la commune pour un de ses terrains (dépose ou remplace sa proposition). */
+  | { type: 'tenderBid'; player: PlayerId; tender: string; price: number; socialShare: number; quality: Quality; delivery: number }
+  | { type: 'tenderWithdraw'; player: PlayerId; tender: string }
   | { type: 'sellPlot'; player: PlayerId; plot: PlotId }
   /** Assemble plusieurs parcelles mitoyennes que le joueur possède en une seule, plus grande. */
   | { type: 'merge'; player: PlayerId; plots: PlotId[] }

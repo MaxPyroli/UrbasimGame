@@ -11,3 +11,4 @@ export * from './identity';
 export * from './ledger';
 export * from './market';
 export * from './rules';
+export * from './tender';

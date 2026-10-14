@@ -159,6 +159,13 @@ export const DEFAULT_BILAN_PARAMS: BilanParams = {
   targetMargin: 0.1,
 };
 
+/** Prix de cession d'un logement social par rapport au marché libre (vente en bloc à un bailleur). */
+export const SOCIAL_PRICE_RATIO = 0.55;
+/** Niveau de qualité environnementale : 0 standard, 1 performant, 2 bas carbone et biosourcé. Surcoût des travaux et prime de vente. */
+export type QualityLevel = 0 | 1 | 2;
+export const QUALITY_COST = [1, 1.03, 1.07] as const;
+export const QUALITY_PREMIUM = [1, 1.02, 1.04] as const;
+
 export interface BilanInput {
   project: Project;
   market: Market;
@@ -167,6 +174,11 @@ export interface BilanInput {
   /** SDP du bâti existant à démolir avant de construire (m²). */
   existingSdp?: number;
   params?: Partial<BilanParams>;
+  /** Part des logements vendue comme logements sociaux (cahier des charges d'un appel d'offres) à `SOCIAL_PRICE_RATIO` du marché. */
+  socialShare?: number;
+  quality?: QualityLevel;
+  /** Hausse des prix de vente du libre (ex. TVA réduite pour les acquéreurs d'un quartier en renouvellement urbain). */
+  salesPremium?: number;
 }
 
 export interface Bilan {
@@ -224,20 +236,24 @@ export function computeBilan(input: BilanInput): Bilan {
   const pk = project.parking;
 
   // Chiffre d'affaires
-  const housing = ind.shab * market.housingPerShab;
-  const commerce = sumLevels(project, 'commerce') * market.commercePerSdp;
-  const office = sumLevels(project, 'bureaux') * market.officePerSdp;
+  const q = input.quality ?? 0;
+  const social = Math.min(1, Math.max(0, input.socialShare ?? 0));
+  const premium = QUALITY_PREMIUM[q] * (1 + (input.salesPremium ?? 0));
+  // Les logements sociaux sont cédés en bloc à un bailleur, sans prime de qualité.
+  const housing = ind.shab * market.housingPerShab * ((1 - social) * premium + social * SOCIAL_PRICE_RATIO);
+  const commerce = sumLevels(project, 'commerce') * market.commercePerSdp * premium;
+  const office = sumLevels(project, 'bureaux') * market.officePerSdp * premium;
   const parking = pk.basement * market.parkingBasementSpace + (pk.rdc + pk.surface) * market.parkingOtherSpace;
   const revenueTotal = housing + commerce + office + parking;
 
   // Coûts directs
-  const works =
+  const works = QUALITY_COST[q] * (
     ind.sdpHousing * market.buildHousingPerSdp +
     ind.sdpCommerce * market.buildCommercePerSdp +
     ind.sdpOffice * market.buildOfficePerSdp +
     pk.basement * market.buildBasementSpace +
     (pk.rdc + pk.surface) * market.buildOtherSpace +
-    pk.offsite * market.offsiteParkingPlace;
+    pk.offsite * market.offsiteParkingPlace);
   const demolition = (input.existingSdp ?? 0) * market.demolitionPerSdp;
   const acquisitionFees = landPrice * p.acquisitionFeeRate;
   const design = works * p.designFeeRate;
