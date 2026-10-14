@@ -182,3 +182,8 @@ label.f.col { flex-direction: column; align-items: stretch; gap: 4px; }
 .lvl span { font-size: 12px; }
 .lvl[aria-checked='true'] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 input[type='number'] { font: inherit; padding: 6px 8px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; width: 100%; }
+.meter { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); }
+table.score { width: 100%; margin: 6px 0; }
+table.score td { padding: 2px 4px; }
+.card.tender { border-color: #0f8b8d; }

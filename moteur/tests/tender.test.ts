@@ -243,6 +243,33 @@ describe('engagements du lauréat', () => {
     expect(netWorth(s, 'a')).toBe(0);
   });
 
+  it('un terrain saisi à un lauréat en faillite retourne à la commune', () => {
+    const { s, plot } = (() => {
+      let g = make();
+      const t = openTenders(g)[0];
+      g = play(g, { type: 'tenderBid', player: 'a', tender: t.id, price: t.spec.minPrice * 1.05, socialShare: 0.4, quality: 0, delivery: t.spec.maxDelivery });
+      g = next(next(next(g)));
+      return { s: g, plot: g.plots.find((p) => p.id === t.plotId)! };
+    })();
+    expect(plot.owner).toBe('a');
+    const broke = next({ ...s, players: s.players.map((p) => (p.id === 'a' ? { ...p, debt: 99_000_000 } : p)) });
+    const back = broke.plots.find((p) => p.id === plot.id)!;
+    expect(back.owner).toBeNull();
+    expect(back.municipal).toBe(true);
+    expect(back.obligation).toBeUndefined();
+  });
+
+  it('un terrain obtenu à bas prix auprès de la commune ne gonfle pas le patrimoine', () => {
+    let g = make();
+    const t = openTenders(g)[0];
+    g = play(g, { type: 'tenderBid', player: 'a', tender: t.id, price: t.spec.minPrice * 1.05, socialShare: 0.4, quality: 0, delivery: t.spec.maxDelivery });
+    const before = netWorth(g, 'a');
+    g = next(next(next(g)));
+    const plot = g.plots.find((p) => p.id === t.plotId)!;
+    expect(plot.owner).toBe('a');
+    expect(netWorth(g, 'a')).toBeLessThanOrEqual(before + 1);
+  });
+
   it('les propositions bloquées comptent dans le patrimoine', () => {
     let s = make();
     const t = openTenders(s)[0];

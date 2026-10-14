@@ -5,6 +5,8 @@ import {
   DEFAULT_CRITERIA,
   LocalProjection,
   MARKETS,
+  QUALITY_COST,
+  QUALITY_PREMIUM,
   computeBilan,
   computeProject,
   type Criteria,
@@ -14,8 +16,19 @@ import {
   ISSUE_MESSAGE,
   DIFFICULTIES,
   campaignConfig,
+  bidProblem,
   committedCash,
+  committedTenderCash,
   isListed,
+  openTenders,
+  scoreBid,
+  tenderBidOf,
+  tenderWorth,
+  programmeParams,
+  LAUNCH_GRACE,
+  MAX_SOCIAL_SHARE,
+  type Quality,
+  type Tender,
   minOfferPrice,
   offerOf,
   offersOn,
@@ -29,7 +42,6 @@ import {
   sanitizeSlogan,
   type Identity,
   ZONE_RULES,
-  allowedLevels,
   criteriaFor,
   ruleOf,
   MAX_PRICE_POLICY,
@@ -90,7 +102,7 @@ function load(): GameState | null {
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) {
       const s = JSON.parse(raw) as GameState;
-      if (s?.players?.some((p) => p.id === ME) && Array.isArray(s.plots) && typeof s.demandShock === 'number' && s.config?.salesDemand > 0 && s.plots.every((p) => Array.isArray(p.zones)) && Array.isArray(s.offers) && s.players.every((p) => typeof p.debt === 'number')) return s;
+      if (s?.players?.some((p) => p.id === ME) && Array.isArray(s.plots) && typeof s.demandShock === 'number' && s.config?.salesDemand > 0 && s.plots.every((p) => Array.isArray(p.zones)) && Array.isArray(s.offers) && Array.isArray(s.tenders) && s.players.every((p) => typeof p.debt === 'number')) return s;
     }
   } catch {
     /* sauvegarde absente ou illisible : nouvelle partie */
@@ -105,12 +117,16 @@ const colorOf = (id: string) => state.players.find((p) => p.id === id)?.color ??
 const shortName = (n: string) => (n.length > 16 ? `${n.slice(0, 15)}…` : n);
 let selected = new Set<string>();
 let multi = false;
-let tab: 'terrain' | 'marche' | 'operations' | 'journal' | 'classement' = 'terrain';
+let tab: 'terrain' | 'marche' | 'commune' | 'operations' | 'journal' | 'classement' = 'terrain';
 let view: 'hauteur' | 'prix' | 'lieu' | 'zonage' = 'hauteur';
 /** Terrains libres mis en avant sur la carte : tous, seulement ceux à ma portée, ou ceux à assembler. */
 let plotFilter: 'tous' | 'vente' | 'abordables' | 'assembler' = 'tous';
 /** Prix saisis pour les offres (par terrain), conservés pendant la navigation. */
 const bidDraft: Record<string, number> = {};
+/** Propositions en préparation pour les appels d'offres de la commune. */
+const tenderDraft: Record<string, { price: number; share: number; quality: Quality; delivery: number }> = {};
+/** Appels d'offres dont j'ai déjà été prévenu que le dernier trimestre approche. */
+const warnedTenders = new Set<string>();
 let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number } = { levels: 3, attic: false, parking: 'auto', depth: 12 };
 
 function save() {
@@ -178,9 +194,21 @@ function fastForward() {
   const limit = hasStake ? 8 : 4;
   let n = 0;
   let why = '';
+  const seenTenders = new Set(state.tenders.map((t) => t.id));
   while (!state.over && n < limit) {
     const { mine, phases } = advanceOne();
     n++;
+    const fresh = openTenders(state).find((t) => !seenTenders.has(t.id));
+    const lastCall = openTenders(state).find((t) => t.closesAt - 1 === state.round && !tenderBidOf(t, ME) && !warnedTenders.has(t.id));
+    if (fresh) {
+      why = `la commune lance l’appel d’offres ${fresh.id} (${fresh.spec.programme.label})`;
+      break;
+    }
+    if (lastCall) {
+      warnedTenders.add(lastCall.id);
+      why = `dernier trimestre pour répondre à l’appel d’offres ${lastCall.id}`;
+      break;
+    }
     if (mine.length) {
       why = mine[mine.length - 1];
       break;
@@ -231,6 +259,7 @@ const affordable = (p: Plot) => buyCost(p) <= me().cash;
 
 function plotStyle(p: Plot): L.PathOptions {
   const sel = selected.has(p.id);
+  if (p.municipal && !p.owner) return { color: sel ? '#000' : '#0f8b8d', weight: sel ? 3 : 2.5, fillColor: '#7fd1d3', fillOpacity: 0.55, dashArray: '6 3' };
   const col = ownerColor(p);
   const ppm = p.askingPrice / Math.max(1, areaOf(p));
   // Terrains libres : plus le prix au m² est élevé, plus la teinte est foncée (échelle = 10e–90e centile des terrains libres).
@@ -339,7 +368,7 @@ function updateMapLegend() {
   }
   // Repères communs à toutes les vues : propriétaires et symboles.
   const owners = [`<span><i class="swatch" style="background:${colorOf(ME)}"></i>vous</span>`, ...state.players.filter((p) => p.bot).map((p) => `<span><i class="swatch" style="background:${colorOf(p.id)}"></i>${esc(shortName(p.name))}</span>`)].join(' ');
-  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#f6d27a;border:2px solid #c98200"></i>en vente</span> <span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span>pointillé épais : opération</span></div>`;
+  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#f6d27a;border:2px solid #c98200"></i>en vente</span> <span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span><i class="swatch" style="background:#7fd1d3;border:1px dashed #0f8b8d"></i>terrain communal</span> <span>pointillé épais : opération</span></div>`;
   // Repliable (fermée par défaut sur petit écran) : le titre devient la ligne cliquable.
   const title = el.querySelector('b');
   const heading = title ? title.outerHTML : '<b>Légende</b>';
@@ -411,7 +440,7 @@ function drawPlots() {
       layers.set(p.id, layer);
     }
     layer.setStyle(plotStyle(p));
-    layer.bindTooltip(`${esc(p.label ?? p.id)}${p.zones.length ? ` · ${esc(ruleOf(p)!.label)}` : ''}<br>${eur(p.askingPrice)} · situation ×${p.locationFactor.toFixed(2).replace('.', ',')}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : ''}`, { sticky: true });
+    layer.bindTooltip(`${esc(p.label ?? p.id)}${p.zones.length ? ` · ${esc(ruleOf(p)!.label)}` : ''}<br>${eur(p.askingPrice)} · situation ×${p.locationFactor.toFixed(2).replace('.', ',')}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : p.municipal ? ' · terrain communal (appel d’offres)' : ''}`, { sticky: true });
   }
 }
 
@@ -539,6 +568,13 @@ const TUTORIAL: { title: string; body: string }[] = [
       <p><b>Terrains en vente</b> (contour doré, onglet « Marché ») : les offres restent ouvertes deux trimestres, sous pli fermé. <b>Le plus offrant l’emporte</b> et les autres sont remboursés.</p>
       <p><b>Autres terrains</b> : vous pouvez prospecter le propriétaire. Il répond à la fin du trimestre, n’accepte que s’il est satisfait du prix, et les frais de prospection sont perdus. Si deux promoteurs se positionnent, le plus offrant gagne.</p>
       <p class="muted">Votre offre bloque l’argent (prix et frais de notaire) jusqu’au verdict. Les concurrents enchérissent aussi.</p>`,
+  },
+  {
+    title: 'Les appels d’offres de la commune',
+    body: `<p>La commune garde quelques terrains (en <b>turquoise</b> sur la carte) et les cède par <b>appel d’offres</b>, dans l’onglet <b>Commune</b>. Elle choisit le <b>meilleur projet</b>, pas le plus offrant.</p>
+      <p>Chaque appel annonce un <b>cahier des charges</b> (logements sociaux, hauteur, commerces, qualité, délai) et la <b>pondération</b> des critères : à vous de doser prix, mixité sociale, qualité et délai. Votre note s’affiche en direct.</p>
+      <p>En échange, le <b>cadre de l’opération</b> apporte des avantages : en <b>ZAC</b>, terrain à prix réduit, pas de taxe d’aménagement et un étage de plus ; en <b>PUP</b>, permis instruit en 3 mois et taxe réduite ; en <b>quartier prioritaire</b>, TVA à 5,5 % donc des logements plus chers.</p>
+      <p class="muted">Vos engagements sont contractuels : lancez à temps (sinon la commune reprend le terrain et garde 10 %) et livrez dans le délai promis (sinon pénalités).</p>`,
   },
   {
     title: 'Les règles d’urbanisme',
@@ -735,19 +771,23 @@ function tabs(): string {
   const nListed = state.plots.filter((p) => p.owner === null && isListed(p)).length;
   const t = (id: typeof tab, label: string) => `<button data-tab="${id}" class="${tab === id ? 'on' : ''}">${label}</button>`;
   const market = state.config.landMarket === 'auction' ? t('marche', `Marché${nListed ? ` <span class="badge">${nListed}</span>` : ''}`) : '';
-  return `<div class="tabs">${t('terrain', 'Terrain')}${market}${t('operations', `Opérations${nOps ? ` <span class="badge">${nOps}</span>` : ''}`)}${t('journal', 'Journal')}${t('classement', 'Classement')}</div>`;
+  const nTenders = openTenders(state).length;
+  const commune = state.config.communeTenders ? t('commune', `Commune${nTenders ? ` <span class="badge">${nTenders}</span>` : ''}`) : '';
+  return `<div class="tabs">${t('terrain', 'Terrain')}${market}${commune}${t('operations', `Opérations${nOps ? ` <span class="badge">${nOps}</span>` : ''}`)}${t('journal', 'Journal')}${t('classement', 'Classement')}</div>`;
 }
 
 function renderSide() {
   let body = '';
   if (tab === 'terrain') body = renderSelection();
   else if (tab === 'marche') body = renderMarche();
+  else if (tab === 'commune') body = renderCommune();
   else if (tab === 'operations') body = renderOperations();
   else if (tab === 'journal') body = renderJournal();
   else body = renderRanking();
   $('side').innerHTML = tabs() + body;
   $('side').querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => (b.onclick = () => ((tab = b.dataset.tab as typeof tab), renderAll())));
   bindSelection();
+  if (tab === 'commune') bindTenders();
 }
 
 /** Sections repliables : l'essentiel est visible, le détail se déplie. */
@@ -806,8 +846,9 @@ function renderMulti(plots: Plot[]): string {
 
 function statusPill(p: Plot): string {
   if (p.projectId) return pill('opération en cours', colorOf(p.owner ?? ''));
-  if (p.owner === ME) return pill('à vous', colorOf(ME));
+  if (p.owner === ME) return pill(p.obligation ? 'à vous · engagements' : 'à vous', colorOf(ME));
   if (p.owner) return pill(esc(state.players.find((x) => x.id === p.owner)!.name), colorOf(p.owner));
+  if (p.municipal) return pill('terrain communal', '#0f8b8d');
   if (p.issue === 'zone') return pill('inconstructible', '#777');
   if (p.issue) return pill('à assembler', '#7b3fa0');
   return pill('libre', '#2b6cb0');
@@ -823,7 +864,7 @@ function renderSingle(p: Plot): string {
   let html = `<div class="head"><b>${esc(shortLabel(p).replace(/ · \d+ m²$/, ''))}</b> ${statusPill(p)}</div>
     <div class="facts">
       ${fact('Surface', `${Math.round(area)} m²${p.parts ? ` <span class="muted">(${p.parts.length} parcelles)</span>` : ''}`)}
-      ${fact(isListed(p) ? 'Prix de départ' : 'Prix affiché', `${eur(isListed(p) ? p.listing!.minPrice : p.askingPrice)} <span class="muted">${Math.round(p.askingPrice / area)} €/m²</span>`)}
+      ${p.obligation && p.owner === ME ? fact('Payé à la commune', `${eur(p.obligation.price)} <span class="muted">${Math.round(p.obligation.price / area)} €/m²</span>`) : fact(isListed(p) ? 'Prix de départ' : 'Prix affiché', `${eur(isListed(p) ? p.listing!.minPrice : p.askingPrice)} <span class="muted">${Math.round(p.askingPrice / area)} €/m²</span>`)}
       ${fact('Zone', rule ? pill(`${esc(rule.label)}${rule.buildable ? ` · R+${rule.maxLevels}` : ''}`, rule.color) : '—')}
       ${fact('Bâti existant', p.existingSdp ? `${p.existingSdp} m²${p.existingHeight ? ` · ${Math.round(p.existingHeight)} m` : ''}` : 'aucun')}
     </div>`;
@@ -831,6 +872,11 @@ function renderSingle(p: Plot): string {
   if (run) {
     drawOverlay(null);
     return html + `<h2>Opération ${esc(run.id)}</h2>` + operationCard(run.id) + details(p);
+  }
+  if (p.municipal && !p.owner) {
+    drawOverlay(null);
+    const t = openTenders(state).find((x) => x.plotId === p.id);
+    return html + `<div class="notice" style="--nc:#0f8b8d"><b>Terrain communal</b> La commune ne le vend pas au plus offrant : elle choisit le meilleur projet par appel d’offres.${t ? `<br>${esc(t.id)} est ouvert (${esc(t.spec.programme.label)}).` : '<br>Un nouvel appel d’offres sera lancé prochainement.'}</div>${t ? '<div class="row"><button id="toTender" class="primary">Voir l’appel d’offres</button></div>' : ''}` + details(p);
   }
   const issueBox = p.issue === 'zone'
     ? `<div class="notice" style="--nc:#777"><b>Inconstructible</b> ${esc(ISSUE_MESSAGE.zone)}</div>`
@@ -859,12 +905,153 @@ function renderSingle(p: Plot): string {
     drawOverlay(null);
     return html + details(p);
   }
-  html += `${issueBox}<div class="row"><button id="sell" class="danger" title="Revente à la banque : ${Math.round(state.config.plotSpread * 100)} % de moins que le prix affiché">Revendre · ${eur(p.askingPrice * (1 - state.config.plotSpread))}</button></div>`;
+  html += `${issueBox}${p.obligation ? obligationNotice(p) : `<div class="row"><button id="sell" class="danger" title="Revente à la banque : ${Math.round(state.config.plotSpread * 100)} % de moins que le prix affiché">Revendre · ${eur(p.askingPrice * (1 - state.config.plotSpread))}</button></div>`}`;
   if (p.issue) {
     drawOverlay(null);
     return html + details(p);
   }
   return html + projectForm(p, true) + details(p);
+}
+
+const QUALITY_LABEL = ['standard', 'performant', 'exemplaire'];
+const qualityHint = (q: number) => (q === 0 ? 'aucun surcoût' : `travaux +${Math.round((QUALITY_COST[q] - 1) * 100)} %, prix de vente +${Math.round((QUALITY_PREMIUM[q] - 1) * 100)} %`);
+const programmePill = (t: Pick<Tender['spec'], 'programme'>['programme']) => pill(esc(t.label), '#0f8b8d');
+
+/** Engagements pris auprès de la commune pour un terrain que je possède. */
+function obligationNotice(p: Plot): string {
+  const o = p.obligation!;
+  const left = o.launchBy - state.round;
+  return `<div class="notice" style="--nc:#0f8b8d"><b>Engagements envers la commune</b> ${programmePill(o.programme)}
+    <div style="margin-top:4px">${[
+      `<span class="chip"><b>${Math.round(o.socialShare * 100)} %</b> de logements sociaux</span>`,
+      `<span class="chip">qualité <b>${QUALITY_LABEL[o.quality]}</b></span>`,
+      `<span class="chip">livraison en <b>${o.delivery} trim.</b> après le lancement</span>`,
+      `<span class="chip">hauteur max <b>R+${o.maxLevels}</b></span>`,
+      o.groundCommerce ? '<span class="chip">commerces en rez-de-chaussée</span>' : '',
+    ].join('')}</div>
+    <div class="muted" style="font-size:12px;margin-top:4px">${esc(o.programme.summary)}</div>
+    <div style="margin-top:4px">${left > 0 ? `À lancer avant la fin de <b>${quarterLabel(o.launchBy - 1)}</b> (encore ${left} trimestre${left > 1 ? 's' : ''})` : '<b class="bad">Délai dépassé</b>'}, sinon la commune reprend le terrain et garde 10 % du prix. Livrer en retard coûte des pénalités. Ce terrain ne peut ni se revendre ni s’assembler tant que l’opération n’est pas lancée.</div></div>`;
+}
+
+function tenderDraftOf(t: Tender) {
+  return (tenderDraft[t.id] ??= (() => {
+    const b = tenderBidOf(t, ME);
+    return b
+      ? { price: b.price, share: b.socialShare, quality: b.quality, delivery: b.delivery }
+      : { price: Math.round((t.spec.minPrice * 1.1) / 1000) * 1000, share: Math.min(MAX_SOCIAL_SHARE, t.spec.minSocialShare + 0.05), quality: t.spec.minQuality, delivery: t.spec.maxDelivery };
+  })());
+}
+
+/** Note de ma proposition en préparation, et ce qu'elle laisse comme marge : mis à jour en direct. */
+function tenderPreview(t: Tender): string {
+  const d = tenderDraftOf(t);
+  const bid = { price: d.price, socialShare: d.share, quality: d.quality, delivery: d.delivery };
+  const problem = bidProblem(t.spec, bid);
+  const plot = plotById(t.plotId)!;
+  const sc = scoreBid(t.spec, bid);
+  const w = t.spec.weights;
+  const line = (label: string, weight: number, v: number) =>
+    `<tr><td>${label} <span class="muted">${Math.round(weight * 100)} %</span></td><td style="width:45%"><div class="meter"><i style="width:${Math.round(v * 100)}%"></i></div></td><td class="num">${Math.round(v * weight * 100)}</td></tr>`;
+  const worth = tenderWorth(state, plot, t.spec, d.share, d.quality, 0);
+  const target = tenderWorth(state, plot, t.spec, d.share, d.quality, state.config.bilanParams.targetMargin);
+  const mine = tenderBidOf(t, ME);
+  const need = Math.round(d.price * (1 + state.config.bilanParams.acquisitionFeeRate)) - (mine?.reserved ?? 0);
+  const missing = need - me().cash;
+  const verdict = worth.value <= 0
+    ? '<div class="check bad">Avec ces engagements, aucun projet n’est rentable sur ce terrain.</div>'
+    : d.price > worth.value
+      ? `<div class="check bad">À ce prix, même le meilleur projet (R+${worth.levels}) perd de l’argent : le terrain ne peut pas valoir plus de ${eur(worth.value)} avec ces engagements.</div>`
+      : d.price > target.value
+        ? `<div class="check warn">Marge faible : pour ${pct(state.config.bilanParams.targetMargin)} de marge, le terrain ne devrait pas dépasser ${eur(target.value)} (meilleur projet R+${target.levels}${target.attic ? ' + attique' : ''}).</div>`
+        : `<div class="check good">Le meilleur projet (R+${worth.levels}${worth.attic ? ' + attique' : ''}) reste rentable : jusqu’à ${eur(target.value)} pour ${pct(state.config.bilanParams.targetMargin)} de marge.</div>`;
+  return `<table class="score">${line('Prix', w.price, sc.price)}${line('Mixité sociale', w.social, sc.social)}${line('Qualité', w.quality, sc.quality)}${line('Délai', w.delay, sc.delay)}
+    <tr class="total"><td colspan="2">Votre note</td><td class="num"><b>${Math.round(sc.total * 100)}</b> / 100</td></tr></table>
+    ${problem ? `<div class="check bad">${esc(problem)}</div>` : verdict}
+    ${missing > 0 ? `<div class="check bad">Il vous manque ${eur(missing)} (la somme est bloquée jusqu’au verdict, notaire compris).</div>` : `<div class="muted" style="font-size:12px">Bloque ${eur(Math.round(d.price * (1 + state.config.bilanParams.acquisitionFeeRate)))} notaire compris jusqu’au verdict.</div>`}`;
+}
+
+function tenderCard(t: Tender): string {
+  const plot = plotById(t.plotId)!;
+  const s = t.spec;
+  const d = tenderDraftOf(t);
+  const mine = tenderBidOf(t, ME);
+  const left = t.closesAt - state.round;
+  const qOpts = [0, 1, 2].filter((q) => q >= s.minQuality).map((q) => `<option value="${q}" ${d.quality === q ? 'selected' : ''}>${QUALITY_LABEL[q]} (${qualityHint(q)})</option>`).join('');
+  const dOpts = Array.from({ length: s.maxDelivery - s.minDelivery + 1 }, (_, i) => s.minDelivery + i).map((n) => `<option value="${n}" ${d.delivery === n ? 'selected' : ''}>${n} trimestres</option>`).join('');
+  const w = s.weights;
+  return `<div class="card tender" data-tender="${esc(t.id)}">
+    <div><b>${esc(t.id)}</b> · <a href="#" data-goto="${esc(plot.id)}">${esc(shortLabel(plot).replace(/ · \d+ m²$/, ''))}</a> <span class="muted">${Math.round(areaOf(plot))} m²</span> ${programmePill(s.programme)}${mine ? ' ' + pill('vous avez répondu', colorOf(ME)) : ''}</div>
+    <div class="muted" style="font-size:12px;margin:4px 0">${esc(s.programme.summary)}</div>
+    <div>${[
+      `<span class="chip">sociaux ≥ <b>${Math.round(s.minSocialShare * 100)} %</b></span>`,
+      `<span class="chip">hauteur <b>R+${s.maxLevels}</b> max</span>`,
+      s.groundCommerce ? '<span class="chip">commerces en rez-de-chaussée</span>' : '',
+      s.minQuality ? '<span class="chip">qualité <b>performante</b> minimum</span>' : '',
+      `<span class="chip">livraison <b>${s.minDelivery}–${s.maxDelivery}</b> trim.</span>`,
+      `<span class="chip">prix de cession ≥ <b>${eur(s.minPrice)}</b></span>`,
+    ].join('')}</div>
+    <div class="muted" style="font-size:12px;margin-top:4px">Critères de choix : prix <b>${Math.round(w.price * 100)} %</b> · mixité sociale <b>${Math.round(w.social * 100)} %</b> · qualité <b>${Math.round(w.quality * 100)} %</b> · délai <b>${Math.round(w.delay * 100)} %</b>. Les autres propositions restent secrètes (${t.bids.length} déposée${t.bids.length > 1 ? 's' : ''}).</div>
+    <div class="muted" style="font-size:12px">Dernier trimestre pour répondre : <b>${quarterLabel(t.closesAt - 1)}</b> (encore ${left} trimestre${left > 1 ? 's' : ''}). Le lauréat dispose ensuite de ${LAUNCH_GRACE} trimestres pour lancer.</div>
+    <label class="f col">Prix du terrain<input type="number" data-t="price" step="1000" min="${s.minPrice}" value="${d.price}"></label>
+    <label class="f col">Logements sociaux <span><input type="range" data-t="share" min="${Math.round(s.minSocialShare * 100)}" max="${Math.round(MAX_SOCIAL_SHARE * 100)}" step="1" value="${Math.round(d.share * 100)}"> <b data-t="sharev">${Math.round(d.share * 100)} %</b> <span class="muted">(vendus à un bailleur à prix réduit)</span></span></label>
+    <label class="f col">Qualité<select data-t="quality">${qOpts}</select></label>
+    <label class="f col">Délai de livraison promis<select data-t="delivery">${dOpts}</select></label>
+    <div data-tpreview="${esc(t.id)}">${tenderPreview(t)}</div>
+    <div class="row"><button class="primary" data-tbid="${esc(t.id)}">${mine ? 'Modifier ma proposition' : 'Déposer ma proposition'}</button>${mine ? `<button data-twithdraw="${esc(t.id)}">Retirer</button>` : ''}</div>
+  </div>`;
+}
+
+/** Onglet « Commune » : appels d'offres ouverts, mes engagements, résultats passés. */
+function renderCommune(): string {
+  drawOverlay(null);
+  const open = openTenders(state);
+  const done = state.tenders.filter((t) => t.status !== 'open').slice(-6).reverse();
+  const committed = committedTenderCash(state, ME);
+  const bound = state.plots.filter((p) => p.owner === ME && p.obligation);
+  const resultRow = (t: Tender) => {
+    const p = plotById(t.plotId);
+    const who = t.status === 'awarded' ? `attribué à <b>${esc(state.players.find((x) => x.id === t.winner)?.name ?? '?')}</b>` : 'infructueux';
+    return `<li>${esc(t.id)} · ${esc(p ? shortLabel(p).replace(/ · \d+ m²$/, '') : t.plotId)} <span class="muted">${esc(t.spec.programme.label)}</span> : ${who}</li>`;
+  };
+  return `<h2>Appels d’offres de la commune (${open.length})</h2>
+    <p class="muted" style="font-size:12px">La commune cède ses terrains au <b>meilleur projet</b>, pas au plus offrant : chaque proposition (prix, logements sociaux, qualité, délai) est notée selon des critères annoncés. En échange du cahier des charges, le cadre de l’opération (ZAC, PUP, quartier prioritaire) apporte des avantages.</p>
+    ${open.map(tenderCard).join('') || '<p class="muted">Aucun appel d’offres ouvert pour le moment : la commune en lance régulièrement.</p>'}
+    ${committed ? `<p class="muted" style="font-size:12px">${eur(committed)} sont bloqués sur votre trésorerie tant que les appels d’offres sont ouverts.</p>` : ''}
+    ${bound.length ? `<h2>Mes engagements</h2>${bound.map((p) => `<div class="card"><a href="#" data-goto="${esc(p.id)}">${esc(shortLabel(p))}</a> ${programmePill(p.obligation!.programme)}<div class="muted">à lancer avant la fin de ${quarterLabel(p.obligation!.launchBy - 1)}</div></div>`).join('')}` : ''}
+    ${done.length ? `<h2>Résultats</h2><ul class="log">${done.map(resultRow).join('')}</ul>` : ''}`;
+}
+
+function bindTenders() {
+  $('side').querySelectorAll<HTMLElement>('[data-tender]').forEach((card) => {
+    const t = state.tenders.find((x) => x.id === card.dataset.tender);
+    if (!t) return;
+    const d = tenderDraftOf(t);
+    const q = <E extends HTMLElement>(k: string) => card.querySelector<E>(`[data-t="${k}"]`)!;
+    const refresh = () => (card.querySelector<HTMLElement>('[data-tpreview]')!.innerHTML = tenderPreview(t));
+    q<HTMLInputElement>('price').oninput = (e) => ((d.price = Math.max(0, Math.round(+(e.target as HTMLInputElement).value || 0))), refresh());
+    q<HTMLInputElement>('share').oninput = (e) => {
+      d.share = +(e.target as HTMLInputElement).value / 100;
+      q('sharev').textContent = `${Math.round(d.share * 100)} %`;
+      refresh();
+    };
+    q<HTMLSelectElement>('quality').onchange = (e) => ((d.quality = +(e.target as HTMLSelectElement).value as Quality), refresh());
+    q<HTMLSelectElement>('delivery').onchange = (e) => ((d.delivery = +(e.target as HTMLSelectElement).value), refresh());
+    card.querySelector<HTMLButtonElement>('[data-tbid]')!.onclick = () => {
+      if (act({ type: 'tenderBid', player: ME, tender: t.id, price: d.price, socialShare: d.share, quality: d.quality, delivery: d.delivery })) {
+        toast('Proposition déposée : verdict à la clôture de l’appel d’offres');
+        renderAll();
+      }
+    };
+    const wd = card.querySelector<HTMLButtonElement>('[data-twithdraw]');
+    if (wd)
+      wd.onclick = () => {
+        if (act({ type: 'tenderWithdraw', player: ME, tender: t.id })) {
+          delete tenderDraft[t.id];
+          toast('Proposition retirée, somme débloquée');
+          renderAll();
+        }
+      };
+  });
 }
 
 /** Offre sur un terrain libre (mode enchères) : mise en vente ouverte ou prospection du propriétaire. */
@@ -902,15 +1089,39 @@ function landDraft(p: Plot): number {
   return bidDraft[p.id] ?? offerOf(state, p.id, ME)?.price ?? (p.listing ? Math.round((p.listing.minPrice * 1.05) / 1000) * 1000 : Math.round((p.askingPrice * 1.08) / 1000) * 1000);
 }
 
+/** Engagements envers la commune qui s'appliquent au projet d'un terrain que je possède. */
+const obligationOf = (p: Plot, owned: boolean) => (owned ? p.obligation : undefined);
+
+/** Critères du projet : PLU, plus les engagements pris auprès de la commune (bonus de hauteur, commerces en rez-de-chaussée). */
+function plotCriteria(p: Plot, base: Criteria, owned: boolean): Criteria {
+  const ob = obligationOf(p, owned);
+  return criteriaFor(p, ob?.groundCommerce ? { ...base, groundFloorUse: 'commerce' } : base, ob?.programme.bonusLevels ?? 0);
+}
+
+/** Bilan d'un projet, avec le cadre d'opération et les engagements éventuels. */
+function planBilan(p: Plot, proj: ReturnType<typeof computeProject>, landPrice: number, owned: boolean) {
+  const ob = obligationOf(p, owned);
+  return computeBilan({
+    project: proj,
+    market: currentMarket(state, p),
+    landPrice,
+    existingSdp: p.existingSdp,
+    params: programmeParams(currentParams(state), ob?.programme),
+    ...(ob ? { socialShare: ob.socialShare, quality: ob.quality, salesPremium: ob.programme.salesPremium } : {}),
+  });
+}
+
 /** Cherche le projet le plus rentable sans erreur (R+0 à R+8, avec ou sans attique, stationnement automatique). */
 function bestForm(p: Plot, owned: boolean): { levels: number; attic: boolean; margin: number } | null {
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : landDraft(p);
   let best: { levels: number; attic: boolean; margin: number } | null = null;
+  const ob = owned ? p.obligation : undefined;
   for (let levels = 0; levels <= 8; levels++) {
     for (const attic of [false, true]) {
-      const proj = computeProject(p.parcel, criteriaFor(p, { ...criteria(), levels, attic, parkingStrategy: 'auto' }));
+      if (ob && levels + (attic ? 1 : 0) > ob.maxLevels) continue;
+      const proj = computeProject(p.parcel, plotCriteria(p, { ...criteria(), levels, attic, parkingStrategy: 'auto' }, owned));
       if (!proj.footprint || proj.checks.some((c) => c.status === 'error')) continue;
-      const b = computeBilan({ project: proj, market: currentMarket(state, p), landPrice, existingSdp: p.existingSdp, params: currentParams(state) });
+      const b = planBilan(p, proj, landPrice, owned);
       if (!best || b.margin > best.margin) best = { levels, attic, margin: b.margin };
     }
   }
@@ -941,9 +1152,12 @@ function locationDetail(p: Plot): string {
 
 function projectForm(p: Plot, owned: boolean): string {
   const rule = ruleOf(p);
-  const maxLv = rule ? allowedLevels(rule, form.attic) : 10;
+  const ob = obligationOf(p, owned);
+  // Hauteur permise (attique compris) : PLU plus bonus de la ZAC, sans dépasser l'engagement pris.
+  const totalCap = Math.min(rule ? rule.maxLevels + (ob?.programme.bonusLevels ?? 0) : 11, ob ? ob.maxLevels : 99);
+  const maxLv = Math.max(0, rule || ob ? totalCap - (form.attic ? 1 : 0) : 10);
   if (form.levels > maxLv) form.levels = maxLv;
-  const proj = computeProject(p.parcel, criteriaFor(p, criteria()));
+  const proj = computeProject(p.parcel, plotCriteria(p, criteria(), owned));
   drawOverlay(proj);
   const errors = proj.checks.filter((c) => c.status === 'error');
   const sel = (v: ParkingStrategy, l: string) => `<option value="${v}" ${form.parking === v ? 'selected' : ''}>${l}</option>`;
@@ -952,14 +1166,14 @@ function projectForm(p: Plot, owned: boolean): string {
   let html = `<h2>Projet</h2>
     <div class="row" style="align-items:center">
       <label class="f" style="margin:0">Niveaux R+<select id="f-levels">${Array.from({ length: maxLv + 1 }, (_, i) => `<option ${i === form.levels ? 'selected' : ''}>${i}</option>`).join('')}</select></label>
-      <label class="f" style="margin:0" title="L'attique compte comme un niveau dans la hauteur maximale de la zone">attique <input type="checkbox" id="f-attic" ${form.attic ? 'checked' : ''} ${rule && rule.maxLevels - 1 < form.levels ? 'disabled' : ''}/></label>
+      <label class="f" style="margin:0" title="L'attique compte comme un niveau dans la hauteur maximale de la zone">attique <input type="checkbox" id="f-attic" ${form.attic ? 'checked' : ''} ${(rule || ob) && totalCap - 1 < form.levels ? 'disabled' : ''}/></label>
       <button id="best" title="Teste les niveaux autorisés par le PLU, avec ou sans attique, et choisit le plus rentable sans erreur">Meilleur projet</button>
     </div>
     ${fold('Options', options)}`;
   if (!proj.footprint) return html + `<p class="bad">Rien de constructible avec ces critères.</p>`;
 
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : landDraft(p);
-  const b = computeBilan({ project: proj, market: currentMarket(state, p), landPrice, existingSdp: p.existingSdp, params: currentParams(state) });
+  const b = planBilan(p, proj, landPrice, owned);
   const c0 = b.costs;
   const equityBuild = (c0.demolition + c0.works + c0.fixed + c0.design + c0.insurance + c0.contingency + c0.taxes) * (1 - state.config.bilanParams.loanShare);
   const cashNeeded = (owned ? 0 : landDraft(p) * (1 + state.config.bilanParams.acquisitionFeeRate)) + equityBuild;
@@ -1073,6 +1287,7 @@ function bindSelection() {
     if (el) el.onclick = f;
   };
   const first = [...selected][0];
+  on('toTender', () => ((tab = 'commune'), renderAll()));
   on('buy', () => act({ type: 'buy', player: ME, plot: first }) && renderAll());
   on('sell', () => act({ type: 'sellPlot', player: ME, plot: first }) && renderAll());
   on('launch', () => {

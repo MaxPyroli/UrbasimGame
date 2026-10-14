@@ -260,10 +260,37 @@ collectivité jouent le rôle des enchères du Monopoly.
     de ×0,5 à ×1,9 (certains perdent : malédiction du vainqueur) ; ~22 % des enchères sont disputées ; aucun bot en faillite.
   Interface : onglet « Marché » (mes offres, terrains en vente), contour doré des terrains en vente, filtre « en vente »,
   panneau d'offre dans la fiche d'un terrain (prix libre, somme bloquée, frais), choix de la difficulté à la création,
-  objectif et découvert en haut, écran de fin avec faillite et objectif. Pistes : surenchère en direct, appels d'offres de
-  la commune, négociation avec le propriétaire, réputation, scénarios (crise, remontée des taux).
-- À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, appels d'offres, programmes (TVA 5,5 %,
-  ZAC), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
+  objectif et découvert en haut, écran de fin avec faillite et objectif. Pistes : surenchère en direct, négociation avec le propriétaire, réputation, scénarios (crise, remontée des taux).
+- Fait : **appels d'offres de la commune** (`moteur/src/game/tender.ts`, actions `tenderBid` / `tenderWithdraw`), dans l'esprit
+  des opérations d'aménagement (ZAC, PUP…) : la commune garde quelques terrains (`municipal`, 6 en campagne, jamais en vente
+  ni prospectables, ni assemblables) et les cède au **meilleur projet**, pas au plus offrant.
+  - **Cahier des charges** tiré au hasard (état rejouable) : part minimale de logements sociaux (20–35 %), hauteur max,
+    commerces en rez-de-chaussée, qualité minimale, délai de livraison (5 à 7–9 trimestres), **prix de cession minimal**
+    (décote sur ce que le meilleur projet imposé peut payer, `tenderWorth`) et **pondération annoncée** des critères
+    (4 profils : prix, mixité, qualité, rapidité). Un appel dure 3 trimestres, un nouveau tous les 3 trimestres, 2 ouverts au plus.
+  - **Cadres d'opération** (avantages contre contraintes, `PROGRAMMES`) : **ZAC** (prix de cession ×0,6, pas de taxe
+    d'aménagement, +1 niveau au-delà du PLU), **PUP** (prix ×0,9, taxe réduite à 60 €/m², permis en 3 mois au lieu de 6),
+    **quartier prioritaire** (prix ×0,75, TVA à 5,5 % : prix de vente du libre +5 %). Appliqués par `programmeParams`
+    (taxe, délai de permis), `criteriaFor(plot, base, bonusLevels)` et `BilanInput.salesPremium`.
+  - **Proposition** = prix, part de logements sociaux, qualité (0/1/2 : travaux +0/3/7 %, prix +0/2/4 %), délai promis. Chaque
+    critère est noté de 0 à 1 (`scoreBid`), pondéré : le joueur voit sa note en direct, pas celles des autres (sous pli
+    fermé). La somme (prix + notaire) est bloquée, remplaçable ou retirable. Meilleure note l'emporte (égalité : prix, puis
+    premier arrivé) ; perdants remboursés ; sans proposition : infructueux.
+  - **Engagements du lauréat** (`Plot.obligation`) : lancer avant `launchBy` (3 trimestres) sinon la commune reprend le
+    terrain et garde 10 % ; hauteur et commerces imposés au lancement ; logements sociaux cédés en bloc à 55 % du prix dès le
+    lancement (comptent dans les préventes) ; livraison en retard = pénalités ; terrain ni revendable ni assemblable avant le
+    lancement ; saisi en cas de faillite (retourne à la commune). Patrimoine : un terrain obtenu est valorisé au plus à son
+    prix de cession (pas au prix affiché).
+  - Bots (`tenderTurn`) : cherchent la proposition la mieux notée qui leur laisse leur marge, selon leur tempérament.
+    Simulation (5 parties, Montreuil, normal) : 3 à 6 appels attribués sur 14, aucun bot en faillite, quelques terrains
+    repris faute de lancement (~2 par partie).
+  Interface : onglet « Commune » (cahier des charges, cadre, pondération, formulaire avec note et marge en direct, résultats,
+  engagements), terrains communaux en turquoise sur la carte, fiche d'engagements sur le terrain gagné (hauteur et bonus de
+  la ZAC pris en compte dans le projet), arrêt du ▶▶ à l'ouverture d'un appel et au dernier trimestre pour répondre, étape du
+  mode d'emploi. Pistes : programmes à TVA 5,5 % en accession sur toute la ville, PUP négocié, surenchère, réputation (elle
+  pourrait peser dans la note), bots qui assemblent des parcelles.
+- À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, programmes plus variés (TVA 5,5 %,
+  ZAC propres à un territoire), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus

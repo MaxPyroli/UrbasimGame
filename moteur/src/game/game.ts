@@ -20,7 +20,7 @@ import { dropTenderBids, committedTenderCash, enforceObligations, openTender, pi
 import { SOCIAL_PRICE_RATIO } from '../engine';
 import { nextGaussian, nextRandom } from './rng';
 import { expectedSales, lotPrice, lotsLeft, soldShare } from './sales';
-import type { Action, ActionResult, BotProfileName, GameConfig, GameState, Plot, PlotIssue, TenderSpec, ProjectPhase, ProjectRun, ZoneFamily } from './types';
+import type { Action, ActionResult, BotProfileName, GameConfig, GameState, Plot, PlotIssue, Quality, TenderSpec, ProjectPhase, ProjectRun, ZoneFamily } from './types';
 
 export const DEFAULT_CONFIG: GameConfig = {
   market: MARKETS['petite-couronne'],
@@ -185,19 +185,32 @@ export function currentMarket(s: GameState, plot?: Plot): Market {
   return marketAt(marketAt(s.config.market, s.marketIndex), plot?.locationFactor ?? 1);
 }
 
-/** Ce que le meilleur projet permis par un cahier des charges (et son cadre d'opération) peut payer pour le terrain. */
-export function tenderLandValue(s: GameState, plot: Plot, spec: TenderSpec): number {
+/**
+ * Ce que le meilleur projet permis par un cahier des charges (et son cadre d'opération) peut payer pour le terrain,
+ * avec les engagements donnés (part sociale, qualité) et la marge visée. Sert au prix minimal de l'appel d'offres,
+ * aux concurrents et à l'aide à la décision du joueur.
+ */
+export function tenderWorth(
+  s: GameState,
+  plot: Plot,
+  spec: TenderSpec,
+  socialShare = spec.minSocialShare,
+  quality: Quality = spec.minQuality,
+  targetMargin = s.config.askMargin,
+): { value: number; levels: number; attic: boolean } {
   const prog = spec.programme;
-  let best = 0;
+  let best = { value: 0, levels: 0, attic: false };
   for (let levels = 0; levels <= spec.maxLevels; levels++) for (const attic of levels >= 2 && levels < spec.maxLevels ? [false, true] : [false]) {
     const base: Criteria = { ...DEFAULT_CRITERIA, levels, attic, ...(spec.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) };
     const project = computeProject(plot.parcel, criteriaFor(plot, base, prog.bonusLevels));
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
-    const b = computeBilan({ project, market: currentMarket(s, plot), landPrice: 0, existingSdp: plot.existingSdp, params: { ...programmeParams(currentParams(s), prog), targetMargin: s.config.askMargin }, socialShare: spec.minSocialShare, quality: spec.minQuality, salesPremium: prog.salesPremium });
-    best = Math.max(best, b.maxLandPrice);
+    const b = computeBilan({ project, market: currentMarket(s, plot), landPrice: 0, existingSdp: plot.existingSdp, params: { ...programmeParams(currentParams(s), prog), targetMargin }, socialShare, quality, salesPremium: prog.salesPremium });
+    if (b.maxLandPrice > best.value) best = { value: b.maxLandPrice, levels, attic };
   }
   return best;
 }
+
+export const tenderLandValue = (s: GameState, plot: Plot, spec: TenderSpec): number => tenderWorth(s, plot, spec).value;
 
 export function createGame(g: NewGame): GameState {
   const config: GameConfig = { ...DEFAULT_CONFIG, ...g.config };
@@ -710,7 +723,8 @@ function declareBankruptcy(state: GameState, id: string): GameState {
   s = {
     ...s,
     projects: s.projects.filter((p) => p.owner !== id),
-    plots: s.plots.map((p) => (p.owner === id ? { ...p, owner: null, paid: 0, projectId: null } : p)),
+    // Un terrain obtenu auprès de la commune lui revient (avec son appel d'offres à refaire).
+    plots: s.plots.map((p) => (p.owner === id ? { ...p, owner: null, paid: 0, projectId: null, ...(p.obligation ? { municipal: true, obligation: undefined } : {}) } : p)),
   };
   s = mapPlayer(s, id, (p) => ({ ...p, bankrupt: true, cash: 0, debt: 0 }));
   return withEvent(s, { player: id, text: `${name} fait faillite : la banque saisit ${plots.length} terrain${plots.length > 1 ? 's' : ''}${runs.length ? ` et arrête ${runs.length} chantier${runs.length > 1 ? 's' : ''}` : ''}` });
@@ -724,7 +738,7 @@ export function netWorth(state: GameState, playerId: string): number {
   // Les offres en cours bloquent de l'argent qui reste le vôtre.
   let w = player.cash - player.debt + committedCash(state, playerId) + committedTenderCash(state, playerId);
   for (const pl of state.plots) {
-    if (pl.owner === playerId && !pl.projectId) w += pl.askingPrice * (1 - state.config.plotSpread);
+    if (pl.owner === playerId && !pl.projectId) w += (pl.obligation ? Math.min(pl.askingPrice, pl.obligation.price) : pl.askingPrice) * (1 - state.config.plotSpread);
   }
   // Un projet vaut les fonds propres investis, moins ce que les ventes ont déjà fait revenir en trésorerie.
   for (const pr of state.projects) if (pr.owner === playerId) w += pr.equityInvested - pr.cashReceived + (pr.financed ? 0 : pr.landRefund);
