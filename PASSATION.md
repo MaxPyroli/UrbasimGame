@@ -222,8 +222,15 @@ collectivité jouent le rôle des enchères du Monopoly.
   patrimoine final / départ ≈ 1,1–2,2, l'agressif ne domine plus aussi nettement.
   Pistes : bonus de constructibilité (logement social, performance énergétique), révision du PLU en cours de partie
   (événement), recours des riverains selon la zone, vraies hauteurs du plan des hauteurs (prescriptions GPU).
-- **À faire (demande notée)** : **simplifier l'affichage** : la fiche d'un terrain est dense (carte + fiche + zone + bilan +
-  équipements + légende) et la barre du haut passe à la ligne ; hiérarchiser, replier les détails, réduire les vues et légendes.
+- Fait : **affichage simplifié** (`jeu/src/main.ts`, `jeu/src/style.css`). Barre du haut sur une ligne (trimestre, trésorerie,
+  patrimoine, un seul bloc « Marché » : indice des prix · taux · demande), boutons « Fin du trimestre », « ▶▶ » et menu « ⋯ »
+  (nouvelle partie). Réglages de la carte (vue, filtre des terrains libres, sélection multiple) dans une petite barre sur
+  la carte ; légende de carte repliable (fermée par défaut sur téléphone) avec les propriétaires et les symboles. Fiche d'un
+  terrain : titre + pastille d'état, 4 faits (surface, prix, zone, bâti), action d'achat/vente, puis le projet (niveaux, attique,
+  « Meilleur projet »), trois indicateurs (marge, fonds propres, durée) ; tout le reste est replié (Options, Détail du bilan,
+  Règles d'urbanisme, Situation). Cartes d'opération plus courtes ; badge du nombre d'opérations sur l'onglet.
+- À faire (idées d'affichage) : mode d'emploi au premier lancement, aide contextuelle sur les termes (préventes, SDP,
+  pleine terre), choix du nom et de l'identité du promoteur.
 - À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, appels d'offres, programmes (TVA 5,5 %,
   ZAC), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 

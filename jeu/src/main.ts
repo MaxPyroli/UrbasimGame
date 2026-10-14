@@ -243,7 +243,6 @@ const HEIGHT_CLASSES: { max: number; color: string; label: string }[] = [
   { max: Infinity, color: '#5d1a4a', label: 'plus de 25 m · R+8 et plus' },
 ];
 const heightColor = (h: number) => (HEIGHT_CLASSES.find((c) => h <= c.max) ?? HEIGHT_CLASSES[HEIGHT_CLASSES.length - 1]).color;
-const levelsOf = (h: number) => Math.max(0, Math.round(h / 2.95) - 1);
 
 /** Valeur du lieu : bleu = en dessous du quartier médian, beige = médian, orange à brun = au-dessus. */
 const LIEU_RANGE: [number, number] = [0.95, 1.09];
@@ -294,6 +293,7 @@ for (const b of district.buildings) {
 
 const mapLegend = new L.Control({ position: 'bottomleft' });
 mapLegend.onAdd = () => L.DomUtil.create('div', 'map-legend');
+let legendOpen = window.innerWidth > 800;
 function updateMapLegend() {
   const el = mapLegend.getContainer();
   if (!el) return;
@@ -313,7 +313,32 @@ function updateMapLegend() {
   } else {
     el.innerHTML = `<b>Prix des terrains libres</b><div>plus foncé = plus cher au m²</div>`;
   }
+  // Repères communs à toutes les vues : propriétaires et symboles.
+  const owners = [`<span><i class="swatch" style="background:${COLORS.moi}"></i>vous</span>`, ...state.players.filter((p) => p.bot).map((p) => `<span><i class="swatch" style="background:${COLORS[p.id]}"></i>${esc(p.name)}</span>`)].join(' ');
+  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span>pointillé épais : opération</span></div>`;
+  // Repliable (fermée par défaut sur petit écran) : le titre devient la ligne cliquable.
+  const title = el.querySelector('b');
+  const heading = title ? title.outerHTML : '<b>Légende</b>';
+  if (title) title.remove();
+  el.innerHTML = `<details class="lg" ${legendOpen ? 'open' : ''}><summary>${heading}</summary>${el.innerHTML}</details>`;
+  el.querySelector('details')!.ontoggle = (e) => (legendOpen = (e.target as HTMLDetailsElement).open);
+  L.DomEvent.disableClickPropagation(el);
 }
+
+/** Barre d'outils de la carte : vue, filtre des terrains libres, sélection multiple. */
+const mapTools = new L.Control({ position: 'topright' });
+mapTools.onAdd = () => {
+  const el = L.DomUtil.create('div', 'maptools');
+  el.innerHTML = `<label>Carte <select id="view"><option value="hauteur">Hauteur du bâti</option><option value="zonage">Règles d’urbanisme</option><option value="lieu">Valeur du lieu</option><option value="prix">Prix des terrains</option></select></label>
+    <label>Terrains libres <select id="pfilter"><option value="tous">tous</option><option value="abordables">à ma portée</option><option value="assembler">à assembler</option></select></label>
+    <label title="Ou Maj+clic sur la carte"><input type="checkbox" id="multi"/> sélection multiple</label>`;
+  L.DomEvent.disableClickPropagation(el);
+  const q = <T extends HTMLElement>(id: string) => el.querySelector<T>(`#${id}`)!;
+  q<HTMLSelectElement>('view').onchange = (e) => ((view = (e.target as HTMLSelectElement).value as typeof view), applyView(), renderAll());
+  q<HTMLSelectElement>('pfilter').onchange = (e) => ((plotFilter = (e.target as HTMLSelectElement).value as typeof plotFilter), renderAll());
+  q<HTMLInputElement>('multi').onchange = (e) => (multi = (e.target as HTMLInputElement).checked);
+  return el;
+};
 
 function applyView() {
   if (view === 'hauteur') buildingsLayer.addTo(map);
@@ -383,17 +408,16 @@ function renderTop() {
   const w = netWorth(state, ME);
   $('top').innerHTML = `
     <h1>Urbasim</h1>
-    <div class="stat"><small>Quartier</small><b>${esc(district.name)}</b></div>
-    <div class="stat"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">(${state.round}/${state.config.rounds})</span></b></div>
-    <div class="stat"><small>Trésorerie</small><b>${eurFull(me().cash)}</b></div>
-    <div class="stat"><small>Patrimoine</small><b>${eurFull(w)}</b></div>
-    <div class="stat"><small>Prix de vente (indice)</small><b class="${state.marketIndex >= 1 ? 'good' : 'bad'}">${(state.marketIndex * 100).toFixed(0)}</b></div>
-    <div class="stat"><small>Crédit promoteur</small><b>${pct(state.interestRate)}</b></div>
-    <div class="stat" title="Logements que les ménages achètent par trimestre dans le quartier, et logements actuellement en vente (tous promoteurs)"><small>Demande · en vente</small><b>${marketDemand(state).toFixed(0)} · ${unitsOnOffer(state)} <span class="muted">logts</span></b></div>
+    <div class="stat"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b></div>
+    <div class="stat"><small>Trésorerie</small><b>${eur(me().cash)}</b></div>
+    <div class="stat" title="Trésorerie + terrains (au prix de reprise) + fonds propres engagés dans les opérations"><small>Patrimoine</small><b>${eur(w)}</b></div>
+    <div class="stat" title="Indice des prix de vente (100 = prix de départ) · taux du crédit promoteur · logements que les ménages achètent par trimestre dans le quartier, et logements en vente en ce moment (tous promoteurs)">
+      <small>Marché</small><b><span class="${state.marketIndex >= 1 ? 'good' : 'bad'}">prix ${(state.marketIndex * 100).toFixed(0)}</span> · ${pct(state.interestRate)} · ${marketDemand(state).toFixed(0)}<span class="muted">/trim.</span> <span class="muted">(${unitsOnOffer(state)} en vente)</span></b>
+    </div>
     <span class="spacer"></span>
     <button id="end" class="primary" ${state.over ? 'disabled' : ''}>${me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
-    <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">Avancer ▶▶</button>
-    <button id="new">Nouvelle partie</button>`;
+    <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">▶▶</button>
+    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><button id="new">Nouvelle partie</button></div></details>`;
   $('end').onclick = endTurn;
   $('ff').onclick = fastForward;
   const nb = $('new');
@@ -417,8 +441,9 @@ function renderTop() {
 }
 
 function tabs(): string {
+  const nOps = state.projects.filter((p) => p.owner === ME).length;
   const t = (id: typeof tab, label: string) => `<button data-tab="${id}" class="${tab === id ? 'on' : ''}">${label}</button>`;
-  return `<div class="tabs">${t('terrain', 'Terrain')}${t('operations', 'Opérations')}${t('journal', 'Journal')}${t('classement', 'Classement')}</div>`;
+  return `<div class="tabs">${t('terrain', 'Terrain')}${t('operations', `Opérations${nOps ? ` <span class="badge">${nOps}</span>` : ''}`)}${t('journal', 'Journal')}${t('classement', 'Classement')}</div>`;
 }
 
 function renderSide() {
@@ -432,22 +457,19 @@ function renderSide() {
   bindSelection();
 }
 
-function legend(): string {
-  const heights = view === 'hauteur' ? `<div class="legend muted" style="margin:6px 0">teinte plus claire = hauteur estimée (non renseignée dans la donnée)</div>` : '';
-  return `<label class="f" style="margin-top:14px">Terrains libres<select id="pfilter"><option value="tous" ${plotFilter === 'tous' ? 'selected' : ''}>tous</option><option value="abordables" ${plotFilter === 'abordables' ? 'selected' : ''}>à ma portée</option><option value="assembler" ${plotFilter === 'assembler' ? 'selected' : ''}>à assembler</option></select></label>
-    <label class="f">Vue de la carte<select id="view"><option value="hauteur" ${view === 'hauteur' ? 'selected' : ''}>Hauteur du bâti existant</option><option value="zonage" ${view === 'zonage' ? 'selected' : ''}>Règles d’urbanisme (PLU)</option><option value="lieu" ${view === 'lieu' ? 'selected' : ''}>Valeur du lieu</option><option value="prix" ${view === 'prix' ? 'selected' : ''}>Prix des terrains</option></select></label>${heights}<p class="legend">
-    <label><input type="checkbox" id="multi" ${multi ? 'checked' : ''}/> sélection multiple</label>
-    <br><span><i class="swatch" style="background:${COLORS.moi}"></i>vous</span>${state.players
-      .filter((p) => p.bot)
-      .map((p) => `<span><i class="swatch" style="background:${COLORS[p.id]}"></i>${esc(p.name)}</span>`)
-      .join('')}<br>${view === 'prix' ? '<span>terrains libres : plus foncé = plus cher au m²</span> ' : '<span>terrains libres : contour bleu</span> '}<span>pointillés épais = opération en cours</span><br><span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>trop petit ou enclavé : à assembler</span> <span>contour pointillé fin = hors de portée</span></p>`;
-}
+/** Sections repliables : l'essentiel est visible, le détail se déplie. */
+const fold = (title: string, body: string, open = false) => `<details class="fold" ${open ? 'open' : ''}><summary>${title}</summary><div class="foldbody">${body}</div></details>`;
+const pill = (text: string, color: string) => `<span class="pill" style="--pc:${color}">${text}</span>`;
+const shortLabel = (p: Plot) => (p.label ?? p.id).replace(' · Montreuil', '');
 
 function renderSelection(): string {
   const ids = [...selected].filter((id) => plotById(id));
   if (ids.length === 0) {
     drawOverlay(null);
-    return `<h2>Terrain</h2><p class="muted">Cliquez sur une parcelle. Pour assembler plusieurs parcelles mitoyennes, achetez-les, puis sélectionnez-les avec Maj+clic (ou « sélection multiple ») et cliquez sur « Assembler ».</p>${legend()}`;
+    return `<div class="empty"><b>Choisissez un terrain</b>
+      <p class="muted">Cliquez sur une parcelle de la carte pour voir son prix, les règles d’urbanisme et ce qu’on peut y construire.</p>
+      <p class="muted">Pour assembler plusieurs parcelles voisines : achetez-les, sélectionnez-les avec Maj+clic, puis « Assembler ».</p>
+      <p class="muted">Les parcelles violettes en pointillés sont trop petites ou enclavées pour être construites seules.</p></div>`;
   }
   const plots = ids.map((id) => plotById(id)!);
   if (plots.length > 1) return renderMulti(plots);
@@ -465,9 +487,9 @@ function renderMulti(plots: Plot[]): string {
   const notMine = plots.filter((p) => p.owner !== ME);
   const busy = plots.filter((p) => p.projectId);
   if (notMine.length) {
-    verdict = `<div class="check bad">Il faut posséder toutes les parcelles : achetez ${notMine.map((p) => esc(p.label ?? p.id)).join(', ')} (${eur(notMine.reduce((s, p) => s + buyCost(p), 0))}).</div>`;
+    verdict = `<div class="check bad">Il faut posséder toutes les parcelles : achetez ${notMine.map((p) => esc(shortLabel(p))).join(', ')} (${eur(notMine.reduce((s, p) => s + buyCost(p), 0))}).</div>`;
   } else if (busy.length) {
-    verdict = `<div class="check bad">Une opération est en cours sur ${busy.map((p) => esc(p.label ?? p.id)).join(', ')} : elle doit d’abord se terminer.</div>`;
+    verdict = `<div class="check bad">Une opération est en cours sur ${busy.map((p) => esc(shortLabel(p))).join(', ')} : elle doit d’abord se terminer.</div>`;
   } else {
     const r = mergeParcels(plots.map((p) => p.parcel));
     if (r.ok) {
@@ -478,63 +500,76 @@ function renderMulti(plots: Plot[]): string {
     }
   }
   const sold = plots.some((p) => p.owner && p.owner !== ME);
-  return `<h2>${plots.length} parcelles sélectionnées</h2>
-    <p>${plots.map((p) => `${esc(p.label ?? p.id)} <span class="muted">${p.owner === ME ? '(à vous)' : p.owner ? '(' + esc(state.players.find((x) => x.id === p.owner)!.name) + ')' : '(libre)'}</span>`).join('<br>')}</p>
-    <table><tr><td>Surface totale</td><td>${Math.round(area)} m²</td></tr><tr><td>Prix affichés (frais compris)</td><td>${eur(cost)}</td></tr></table>
+  return `<div class="head"><b>${plots.length} parcelles</b> <span class="muted">· ${Math.round(area)} m² · ${eur(cost)} frais compris</span></div>
+    <div class="muted" style="font-size:12px;margin:4px 0">${plots.map((p) => `${esc(shortLabel(p))} (${p.owner === ME ? 'à vous' : p.owner ? esc(state.players.find((x) => x.id === p.owner)!.name) : 'libre'})`).join(' · ')}</div>
     ${verdict}
     <div class="row">
+      <button id="merge" class="primary" ${canMerge ? '' : 'disabled'}>Assembler en un terrain</button>
       <button id="buyAll" ${free && !sold ? '' : 'disabled'} title="Achète toutes les parcelles libres de la sélection">Tout acheter</button>
-      <button id="merge" class="primary" ${canMerge ? '' : 'disabled'}>Assembler en un seul terrain</button>
-      <button id="clear">Désélectionner</button>
+      <button id="clear">Annuler</button>
     </div>
-    <p class="muted">Les parcelles doivent se toucher sur au moins 1,5 m. L’assemblage permet de construire un ensemble plus grand et de rendre constructibles des parcelles trop petites ou enclavées.</p>${legend()}`;
+    <p class="muted" style="font-size:12px">Les parcelles doivent se toucher sur au moins 1,5 m. Assembler permet de construire plus gros, et de rendre constructibles des parcelles trop petites ou enclavées.</p>`;
+}
+
+function statusPill(p: Plot): string {
+  if (p.projectId) return pill('opération en cours', COLORS[p.owner ?? ''] ?? '#888');
+  if (p.owner === ME) return pill('à vous', COLORS.moi);
+  if (p.owner) return pill(esc(state.players.find((x) => x.id === p.owner)!.name), COLORS[p.owner] ?? '#888');
+  if (p.issue === 'zone') return pill('inconstructible', '#777');
+  if (p.issue) return pill('à assembler', '#7b3fa0');
+  return pill('libre', '#2b6cb0');
 }
 
 function renderSingle(p: Plot): string {
-  const owner = p.owner ? state.players.find((x) => x.id === p.owner)!.name : null;
   const area = areaOf(p);
   const fee = p.askingPrice * state.config.bilanParams.acquisitionFeeRate;
   const mine = p.owner === ME;
   const run = p.projectId ? state.projects.find((r) => r.id === p.projectId) : null;
-  let html = `<h2>${esc(p.label ?? p.id)}</h2>
-    <table>
-      <tr><td>Surface</td><td>${Math.round(area)} m²${p.parts ? ` · assemblage de ${p.parts.length}` : ''}</td></tr>
-      <tr><td>Bâti existant</td><td>${p.existingSdp ? `${p.existingSdp} m² SDP${p.existingHeight ? ` · ${Math.round(p.existingHeight)} m (≈ R+${levelsOf(p.existingHeight)})` : ''}<br><span class="muted">à démolir avant de construire</span>` : 'aucun'}</td></tr>
-      <tr><td>Prix affiché</td><td>${eurFull(p.askingPrice)} <span class="muted">(${Math.round(p.askingPrice / area)} €/m²)</span></td></tr>
-      <tr><td>Propriétaire</td><td>${owner ? esc(owner) : '<span class="muted">libre</span>'}</td></tr>
-      <tr><td>Situation</td><td>prix de vente <b class="${p.locationFactor >= 1 ? 'good' : 'bad'}">×${p.locationFactor.toFixed(2).replace('.', ',')}</b></td></tr>
-    </table>${zoneCard(p)}${locationDetail(p)}`;
+  const rule = ruleOf(p);
+  const fact = (k: string, v: string) => `<div class="fact"><small>${k}</small><b>${v}</b></div>`;
+  let html = `<div class="head"><b>${esc(shortLabel(p).replace(/ · \d+ m²$/, ''))}</b> ${statusPill(p)}</div>
+    <div class="facts">
+      ${fact('Surface', `${Math.round(area)} m²${p.parts ? ` <span class="muted">(${p.parts.length} parcelles)</span>` : ''}`)}
+      ${fact('Prix affiché', `${eur(p.askingPrice)} <span class="muted">${Math.round(p.askingPrice / area)} €/m²</span>`)}
+      ${fact('Zone', rule ? pill(`${esc(rule.label)}${rule.buildable ? ` · R+${rule.maxLevels}` : ''}`, rule.color) : '—')}
+      ${fact('Bâti existant', p.existingSdp ? `${p.existingSdp} m²${p.existingHeight ? ` · ${Math.round(p.existingHeight)} m` : ''}` : 'aucun')}
+    </div>`;
 
   if (run) {
-    html += `<h2>Opération ${esc(run.id)}</h2>` + operationCard(run.id);
     drawOverlay(null);
-    return html + legend();
+    return html + `<h2>Opération ${esc(run.id)}</h2>` + operationCard(run.id) + details(p);
   }
   const issueBox = p.issue === 'zone'
-    ? `<div class="card" style="border-color:#777"><b>Inconstructible</b><div>${esc(ISSUE_MESSAGE.zone)}</div></div>`
+    ? `<div class="notice" style="--nc:#777"><b>Inconstructible</b> ${esc(ISSUE_MESSAGE.zone)}</div>`
     : p.issue
-      ? `<div class="card" style="border-color:#7b3fa0"><b style="color:#7b3fa0">Non constructible seul</b><div>${esc(ISSUE_MESSAGE[p.issue])}</div><div class="muted">Sélectionnez les parcelles voisines (Maj+clic ou « sélection multiple »), achetez-les, puis « Assembler ».</div></div>`
+      ? `<div class="notice" style="--nc:#7b3fa0"><b>À assembler</b> ${esc(ISSUE_MESSAGE[p.issue])}<br><span class="muted">Sélectionnez les voisines (Maj+clic), achetez-les, puis « Assembler ».</span></div>`
       : '';
   if (!p.owner) {
     const missing = buyCost(p) - me().cash;
-    html += `${issueBox}<div class="row"><button id="buy" class="primary" ${missing > 0 ? 'disabled' : ''}>Acheter · ${eurFull(buyCost(p))}</button></div>
-      <p class="muted">${missing > 0 ? `<span class="bad">Il vous manque ${eurFull(missing)}.</span> ` : ''}dont ${eurFull(fee)} de frais de notaire.${p.issue ? '' : ' Essayez un projet sur ce terrain avant d’acheter :'}</p>`;
+    html += `${issueBox}<div class="row"><button id="buy" class="primary" ${missing > 0 ? 'disabled' : ''}>Acheter · ${eur(buyCost(p))}</button></div>
+      <div class="muted" style="font-size:12px">${missing > 0 ? `<span class="bad">Il vous manque ${eur(missing)}.</span> ` : ''}Frais de notaire compris (${eur(fee)}).</div>`;
     if (p.issue) {
       drawOverlay(null);
-      return html + legend();
+      return html + details(p);
     }
-    return html + projectForm(p, false) + legend();
+    return html + projectForm(p, false) + details(p);
   }
   if (!mine) {
     drawOverlay(null);
-    return html + legend();
+    return html + details(p);
   }
-  html += `${issueBox}<div class="row"><button id="sell" class="danger">Revendre · ${eurFull(p.askingPrice * (1 - state.config.plotSpread))}</button></div>`;
+  html += `${issueBox}<div class="row"><button id="sell" class="danger" title="Revente à la banque : ${Math.round(state.config.plotSpread * 100)} % de moins que le prix affiché">Revendre · ${eur(p.askingPrice * (1 - state.config.plotSpread))}</button></div>`;
   if (p.issue) {
     drawOverlay(null);
-    return html + legend();
+    return html + details(p);
   }
-  return html + projectForm(p, true) + legend();
+  return html + projectForm(p, true) + details(p);
+}
+
+/** Détails repliés : règles d'urbanisme et situation. */
+function details(p: Plot): string {
+  const rule = ruleOf(p);
+  return (rule ? fold(`Règles d’urbanisme · ${esc(rule.label)}`, zoneCard(p)) : '') + fold(`Situation · prix de vente ×${p.locationFactor.toFixed(2).replace('.', ',')}`, locationDetail(p));
 }
 
 /** Cherche le projet le plus rentable sans erreur (R+0 à R+8, avec ou sans attique, stationnement automatique). */
@@ -552,26 +587,26 @@ function bestForm(p: Plot, owned: boolean): { levels: number; attic: boolean; ma
   return best;
 }
 
-/** Carte de la zone du PLU : 5 règles, en clair. */
+/** Les règles de la zone du PLU, en clair. */
 function zoneCard(p: Plot): string {
   const rule = ruleOf(p);
   if (!rule) return '';
-  const several = p.zones.length > 1 ? ' <span class="muted">(terrain à cheval sur plusieurs zones : règle la plus stricte)</span>' : '';
+  const several = p.zones.length > 1 ? '<div class="muted" style="font-size:12px">Terrain à cheval sur plusieurs zones : la règle la plus stricte s’applique.</div>' : '';
   const code = p.zoneCode ? `<span class="muted">${esc(p.zoneCode)}</span> · ` : '';
-  if (!rule.buildable) return `<div class="card" style="border-left:4px solid ${rule.color}"><b>${code}${esc(rule.label)}</b>${several}<div class="muted">${esc(rule.summary)}</div></div>`;
-  const chip = (t: string) => `<span style="display:inline-block;border:1px solid var(--line);border-radius:10px;padding:0 8px;margin:2px 4px 2px 0;font-size:12px">${t}</span>`;
-  return `<div class="card" style="border-left:4px solid ${rule.color}"><b>${code}${esc(rule.label)}</b>${several}
+  if (!rule.buildable) return `<div><b>${code}${esc(rule.label)}</b>${several}<div class="muted">${esc(rule.summary)}</div></div>`;
+  const chip = (t: string) => `<span class="chip">${t}</span>`;
+  return `<div><b>${code}${esc(rule.label)}</b>${several}
     <div class="muted" style="font-size:12px">${esc(rule.summary)}</div>
-    <div>${chip(`Hauteur max <b>R+${rule.maxLevels}</b>`)}${chip(`Emprise <b>${Math.round(rule.maxCoverage * 100)} %</b>`)}${chip(`Pleine terre <b>${Math.round(rule.minOpenGround * 100)} %</b>`)}${rule.setbackFond || rule.setbackLateral ? chip(`Retraits <b>${rule.setbackFond ? `fond ${rule.setbackFond} m` : ''}${rule.setbackFond && rule.setbackLateral ? ', ' : ''}${rule.setbackLateral ? `côtés ${rule.setbackLateral} m` : ''}</b>`) : chip('Construction en limite possible')}${chip(rule.use === 'bureaux' ? '<b>Bureaux</b> uniquement' : 'Logements, commerces')}</div>
-    <div class="muted" style="font-size:11px">Règles simplifiées inspirées du type de zone, pas le règlement réel.</div></div>`;
+    <div style="margin-top:4px">${chip(`Hauteur max <b>R+${rule.maxLevels}</b>`)}${chip(`Emprise <b>${Math.round(rule.maxCoverage * 100)} %</b>`)}${chip(`Pleine terre <b>${Math.round(rule.minOpenGround * 100)} %</b>`)}${rule.setbackFond || rule.setbackLateral ? chip(`Retraits <b>${rule.setbackFond ? `fond ${rule.setbackFond} m` : ''}${rule.setbackFond && rule.setbackLateral ? ', ' : ''}${rule.setbackLateral ? `côtés ${rule.setbackLateral} m` : ''}</b>`) : chip('Construction en limite possible')}${chip(rule.use === 'bureaux' ? '<b>Bureaux</b> uniquement' : 'Logements, commerces')}</div>
+    <div class="muted" style="font-size:11px;margin-top:4px">Règles simplifiées inspirées du type de zone, pas le règlement réel.</div></div>`;
 }
 
 function locationDetail(p: Plot): string {
   const n = p.parcel.ring.length;
   const here = { lon: p.parcel.ring.reduce((t, q) => t + q.lon, 0) / n, lat: p.parcel.ring.reduce((t, q) => t + q.lat, 0) / n };
   const parts = locationParts(here, district.pois).slice(0, 4);
-  if (!parts.length) return '<p class="muted">Aucun équipement structurant à proximité.</p>';
-  return `<div class="muted" style="font-size:12px">${parts.map((x) => `${esc(LOCATION_RULES[x.kind].label)} ${esc(x.name)} · ${x.distance} m · +${(x.bonus * 100).toFixed(1).replace('.', ',')} %`).join('<br>')}</div>`;
+  if (!parts.length) return '<div class="muted">Aucun équipement structurant à proximité.</div>';
+  return `<div class="muted" style="font-size:12px">Les équipements proches font monter les prix de vente (donc le terrain) :<br>${parts.map((x) => `${esc(LOCATION_RULES[x.kind].label)} ${esc(x.name)} · ${x.distance} m · +${(x.bonus * 100).toFixed(1).replace('.', ',')} %`).join('<br>')}</div>`;
 }
 
 function projectForm(p: Plot, owned: boolean): string {
@@ -582,12 +617,15 @@ function projectForm(p: Plot, owned: boolean): string {
   drawOverlay(proj);
   const errors = proj.checks.filter((c) => c.status === 'error');
   const sel = (v: ParkingStrategy, l: string) => `<option value="${v}" ${form.parking === v ? 'selected' : ''}>${l}</option>`;
+  const options = `<label class="f">Stationnement<select id="f-parking">${sel('auto', 'automatique')}${sel('sous-sol', 'sous-sol')}${sel('rdc', 'rez-de-chaussée')}${sel('surface', 'en surface')}${sel('hors-site', 'places achetées à proximité')}${sel('aucun', 'aucun')}</select></label>
+    <label class="f" title="Au-delà de 14 m de profondeur, l'éclairement naturel devient difficile">Profondeur max du bâtiment<select id="f-depth">${[10, 12, 15, 18, 22].map((d) => `<option value="${d}" ${form.depth === d ? 'selected' : ''}>${d} m</option>`).join('')}</select></label>`;
   let html = `<h2>Projet</h2>
-    <label class="f">Niveaux (R+x)${rule ? ` <span class="muted">max R+${rule.maxLevels}</span>` : ''}<select id="f-levels">${Array.from({ length: maxLv + 1 }, (_, i) => `<option ${i === form.levels ? 'selected' : ''}>${i}</option>`).join('')}</select></label>
-    <label class="f" title="L'attique compte comme un niveau dans la hauteur maximale de la zone">Attique<input type="checkbox" id="f-attic" ${form.attic ? 'checked' : ''} ${rule && rule.maxLevels - 1 < form.levels ? 'disabled' : ''}/></label>
-    <label class="f">Stationnement<select id="f-parking">${sel('auto', 'automatique')}${sel('sous-sol', 'sous-sol')}${sel('rdc', 'rez-de-chaussée')}${sel('surface', 'en surface')}${sel('hors-site', 'places achetées à proximité')}${sel('aucun', 'aucun')}</select></label>
-    <label class="f" title="Au-delà de 14 m de profondeur, l'éclairement naturel devient difficile">Profondeur max du bâtiment<select id="f-depth">${[10, 12, 15, 18, 22].map((d) => `<option value="${d}" ${form.depth === d ? 'selected' : ''}>${d} m</option>`).join('')}</select></label>
-    <div class="row"><button id="best" title="Teste les niveaux autorisés par le PLU, avec ou sans attique, et choisit le plus rentable sans erreur">Meilleur projet</button></div>`;
+    <div class="row" style="align-items:center">
+      <label class="f" style="margin:0">Niveaux R+<select id="f-levels">${Array.from({ length: maxLv + 1 }, (_, i) => `<option ${i === form.levels ? 'selected' : ''}>${i}</option>`).join('')}</select></label>
+      <label class="f" style="margin:0" title="L'attique compte comme un niveau dans la hauteur maximale de la zone">attique <input type="checkbox" id="f-attic" ${form.attic ? 'checked' : ''} ${rule && rule.maxLevels - 1 < form.levels ? 'disabled' : ''}/></label>
+      <button id="best" title="Teste les niveaux autorisés par le PLU, avec ou sans attique, et choisit le plus rentable sans erreur">Meilleur projet</button>
+    </div>
+    ${fold('Options', options)}`;
   if (!proj.footprint) return html + `<p class="bad">Rien de constructible avec ces critères.</p>`;
 
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : p.askingPrice;
@@ -598,7 +636,16 @@ function projectForm(p: Plot, owned: boolean): string {
   const short = cashNeeded - me().cash;
   const i = proj.indicators;
   const ok = errors.length === 0;
-  html += `<table>
+  html += `<div class="kpis">
+      <div class="kpi"><small>Marge</small><b class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)}</b><span class="muted">${pct(b.marginRate)} du CA</span></div>
+      <div class="kpi" title="Le terrain est payé comptant. La banque ne finance le terrain (80 %) et les travaux qu'une fois ${Math.round(state.config.presaleThreshold * 100)} % des logements vendus sur plan."><small>Fonds propres</small><b class="${short > 0 ? 'bad' : ''}">${eur(cashNeeded)}</b><span class="muted">${owned ? 'pour lancer' : 'achat compris'}</span></div>
+      <div class="kpi"><small>Durée</small><b>${b.quarters} trim.</b><span class="muted">${i.dwellings} logts · ${Math.round(i.sdpTotal)} m²</span></div>
+    </div>`;
+  html += proj.checks.filter((c) => c.status === 'error' || c.status === 'warn').map((c) => `<div class="check ${c.status === 'error' ? 'bad' : 'warn'}">${esc(c.label)} : ${esc(c.detail)}</div>`).join('');
+  if (!ok) html += `<div class="muted" style="font-size:12px">Pour débloquer : réduisez les niveaux, changez le mode de stationnement dans « Options », ou cliquez sur « Meilleur projet ».</div>`;
+  if (short > 0) html += `<div class="check bad">Il vous manque ${eur(short)} pour ${owned ? 'lancer' : 'acheter et lancer'} ce projet.</div>`;
+  if (owned) html += `<div class="row"><button id="launch" class="primary" ${ok && short <= 0 ? '' : 'disabled'}>Lancer l’opération</button></div>`;
+  const rows = `<table>
       <tr><td>Surface de plancher</td><td>${Math.round(i.sdpTotal)} m² (${i.levelsCount} niv.)</td></tr>
       <tr><td>Logements</td><td>${i.dwellings} · SHAB ${Math.round(i.shab)} m²</td></tr>
       <tr><td>Stationnement</td><td>${proj.parking.provided}/${proj.parking.required} places</td></tr>
@@ -607,23 +654,17 @@ function projectForm(p: Plot, owned: boolean): string {
       <tr><td>Travaux${p.existingSdp ? ' et démolition' : ''}</td><td>${eur(b.costs.works + b.costs.demolition)}</td></tr>
       <tr><td>Coûts fixes d’opération <span class="muted" title="études de sol, géomètre, diagnostics, dossier de permis, garantie d’achèvement, raccordements, installation de chantier : dus quelle que soit la taille">ⓘ</span></td><td>${eur(b.costs.fixed)}</td></tr>
       <tr><td>Autres frais et crédit</td><td>${eur(b.costs.total - b.costs.land - b.costs.acquisitionFees - b.costs.works - b.costs.demolition - b.costs.fixed)}</td></tr>
-      <tr class="total"><td>Marge</td><td class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)} (${pct(b.marginRate)})</td></tr>
-      <tr><td>Durée</td><td>${b.quarters} trimestres</td></tr>
-      <tr><td>Fonds propres à avancer ${owned ? '' : '(achat compris)'} <span class="muted" title="Le terrain est payé comptant. La banque ne finance le terrain (80 %) et les travaux qu'une fois ${Math.round(state.config.presaleThreshold * 100)} % des logements vendus sur plan.">ⓘ</span></td><td class="${short > 0 ? 'bad' : ''}">${eur(cashNeeded)}</td></tr>
+      <tr class="total"><td>Coût total</td><td>${eur(b.costs.total)}</td></tr>
       <tr><td>Prix de terrain max (marge ${pct(state.config.bilanParams.targetMargin)})</td><td>${eur(b.maxLandPrice)}</td></tr>
     </table>`;
-  html += proj.checks.filter((c) => c.status === 'error' || c.status === 'warn').map((c) => `<div class="check ${c.status === 'error' ? 'bad' : 'warn'}">${esc(c.label)} : ${esc(c.detail)}</div>`).join('');
-  if (!ok) html += `<div class="muted" style="font-size:12px">Pour débloquer : réduisez les niveaux, changez le mode de stationnement, ou cliquez sur « Meilleur projet ».</div>`;
-  if (short > 0) html += `<div class="check bad">Trésorerie insuffisante : il vous manque ${eurFull(short)} pour ${owned ? 'lancer' : 'acheter et lancer'} ce projet.</div>`;
-  if (owned) html += `<div class="row"><button id="launch" class="primary" ${ok && short <= 0 ? '' : 'disabled'}>Lancer l’opération</button></div>`;
-  return html;
+  return html + fold('Détail du bilan', rows);
 }
 
 const PHASE_LABEL: Record<string, string> = {
-  permis: 'Permis de construire · commercialisation sur plan',
-  preventes: 'En attente de préventes : la banque ne débloque pas le crédit',
-  chantier: 'Chantier · appels de fonds des acquéreurs',
-  livraison: 'Livraison et dernières ventes',
+  permis: 'Permis de construire',
+  preventes: 'En attente de préventes',
+  chantier: 'Chantier',
+  livraison: 'Livraison',
 };
 
 function operationCard(runId: string): string {
@@ -635,14 +676,14 @@ function operationCard(runId: string): string {
   const sales = expectedSales(state).get(r.id) ?? 0;
   const threshold = Math.round(state.config.presaleThreshold * 100);
   const share = Math.round(soldShare(r) * 100);
-  const bar = `<div style="position:relative;height:8px;background:var(--line);border-radius:4px;margin:6px 0"><div style="height:8px;width:${share}%;background:${share >= threshold ? 'var(--good)' : 'var(--accent)'};border-radius:4px"></div><div title="seuil de préventes" style="position:absolute;left:${threshold}%;top:-3px;width:2px;height:14px;background:var(--ink)"></div></div>`;
-  const stage = r.phase === 'permis' ? `${r.phaseElapsed}/${r.permitRounds}` : r.phase === 'chantier' ? `${r.phaseElapsed}/${r.buildRounds}` : r.phase === 'livraison' ? 'derniers lots' : 'attente';
-  let html = `<div class="card"><b>${esc(r.id)}</b> · ${esc(owner)} · ${PHASE_LABEL[r.phase]}
-    <div class="muted">${Math.round(r.sdp)} m² SDP · étape ${stage} · ${r.roundsRun} trimestre${r.roundsRun > 1 ? 's' : ''} écoulé${r.roundsRun > 1 ? 's' : ''}</div>
-    ${bar}<div>${r.lotsSold}/${r.lots} lots vendus (${share} %) · ${left ? `environ <span data-sales="${esc(r.id)}">${sales.toFixed(1).replace('.', ',')}</span> vente${sales >= 1.5 ? 's' : ''} par trimestre` : 'tout est vendu'}</div>`;
-  if (!r.financed) html += `<div class="muted">Crédit bancaire débloqué à ${threshold} % de lots vendus${share >= threshold ? '' : ` : encore ${Math.max(1, Math.ceil(r.lots * state.config.presaleThreshold) - r.lotsSold)} lot(s) à vendre`}.</div>`;
+  const bar = `<div style="position:relative;height:8px;background:var(--line);border-radius:4px;margin:8px 0 4px"><div style="height:8px;width:${share}%;background:${share >= threshold ? 'var(--good)' : 'var(--accent)'};border-radius:4px"></div><div title="seuil de préventes : ${threshold} %" style="position:absolute;left:${threshold}%;top:-3px;width:2px;height:14px;background:var(--ink)"></div></div>`;
+  const stage = r.phase === 'permis' ? `trimestre ${r.phaseElapsed + 1}/${r.permitRounds}` : r.phase === 'chantier' ? `trimestre ${r.phaseElapsed + 1}/${r.buildRounds}` : r.phase === 'livraison' ? 'derniers lots' : 'en attente';
+  let html = `<div class="card"><div><b>${esc(r.id)}</b> <span class="muted">${esc(owner)} · ${Math.round(r.sdp)} m²</span></div>
+    <div>${PHASE_LABEL[r.phase]} <span class="muted">· ${stage}</span></div>
+    ${bar}<div>${r.lotsSold}/${r.lots} lots vendus${left ? ` <span class="muted">· ≈ <span data-sales="${esc(r.id)}">${sales.toFixed(1).replace('.', ',')}</span> par trimestre</span>` : ' · tout est vendu'}</div>`;
+  html += r.financed ? '<div class="muted">Crédit bancaire débloqué</div>' : `<div class="muted">Crédit débloqué à ${threshold} % vendus${share >= threshold ? '' : ` · encore ${Math.max(1, Math.ceil(r.lots * state.config.presaleThreshold) - r.lotsSold)} lot(s)`}</div>`;
   if (mineOp) {
-    html += `<div>Marge attendue ${eur(r.bilan.margin)} (${pct(r.bilan.marginRate)})${r.extraCost ? ` · surcoûts ${eur(r.extraCost)}` : ''}</div>`;
+    html += `<div>Marge attendue <b class="${r.bilan.margin >= 0 ? 'good' : 'bad'}">${eur(r.bilan.margin)}</b> <span class="muted">${pct(r.bilan.marginRate)}${r.extraCost ? ` · surcoûts ${eur(r.extraCost)}` : ''}</span></div>`;
     if (left > 0)
       html += `<label class="f" title="Une remise vend plus vite ; une prime ralentit les ventes">Prix de vente <span><input type="range" data-price="${esc(r.id)}" min="${MIN_PRICE_POLICY * 100}" max="${MAX_PRICE_POLICY * 100}" step="1" value="${Math.round(r.pricePolicy * 100)}"> <b data-pct="${esc(r.id)}">${r.pricePolicy > 0 ? '+' : ''}${Math.round(r.pricePolicy * 100)} %</b> <span class="muted">(≈ <span data-lot="${esc(r.id)}">${eur(lotPrice(state, r))}</span>/lot)</span></span></label>`;
   }
@@ -765,8 +806,10 @@ function renderAll() {
 
 $('credits').textContent = district.credits.join(' · ') + (NO_TILES ? ' · Voies : IGN, BD TOPO® (Licence Ouverte 2.0)' : ' · Fond de carte : © contributeurs OpenStreetMap') + ' · Prix et coûts : ordres de grandeur, pas une expertise.';
 mapLegend.addTo(map);
+mapTools.addTo(map);
 fitDistrict();
 applyView();
+(document.getElementById('view') as HTMLSelectElement).value = view;
 renderAll();
 
 // Outils de test automatisé (serveur de développement uniquement).
