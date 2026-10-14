@@ -43,6 +43,10 @@ export interface Plot {
   existingSdp: number;
   /** Hauteur du bâti existant (m). */
   existingHeight: number;
+  /** Coefficient de situation sur les prix de vente (transports, centre, équipements) ; 1 = médiane du quartier. */
+  locationFactor: number;
+  /** Surface du terrain (m²). */
+  area: number;
   askingPrice: number;
   /** Prix de référence (indice de marché et demande à 1) ; le prix affiché en découle. */
   basePrice: number;

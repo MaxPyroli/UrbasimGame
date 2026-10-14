@@ -164,7 +164,7 @@ class PermanentError extends Error {}
 const RETRY_DELAYS_MS = [1000, 5500];
 
 /** Une page du WFS, avec de nouvelles tentatives sur coupure réseau, JSON tronqué, 429 ou erreur serveur passagère (5xx). */
-async function fetchWfsPage(url: string, signal?: AbortSignal): Promise<{ features?: unknown[] }> {
+export async function fetchWfsPage(url: string, signal?: AbortSignal): Promise<{ features?: unknown[] }> {
   let lastError: unknown = null;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     if (signal?.aborted) throw new Error('Requête annulée');

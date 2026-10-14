@@ -161,6 +161,17 @@ collectivité jouent le rôle des enchères du Monopoly.
   hauteur) : 5 classes de couleur (≤ 6 m, 6–10, 10–16, 16–25, > 25 m, avec équivalent R+x), légende, bascule avec la vue
   « prix des terrains » ; hauteur existante affichée dans la fiche du terrain. Limite : le bâti dessiné est celui de
   l'instantané (2025) ; les bâtiments construits ou démolis pendant la partie ne sont pas redessinés.
+- Fait : **valeur selon le lieu** (`moteur/src/game/location.ts`). Équipements issus de la BD TOPO (transports :
+  métro, gare, tramway ; mairie = centre-ville ; écoles ; espaces publics ; hôpitaux), stockés dans l'instantané du
+  quartier (`pois`, récupérés par `fetchPois`). Chaque parcelle reçoit un coefficient `locationFactor` sur les prix de
+  vente : somme, par type d'équipement le plus proche, de bonus × exp(−distance/échelle) (métro +14 % à 350 m d'échelle,
+  gare +14 %, mairie +8 %, tram +5 %, école +2 %, parc +2 %, hôpital +2 %), normalisée sur la parcelle médiane du
+  quartier et bornée à 0,85–1,30. Le coefficient s'applique aux prix de vente du bilan (pas aux coûts) : le prix du
+  terrain en découle car il est calculé en résiduel (+8 % de prix de vente ≈ +15 à 30 % de foncier). L'assemblage moyenne
+  les coefficients pondérés par la surface. Interface : vue « Valeur du lieu » (parcelles colorées, équipements,
+  légende) et détail dans la fiche du terrain. Montreuil : coefficients de 0,95 à 1,09. Poids = ordres de grandeur,
+  à calibrer sur des prix réels (DVF). Pas encore : nuisances (voie ferrée, bruit, trafic), commerces (absents de la
+  BD TOPO — OSM/Overpass était injoignable depuis l'environnement de développement), emplacements en bord de rue.
 - **Taxes de construction** : seul un forfait de 100 €/m² de SDP (`taxPerSdp`) approxime la taxe d'aménagement et les
   participations. À affiner : valeur forfaitaire au m² × (taux communal + départemental [+ régional en Île-de-France]),
   forfait par place de stationnement, redevance d'archéologie préventive, PUP, participation à l'assainissement ;

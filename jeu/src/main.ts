@@ -15,7 +15,9 @@ import {
   createGame,
   currentMarket,
   currentParams,
+  LOCATION_RULES,
   districtToSeeds,
+  locationParts,
   mergeParcels,
   netWorth,
   playBots,
@@ -72,7 +74,7 @@ let state: GameState = load();
 let selected = new Set<string>();
 let multi = false;
 let tab: 'terrain' | 'operations' | 'journal' | 'classement' = 'terrain';
-let view: 'hauteur' | 'prix' = 'hauteur';
+let view: 'hauteur' | 'prix' | 'lieu' = 'hauteur';
 let form: { levels: number; attic: boolean; parking: ParkingStrategy } = { levels: 3, attic: false, parking: 'auto' };
 
 function save() {
@@ -147,12 +149,13 @@ function plotStyle(p: Plot): L.PathOptions {
   const [lo, hi] = ppmRange;
   const t = Math.min(1, Math.max(0, (ppm - lo) / Math.max(1, hi - lo)));
   const free = `hsl(${40 - 30 * t} 80% ${78 - 28 * t}%)`;
+  const lieu = view === 'lieu';
   return {
     color: sel ? '#000' : col ?? (view === 'hauteur' ? '#2b6cb0' : '#7a6b4f'),
     weight: sel ? 3 : p.projectId ? 2.5 : view === 'hauteur' ? 1.5 : 1,
-    fillColor: col ?? free,
+    fillColor: col ?? (lieu ? lieuColor(p.locationFactor) : free),
     // Vue « hauteur » : les parcelles libres restent transparentes pour laisser voir le bâti.
-    fillOpacity: col ? (p.projectId ? 0.7 : view === 'hauteur' ? 0.35 : 0.55) : view === 'hauteur' ? 0 : 0.45,
+    fillOpacity: col ? (p.projectId ? 0.7 : view === 'hauteur' ? 0.35 : 0.55) : view === 'hauteur' ? 0 : lieu ? 0.8 : 0.45,
     dashArray: p.projectId ? '4 3' : undefined,
   };
 }
@@ -167,6 +170,24 @@ const HEIGHT_CLASSES: { max: number; color: string; label: string }[] = [
 ];
 const heightColor = (h: number) => (HEIGHT_CLASSES.find((c) => h <= c.max) ?? HEIGHT_CLASSES[HEIGHT_CLASSES.length - 1]).color;
 const levelsOf = (h: number) => Math.max(0, Math.round(h / 2.95) - 1);
+
+/** Valeur du lieu : bleu = en dessous du quartier médian, beige = médian, orange à brun = au-dessus. */
+const LIEU_RANGE: [number, number] = [0.95, 1.09];
+function lieuColor(f: number): string {
+  if (f < 1) {
+    const t = Math.min(1, (1 - f) / (1 - LIEU_RANGE[0]));
+    return `hsl(209 ${35 + 30 * t}% ${88 - 22 * t}%)`;
+  }
+  const t = Math.min(1, (f - 1) / (LIEU_RANGE[1] - 1));
+  return `hsl(${32 - 20 * t} ${70 + 15 * t}% ${86 - 38 * t}%)`;
+}
+const POI_COLORS: Record<string, string> = { metro: '#0b5fa5', gare: '#0b5fa5', tram: '#2f9e8f', mairie: '#8e24aa', ecole: '#e6a817', superieur: '#e6a817', parc: '#2e8b57', sante: '#d62839' };
+const poiLayer = L.layerGroup();
+for (const poi of district.pois) {
+  L.circleMarker([poi.lat, poi.lon], { radius: poi.kind === 'metro' || poi.kind === 'gare' || poi.kind === 'mairie' ? 8 : 5, color: '#fff', weight: 1.5, fillColor: POI_COLORS[poi.kind] ?? '#555', fillOpacity: 1 })
+    .bindTooltip(`${esc(LOCATION_RULES[poi.kind].label)} : ${esc(poi.name)}`)
+    .addTo(poiLayer);
+}
 
 map.createPane('bati');
 map.getPane('bati')!.style.zIndex = '350';
@@ -186,20 +207,27 @@ for (const b of district.buildings) {
 }
 
 const mapLegend = new L.Control({ position: 'bottomleft' });
-mapLegend.onAdd = () => {
-  const el = L.DomUtil.create('div', 'map-legend');
-  el.innerHTML = `<b>Hauteur du bâti existant</b>${HEIGHT_CLASSES.map((c) => `<div><i class="swatch" style="background:${c.color}"></i>${c.label}</div>`).join('')}`;
-  return el;
-};
+mapLegend.onAdd = () => L.DomUtil.create('div', 'map-legend');
+function updateMapLegend() {
+  const el = mapLegend.getContainer();
+  if (!el) return;
+  if (view === 'hauteur') {
+    el.innerHTML = `<b>Hauteur du bâti existant</b>${HEIGHT_CLASSES.map((c) => `<div><i class="swatch" style="background:${c.color}"></i>${c.label}</div>`).join('')}`;
+  } else if (view === 'lieu') {
+    const ramp = [0.95, 0.98, 1, 1.03, 1.06, 1.09].map((f) => `<i class="swatch" style="background:${lieuColor(f)};width:18px"></i>`).join('');
+    const kinds = ['metro', 'tram', 'mairie', 'ecole', 'parc', 'sante'].map((k) => `<span><i class="swatch" style="background:${POI_COLORS[k]}"></i>${k === 'ecole' ? 'école' : k === 'sante' ? 'hôpital' : k === 'parc' ? 'espace public' : k === 'mairie' ? 'mairie' : k === 'tram' ? 'tramway' : 'métro'}</span>`).join(' ');
+    el.innerHTML = `<b>Valeur du lieu (prix de vente)</b><div>${ramp}</div><div class="muted">moins cher ← quartier médian → plus cher</div><div style="margin-top:3px">${kinds}</div>`;
+  } else {
+    el.innerHTML = `<b>Prix des terrains libres</b><div>plus foncé = plus cher au m²</div>`;
+  }
+}
 
 function applyView() {
-  if (view === 'hauteur') {
-    buildingsLayer.addTo(map);
-    mapLegend.addTo(map);
-  } else {
-    buildingsLayer.remove();
-    mapLegend.remove();
-  }
+  if (view === 'hauteur') buildingsLayer.addTo(map);
+  else buildingsLayer.remove();
+  if (view === 'lieu') poiLayer.addTo(map);
+  else poiLayer.remove();
+  updateMapLegend();
 }
 
 const areaCache = new WeakMap<object, number>();
@@ -239,7 +267,7 @@ function drawPlots() {
       layers.set(p.id, layer);
     }
     layer.setStyle(plotStyle(p));
-    layer.bindTooltip(`${esc(p.label ?? p.id)}<br>${eur(p.askingPrice)}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : ''}`, { sticky: true });
+    layer.bindTooltip(`${esc(p.label ?? p.id)}<br>${eur(p.askingPrice)} · situation ×${p.locationFactor.toFixed(2).replace('.', ',')}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : ''}`, { sticky: true });
   }
 }
 
@@ -298,11 +326,8 @@ function renderSide() {
 }
 
 function legend(): string {
-  const heights =
-    view === 'hauteur'
-      ? `<div class="legend" style="margin:6px 0">${HEIGHT_CLASSES.map((c) => `<div><i class="swatch" style="background:${c.color}"></i>${c.label}</div>`).join('')}<div class="muted">teinte plus claire = hauteur estimée (non renseignée)</div></div>`
-      : '';
-  return `<label class="f" style="margin-top:14px">Vue de la carte<select id="view"><option value="hauteur" ${view === 'hauteur' ? 'selected' : ''}>Hauteur du bâti existant</option><option value="prix" ${view === 'prix' ? 'selected' : ''}>Prix des terrains</option></select></label>${heights}<p class="legend">
+  const heights = view === 'hauteur' ? `<div class="legend muted" style="margin:6px 0">teinte plus claire = hauteur estimée (non renseignée dans la donnée)</div>` : '';
+  return `<label class="f" style="margin-top:14px">Vue de la carte<select id="view"><option value="hauteur" ${view === 'hauteur' ? 'selected' : ''}>Hauteur du bâti existant</option><option value="lieu" ${view === 'lieu' ? 'selected' : ''}>Valeur du lieu</option><option value="prix" ${view === 'prix' ? 'selected' : ''}>Prix des terrains</option></select></label>${heights}<p class="legend">
     <label><input type="checkbox" id="multi" ${multi ? 'checked' : ''}/> sélection multiple</label>
     <br><span><i class="swatch" style="background:${COLORS.moi}"></i>vous</span>${state.players
       .filter((p) => p.bot)
@@ -350,7 +375,8 @@ function renderSingle(p: Plot): string {
       <tr><td>Bâti existant</td><td>${p.existingSdp ? `${p.existingSdp} m² SDP${p.existingHeight ? ` · ${Math.round(p.existingHeight)} m (≈ R+${levelsOf(p.existingHeight)})` : ''}<br><span class="muted">à démolir avant de construire</span>` : 'aucun'}</td></tr>
       <tr><td>Prix affiché</td><td>${eurFull(p.askingPrice)} <span class="muted">(${Math.round(p.askingPrice / area)} €/m²)</span></td></tr>
       <tr><td>Propriétaire</td><td>${owner ? esc(owner) : '<span class="muted">libre</span>'}</td></tr>
-    </table>`;
+      <tr><td>Situation</td><td>prix de vente <b class="${p.locationFactor >= 1 ? 'good' : 'bad'}">×${p.locationFactor.toFixed(2).replace('.', ',')}</b></td></tr>
+    </table>${locationDetail(p)}`;
 
   if (run) {
     html += `<h2>Opération ${esc(run.id)}</h2>` + operationCard(run.id);
@@ -368,6 +394,14 @@ function renderSingle(p: Plot): string {
   }
   html += `<div class="row"><button id="sell" class="danger">Revendre · ${eurFull(p.askingPrice * (1 - state.config.plotSpread))}</button></div>`;
   return html + projectForm(p, true) + legend();
+}
+
+function locationDetail(p: Plot): string {
+  const n = p.parcel.ring.length;
+  const here = { lon: p.parcel.ring.reduce((t, q) => t + q.lon, 0) / n, lat: p.parcel.ring.reduce((t, q) => t + q.lat, 0) / n };
+  const parts = locationParts(here, district.pois).slice(0, 4);
+  if (!parts.length) return '<p class="muted">Aucun équipement structurant à proximité.</p>';
+  return `<div class="muted" style="font-size:12px">${parts.map((x) => `${esc(LOCATION_RULES[x.kind].label)} ${esc(x.name)} · ${x.distance} m · +${(x.bonus * 100).toFixed(1).replace('.', ',')} %`).join('<br>')}</div>`;
 }
 
 function projectForm(p: Plot, owned: boolean): string {
@@ -497,6 +531,7 @@ function renderAll() {
 }
 
 $('credits').textContent = district.credits.join(' · ') + ' · Fond de carte : © contributeurs OpenStreetMap · Prix et coûts : ordres de grandeur, pas une expertise.';
+mapLegend.addTo(map);
 fitDistrict();
 applyView();
 renderAll();

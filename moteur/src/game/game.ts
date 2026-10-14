@@ -5,9 +5,12 @@ import {
   buildDuration,
   computeBilan,
   computeProject,
+  LocalProjection,
+  ringArea,
   type Market,
   type Parcel,
 } from '../engine';
+import { marketAt } from './location';
 import { mergeParcels } from './merge';
 import { nextGaussian, nextRandom } from './rng';
 import type { Action, ActionResult, BotProfileName, GameConfig, GameEvent, GameState, Plot, Player, ProjectPhase, ProjectRun } from './types';
@@ -41,6 +44,8 @@ export interface PlotSeed {
   existingSdp?: number;
   /** Hauteur du bâti existant (m). */
   existingHeight?: number;
+  /** Coefficient de situation sur les prix de vente (1 = médiane du quartier). */
+  locationFactor?: number;
   askingPrice?: number;
   /** Libellé affichable (section, numéro, surface). */
   label?: string;
@@ -62,40 +67,39 @@ export interface NewGame {
 
 const MIN_PLOT_PRICE = 20_000;
 
+/** Surface d'une parcelle (m²). */
+export function parcelArea(parcel: Parcel): number {
+  const n = parcel.ring.length;
+  const proj = new LocalProjection(parcel.ring.reduce((t, q) => t + q.lon, 0) / n, parcel.ring.reduce((t, q) => t + q.lat, 0) / n);
+  return ringArea(parcel.ring.map((q) => proj.toLocal(q)));
+}
+
 /**
  * Prix de départ d'un terrain : ce que le meilleur projet réalisable (jusqu'à R+5, attique compris) peut payer en gardant la marge
  * visée, multiplié par 0,9 à 1,5 selon le terrain (attentes du vendeur) : certains sont de bonnes affaires, d'autres trop chers.
  */
-export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig): number {
+export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1): number {
+  const market = marketAt(config.market, locationFactor);
   let best = 0;
   let area = 0;
   for (let levels = 0; levels <= 5; levels++) for (const attic of [false, true]) {
     const project = computeProject(parcel, { ...DEFAULT_CRITERIA, levels, attic });
     area = project.parcelArea;
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
-    const b = computeBilan({ project, market: config.market, landPrice: 0, existingSdp, params: { ...config.bilanParams, targetMargin: config.askMargin } });
+    const b = computeBilan({ project, market, landPrice: 0, existingSdp, params: { ...config.bilanParams, targetMargin: config.askMargin } });
     best = Math.max(best, b.maxLandPrice);
   }
   let h = 0;
   for (const ch of id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
   const factor = 0.9 + 0.6 * ((h % 1000) / 999);
   // Même sans projet rentable, un terrain vaut quelque chose : usage actuel, jardin, intérêt pour un voisin qui assemble.
-  const floor = Math.max(MIN_PLOT_PRICE, 0.6 * area * config.market.landPerSdp);
+  const floor = Math.max(MIN_PLOT_PRICE, 0.6 * area * market.landPerSdp * locationFactor);
   return Math.max(Math.round(floor / 1000) * 1000, Math.round((best * factor) / 1000) * 1000);
 }
 
 /** Marché au niveau de prix actuel : seuls les prix de vente suivent l'indice, pas les coûts. */
-export function currentMarket(s: GameState): Market {
-  const m = s.config.market;
-  const k = s.marketIndex;
-  return {
-    ...m,
-    housingPerShab: m.housingPerShab * k,
-    commercePerSdp: m.commercePerSdp * k,
-    officePerSdp: m.officePerSdp * k,
-    parkingBasementSpace: m.parkingBasementSpace * k,
-    parkingOtherSpace: m.parkingOtherSpace * k,
-  };
+export function currentMarket(s: GameState, plot?: Plot): Market {
+  return marketAt(marketAt(s.config.market, s.marketIndex), plot?.locationFactor ?? 1);
 }
 
 export function createGame(g: NewGame): GameState {
@@ -116,8 +120,10 @@ export function createGame(g: NewGame): GameState {
       owner: null,
       existingSdp: s.existingSdp ?? 0,
       existingHeight: s.existingHeight ?? 0,
+      locationFactor: s.locationFactor ?? 1,
+      area: parcelArea(s.parcel),
       askingPrice: 0,
-      basePrice: s.askingPrice ?? defaultAskingPrice(s.id, s.parcel, s.existingSdp ?? 0, config),
+      basePrice: s.askingPrice ?? defaultAskingPrice(s.id, s.parcel, s.existingSdp ?? 0, config, s.locationFactor ?? 1),
       paid: 0,
       projectId: null,
     };
@@ -206,6 +212,8 @@ export function applyAction(state: GameState, action: Action): ActionResult {
       owner: player.id,
       existingSdp: plots.reduce((t, p) => t + p.existingSdp, 0),
       existingHeight: Math.max(...plots.map((p) => p.existingHeight)),
+      locationFactor: plots.reduce((t, p) => t + p.locationFactor * p.area, 0) / plots.reduce((t, p) => t + p.area, 0),
+      area: merged.area,
       askingPrice: 0,
       basePrice: plots.reduce((t, p) => t + p.basePrice, 0),
       paid: plots.reduce((t, p) => t + p.paid, 0),
@@ -250,7 +258,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
   const ls = config.bilanParams.loanShare;
   const bilan = computeBilan({
     project,
-    market: currentMarket(state),
+    market: currentMarket(state, plot),
     landPrice: plot.paid / (1 + config.bilanParams.acquisitionFeeRate),
     existingSdp: plot.existingSdp,
     params: currentParams(state),

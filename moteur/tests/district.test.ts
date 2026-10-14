@@ -32,7 +32,7 @@ const house: ContextBuilding = {
   estimated: false,
   updated: null,
 };
-const src = { name: 'Test', center: C, radius: 100, market: 'petite-couronne' as const, cadastre, buildings: [house], credits: ['x'], fetchedAt: '2026-01-01' };
+const src = { name: 'Test', center: C, radius: 100, market: 'petite-couronne' as const, cadastre, buildings: [house], pois: [], credits: ['x'], fetchedAt: '2026-01-01' };
 
 describe('quartier à partir du cadastre', () => {
   const d = buildDistrict(src);

@@ -16,6 +16,7 @@ import {
   type Ring,
 } from '../engine';
 import { DEFAULT_CONFIG, defaultAskingPrice, type PlotSeed } from './game';
+import { locationFactors, type Poi } from './location';
 import { MARKETS } from '../engine';
 
 /** Parcelle cadastrale prête pour le jeu. */
@@ -32,6 +33,8 @@ export interface DistrictParcel {
   existingSdp: number;
   /** Hauteur du plus haut bâtiment existant sur la parcelle (m), 0 si aucun. */
   existingHeight: number;
+  /** Coefficient de situation sur les prix de vente (1 = parcelle médiane du quartier) : transports, centre, équipements. */
+  locationFactor: number;
   /** Prix de référence du terrain avec la configuration par défaut (calcul long, donc mémorisé dans l'instantané). */
   basePrice?: number;
 }
@@ -55,6 +58,8 @@ export interface District {
   market: MarketId;
   parcels: DistrictParcel[];
   buildings: DistrictBuilding[];
+  /** Équipements qui valorisent les terrains alentour (y compris juste hors du quartier). */
+  pois: Poi[];
   /** Mentions de licence à afficher (IGN, Licence Ouverte 2.0). */
   credits: string[];
   /** Date de l'instantané (AAAA-MM-JJ). */
@@ -69,6 +74,7 @@ export interface DistrictSource {
   /** FeatureCollection de l'API Carto cadastre (parcelles autour du quartier, marge comprise). */
   cadastre: unknown;
   buildings: ContextBuilding[];
+  pois: Poi[];
   credits: string[];
   fetchedAt: string;
 }
@@ -186,10 +192,16 @@ export function buildDistrict(src: DistrictSource): District {
       area: Math.round(area),
       existingSdp: Math.round(sdp),
       existingHeight: Math.round(tallest * 10) / 10,
+      locationFactor: 1,
     });
   });
 
   parcels.sort((a, b) => (a.id < b.id ? -1 : 1));
+  const factors = locationFactors(
+    parcels.map((p) => ({ lon: p.ring.reduce((t, q) => t + q.lon, 0) / p.ring.length, lat: p.ring.reduce((t, q) => t + q.lat, 0) / p.ring.length })),
+    src.pois,
+  );
+  parcels.forEach((p, i) => (p.locationFactor = Math.round(factors[i] * 1000) / 1000));
   const buildings: DistrictBuilding[] = [];
   for (const b of src.buildings) {
     if (b.outer.length < 3) continue;
@@ -199,7 +211,7 @@ export function buildDistrict(src: DistrictSource): District {
     if (Math.hypot(cx, cy) > src.radius + 15) continue;
     buildings.push({ ring: b.outer.map((q) => [Math.round(q.lon * 1e6) / 1e6, Math.round(q.lat * 1e6) / 1e6]), height: Math.round(b.height * 10) / 10, estimated: b.estimated });
   }
-  return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, buildings, credits: src.credits, fetchedAt: src.fetchedAt };
+  return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, buildings, pois: src.pois, credits: src.credits, fetchedAt: src.fetchedAt };
 }
 
 /**
@@ -214,7 +226,7 @@ export function districtToSeeds(d: District): PlotSeed[] {
       const pr = computeProject(parcel, { ...DEFAULT_CRITERIA, levels });
       return pr.footprint !== null && pr.checks.every((c) => c.status !== 'error');
     });
-    if (ok) seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, label: p.label, ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
+    if (ok) seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, locationFactor: p.locationFactor, label: p.label, ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
   }
   return seeds;
 }
@@ -222,5 +234,5 @@ export function districtToSeeds(d: District): PlotSeed[] {
 /** Calcule et mémorise le prix de référence de chaque parcelle (configuration par défaut du marché du quartier). */
 export function withBasePrices(d: District): District {
   const config = { ...DEFAULT_CONFIG, market: MARKETS[d.market] };
-  return { ...d, parcels: d.parcels.map((p) => ({ ...p, basePrice: defaultAskingPrice(p.id, { ring: p.ring, streetEdges: p.streetEdges }, p.existingSdp, config) })) };
+  return { ...d, parcels: d.parcels.map((p) => ({ ...p, basePrice: defaultAskingPrice(p.id, { ring: p.ring, streetEdges: p.streetEdges }, p.existingSdp, config, p.locationFactor) })) };
 }

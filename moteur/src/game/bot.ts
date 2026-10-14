@@ -44,7 +44,7 @@ export function bestPlan(state: GameState, plot: Plot, landPrice: number, profil
     for (const attic of levels >= 2 ? [false, true] : [false]) {
       const { criteria, project } = projectFor(plot.parcel, levels, attic);
       if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
-      const bilan = computeBilan({ project, market: currentMarket(state), landPrice, existingSdp: plot.existingSdp, params: currentParams(state) });
+      const bilan = computeBilan({ project, market: currentMarket(state, plot), landPrice, existingSdp: plot.existingSdp, params: currentParams(state) });
       if (bilan.marginRate < profile.minMargin) continue;
       if (!best || bilan.margin > best.bilan.margin) best = { criteria, bilan };
     }
