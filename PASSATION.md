@@ -1,6 +1,6 @@
 # Passation : d'Urbasim (outil de pré-faisabilité) au jeu « Urbasim »
 
-Ce dossier est autonome : copiez `passation/` dans le nouveau dépôt. `moteur/` contient le moteur de calcul, ses
+Ce dossier est autonome : copiez `./` dans le nouveau dépôt. `moteur/` contient le moteur de calcul, ses
 services réseau et ses 129 tests (`npm install && npm test` dans ce dossier). Origine : dépôt `maxpyroli/urbasim`,
 branche `claude/beautiful-goldberg-1wk8jn`, commit `50ead9f`. L'outil tourne sur https://maxpyroli.github.io/urbasim/.
 
@@ -91,7 +91,17 @@ collectivité jouent le rôle des enchères du Monopoly.
 - Limites du WFS IGN : 30 requêtes/s/IP (blocage 5 s au-delà), 5 000 objets/requête ; le client réessaie (1 s puis 5,5 s).
 - Fonds de carte : OpenStreetMap (attribution), photo aérienne IGN. Google 3D Tiles : clé de l'utilisateur, quotas payants.
 
+## 5 bis. État d'avancement (nouveau dépôt)
+- Structure : `moteur/` à la racine (`npm install && npm test`, 136 tests).
+- Fait : `moteur/src/engine/bilan.ts` — bilan du promoteur (`computeBilan`, `suggestLandPrice`, `MARKETS`,
+  `DEFAULT_BILAN_PARAMS`). Prix HT, approximatifs mais proches du réel, 4 marchés (Paris, petite couronne, grande ville,
+  ville moyenne) calibrés pour qu'un terrain au prix « normal » donne une marge de 0 à 20 %. Sorties : CA, coûts,
+  frais financiers, marge, durée (en trimestres pour le tour de jeu), prix de terrain maximal, seuil de rentabilité.
+- Décisions prises : prix approximatifs proches du réel ; un quartier pour la version de test ; multijoueur visé dès le
+  début, concurrents ordinateur pour tester.
+- À faire ensuite : état de partie + tour trimestriel (module pur), concurrents ordinateur, puis serveur multijoueur.
+
 ## 6. Pour démarrer la nouvelle session
-Donnez-lui ce fichier et dites par exemple : « Reprends le moteur de `passation/moteur`, crée la structure du jeu, et
+Donnez-lui ce fichier et dites par exemple : « Reprends le moteur de `./moteur`, crée la structure du jeu, et
 commence par le bilan du promoteur (module pur, testé), à brancher sur `computeProject`. » Vérifiez que la session a
 bien accès au nouveau dépôt.

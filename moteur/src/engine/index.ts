@@ -12,3 +12,4 @@ export * from './ringEdit';
 export * from './buildings';
 export * from './access';
 export * from './plu';
+export * from './bilan';
