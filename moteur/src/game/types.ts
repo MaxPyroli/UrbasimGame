@@ -34,6 +34,7 @@ export interface GameConfig {
 
 export interface Plot {
   id: PlotId;
+  label?: string;
   parcel: Parcel;
   owner: PlayerId | null;
   /** SDP du bâti existant (m²) : démoli au lancement d'une opération. */

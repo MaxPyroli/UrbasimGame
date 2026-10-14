@@ -127,7 +127,41 @@ collectivité jouent le rôle des enchères du Monopoly.
   Limites : en « ville moyenne » les parties restent trop faciles (terrains très bon marché) ; le profil agressif
   domine encore en moyenne ; les bots ignorent le cycle de marché (n'achètent pas exprès quand il est bas) ;
   parcelles de test identiques (rectangles) — à refaire sur de vraies parcelles cadastrales.
-- À faire ensuite : serveur multijoueur, règles de zone (PLU de jeu), appels d'offres, vraies parcelles d'un quartier.
+- Fait : **vraies parcelles** (`moteur/src/game/district.ts`, `moteur/src/app/districtFetch.ts`). `npm run district --
+  <id> "<nom>" <lon> <lat> <rayon> <marché>` télécharge le cadastre (API Carto IGN) et le bâti (BD TOPO) d'un quartier et
+  enregistre un instantané hors ligne dans `moteur/data/districts/<id>.json` (licence : mentions dans `credits`).
+  `buildDistrict` (pur) déduit les façades sur rue (arêtes sans parcelle voisine), la SDP existante (emprise × niveaux)
+  et écarte miettes (<60 m²), très grandes (>3000 m²) et enclavées ; `districtToSeeds` écarte les parcelles où rien
+  n'est constructible ; `withBasePrices` mémorise les prix (calcul ~6 s). Quartier fourni : **Montreuil – Mairie**
+  (rayon 300 m, 267 parcelles dont 246 jouables, marché « petite couronne », données au 2026-10-14).
+  Équilibrage refait sur ce quartier : prix du terrain × 0,9 à 1,5 selon la parcelle (attentes du vendeur), demande
+  +5 %/achat qui retombe de 10 %/tour ; patrimoine final / départ ≈ 1,1 à 4,8 (médiane ≈ 2) sur 4 graines, 40 tours.
+  Limites : toutes les parcelles utilisent les mêmes critères par défaut (pas de PLU de jeu) ; le bâti existant n'a pas
+  de valeur propre ; parcelles voisines pas fusionnables ; les bots ne regroupent pas de parcelles.
+- À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, appels d'offres, programmes (TVA 5,5 %,
+  ZAC), multijoueur pair-à-pair, interface (carte).
+
+## 5 ter. Idées notées pour plus tard
+- **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
+  de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,
+  métro, écoles, commerces) ; multiplicateur par parcelle dans le prix de référence (`basePrice`) et dans les prix de
+  vente du bilan. À brancher sur `Plot` (champ `locationFactor`) sans toucher au moteur de calcul.
+- **Programmes et dispositifs** : TVA à 5,5 % (zones ANRU/QPV, accession sociale), logement social / PLS / PLUS,
+  bail réel solidaire, dispositifs propres à un territoire (zonage A/B/C, taxe d'aménagement locale, aides
+  communales), **ZAC** (charges foncières imposées, cahier des charges, aménageur). À modéliser comme des « règles
+  de programme » attachées à une parcelle ou une zone, qui modifient le bilan (TVA/prix de vente plafonné, aides,
+  contraintes de programme) et se combinent avec les appels d'offres.
+
+## 5 quater. Multijoueur pair-à-pair (souhait, sans serveur à gérer)
+Le moteur est déjà adapté : état pur, sérialisable, déterministe, aléa dans l'état (graine). Pistes :
+- **Hôte faisant foi** (le plus simple) : un joueur héberge la partie, les autres lui envoient leurs actions via WebRTC
+  (PeerJS ou WebRTC direct) et reçoivent l'état ; `applyAction` valide tout. Il faut un service de signalisation
+  (gratuit : PeerJS cloud, ou échange manuel d'un code/QR). L'hôte peut tricher et sa déconnexion arrête la partie :
+  prévoir « sauvegarde de l'état » (JSON) pour reprendre avec un autre hôte.
+- **Lockstep** : chacun rejoue le même journal d'actions avec la même graine et vérifie que l'empreinte de l'état
+  est identique (détecte la triche d'un pair). Plus robuste, plus complexe (ordre des actions, reconnexion).
+- **Asynchrone** (un trimestre par jour) : état échangé par fichier/lien ou stockage partagé ; pas de temps réel.
+Limite : le P2P pur n'empêche pas un hôte malhonnête ; acceptable entre amis, à reconsidérer pour un jeu public.
 
 ## 6. Pour démarrer la nouvelle session
 Donnez-lui ce fichier et dites par exemple : « Reprends le moteur de `./moteur`, crée la structure du jeu, et

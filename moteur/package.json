@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "district": "rolldown scripts/fetch-district.ts -f esm -p node -o .build/fetch-district.mjs && node .build/fetch-district.mjs"
   },
   "dependencies": {
     "polygon-clipping": "^0.15.7"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
     "typescript": "^5.9.3",
     "vitest": "^5.0.4"
   }

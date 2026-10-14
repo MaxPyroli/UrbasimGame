@@ -21,8 +21,8 @@ export const DEFAULT_CONFIG: GameConfig = {
   plotSpread: 0.1,
   marketVolatility: 0.03,
   marketReversion: 0.1,
-  landHeatStep: 0.02,
-  landHeatDecay: 0.2,
+  landHeatStep: 0.05,
+  landHeatDecay: 0.1,
   holdingCostRate: 0.005,
   eventChance: 0.4,
   rateVolatility: 0.004,
@@ -39,6 +39,8 @@ export interface PlotSeed {
   parcel: Parcel;
   existingSdp?: number;
   askingPrice?: number;
+  /** Libellé affichable (section, numéro, surface). */
+  label?: string;
 }
 
 export interface PlayerSeed {
@@ -59,9 +61,9 @@ const MIN_PLOT_PRICE = 20_000;
 
 /**
  * Prix de départ d'un terrain : ce que le meilleur projet réalisable (jusqu'à R+5, attique compris) peut payer en gardant la marge
- * visée, modulé de ±8 % selon le terrain pour qu'ils ne soient pas tous équivalents.
+ * visée, multiplié par 0,9 à 1,5 selon le terrain (attentes du vendeur) : certains sont de bonnes affaires, d'autres trop chers.
  */
-function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig): number {
+export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig): number {
   let best = 0;
   for (let levels = 0; levels <= 5; levels++) for (const attic of [false, true]) {
     const project = computeProject(parcel, { ...DEFAULT_CRITERIA, levels, attic });
@@ -71,7 +73,7 @@ function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, con
   }
   let h = 0;
   for (const ch of id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
-  const factor = 0.92 + 0.16 * ((h % 1000) / 999);
+  const factor = 0.9 + 0.6 * ((h % 1000) / 999);
   return Math.max(MIN_PLOT_PRICE, Math.round((best * factor) / 1000) * 1000);
 }
 
@@ -102,6 +104,7 @@ export function createGame(g: NewGame): GameState {
     plotIds.add(s.id);
     return {
       id: s.id,
+      ...(s.label ? { label: s.label } : {}),
       parcel: s.parcel,
       owner: null,
       existingSdp: s.existingSdp ?? 0,
