@@ -10,7 +10,7 @@ import {
   type Parcel,
 } from '../engine';
 import { nextGaussian } from './rng';
-import type { Action, ActionResult, GameConfig, GameEvent, GameState, Plot, Player, ProjectPhase, ProjectRun } from './types';
+import type { Action, ActionResult, BotProfileName, GameConfig, GameEvent, GameState, Plot, Player, ProjectPhase, ProjectRun } from './types';
 
 export const DEFAULT_CONFIG: GameConfig = {
   market: MARKETS['petite-couronne'],
@@ -33,6 +33,7 @@ export interface PlayerSeed {
   id: string;
   name: string;
   bot?: boolean;
+  profile?: BotProfileName;
 }
 
 export interface NewGame {
@@ -74,7 +75,7 @@ export function createGame(g: NewGame): GameState {
     config,
     round: 0,
     over: false,
-    players: g.players.map((p) => ({ id: p.id, name: p.name, bot: p.bot ?? false, cash: config.startCash, ready: false })),
+    players: g.players.map((p) => ({ id: p.id, name: p.name, bot: p.bot ?? false, ...(p.bot ? { profile: p.profile ?? 'equilibre' } : {}), cash: config.startCash, ready: false })),
     plots,
     projects: [],
     marketIndex: 1,

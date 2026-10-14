@@ -30,10 +30,14 @@ export interface Plot {
   projectId: string | null;
 }
 
+export type BotProfileName = 'prudent' | 'equilibre' | 'agressif';
+
 export interface Player {
   id: PlayerId;
   name: string;
   bot: boolean;
+  /** Tempérament du joueur ordinateur (ignoré pour un humain). */
+  profile?: BotProfileName;
   cash: number;
   ready: boolean;
 }

@@ -107,7 +107,15 @@ collectivité jouent le rôle des enchères du Monopoly.
   Après livraison le terrain redevient achetable avec le bâti existant (démolition-reconstruction, surélévation).
   Limites : premier arrivé premier servi pour un même terrain (les appels d'offres viendront), pas de faillite
   (le séquestre garantit le chantier), pas d'événements, pas de zonage/PLU de jeu.
-- À faire ensuite : concurrents ordinateur (module `bot`), puis serveur multijoueur, règles de zone, appels d'offres.
+- Fait : `moteur/src/game/bot.ts` — concurrents ordinateur (`playBotTurn`, `playBots`, `simulateAllBots`,
+  `bestPlan`, `BOT_PROFILES`). Trois tempéraments (prudent / équilibré / agressif : marge minimale, R+x maximal,
+  réserve de trésorerie, achats par trimestre). Un bot lance d'abord ses terrains, puis achète le terrain à plus forte
+  marge absolue, puis passe. Fonction pure de l'état (pas de hasard propre) ; mélangeable avec des humains
+  (le trimestre attend les humains). Simulation d'une partie de 40 trimestres : ~0,1 s.
+- **Équilibrage à faire** : en simulation bots seuls (24 terrains, 3 bots, 40 trimestres, 2 M€ de départ), le
+  patrimoine est multiplié par ~3 à 7 (petite couronne / grande ville) et ~18 (Paris) : trop facile. Pistes : prix des
+  terrains qui montent quand on achète, frais/aléas, événements (taux, recours), concurrence sur les terrains.
+- À faire ensuite : équilibrage, serveur multijoueur, règles de zone, appels d'offres, événements.
 
 ## 6. Pour démarrer la nouvelle session
 Donnez-lui ce fichier et dites par exemple : « Reprends le moteur de `./moteur`, crée la structure du jeu, et
