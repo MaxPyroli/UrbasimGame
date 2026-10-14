@@ -238,10 +238,30 @@ collectivité jouent le rôle des enchères du Monopoly.
   coche seule ; couleurs et noms de chaque société partout (carte, classement, barre du haut). Écran de **fin de partie** :
   verdict selon le multiple du patrimoine, classement, bilan des opérations soldées (`Player.stats`), rejouer ou changer de
   société ; bouton « Résultats » pour le rouvrir.
-- **Problème identifié (retour de test)** : la partie manque d'**enjeux**. Un joueur qui ne fait rien termine à ×1,00 sans
-  conséquence, il n'y a ni faillite ni objectif ni choix risqué, et les concurrents n'interagissent pas directement avec
-  lui. Pistes : faillite réelle et dette qui court, objectif et niveaux de difficulté, enchères entre promoteurs sur les
-  bons terrains, scénarios (boom, crise, remontée des taux), appels d'offres de la commune, réputation.
+- Fait : **enjeux** (réponse au retour « il n'y a aucun enjeu »). Mode campagne (`moteur/src/game/rules.ts`,
+  `campaignConfig(difficulté)`) ; le moteur seul garde ses règles simples par défaut (achat immédiat, pas de frais de
+  structure) pour rester testable.
+  - **Marché foncier à enchères** (`moteur/src/game/market.ts`, action `offer` / `withdraw`) : plus d'achat immédiat. Chaque
+    trimestre ~3 % des terrains libres sont **mis en vente** : offres ouvertes 2 trimestres, **sous pli fermé** (on voit le
+    nombre d'offres, pas les prix), **le plus offrant l'emporte** (à égalité le premier arrivé), prix de départ minimal,
+    perdants remboursés. Les autres terrains se **prospectent** : offre spontanée au propriétaire, résolue à la fin du
+    trimestre, acceptée seulement si le prix atteint son seuil caché (1 à 1,2–1,3 × le prix affiché selon le terrain),
+    frais de prospection non remboursés ; si deux promoteurs prospectent, le plus offrant gagne. L'offre bloque la
+    trésorerie (prix + notaire), comptée dans le patrimoine. Les bots enchérissent (entre le prix de départ et leur prix
+    maximal selon leur tempérament) et prospectent.
+  - **Dette et faillite** : frais de structure chaque trimestre (0,2 / 0,4 / 0,6 % de la mise selon la difficulté : ne rien
+    faire coûte), charges impayées = **découvert** qui porte intérêt (taux du crédit + 3 pts) et se rembourse sur les premiers
+    encaissements, aucune offre ni opération tant qu'il y a un découvert, **patrimoine négatif = faillite** (terrains saisis,
+    chantiers arrêtés, offres rendues, le joueur ne joue plus ; partie finie si plus aucun humain en lice).
+  - **Objectif et difficulté** : facile / normal / difficile (trésorerie ×1,25 / ×1 / ×0,85, volatilité, aléas,
+    propriétaires plus ou moins exigeants) ; objectif de patrimoine final ×1,4 / ×1,7 / ×2,2 la mise, suivi dans la barre du haut
+    et jugé à l'écran de fin.
+  - Simulations (5 parties par niveau, 3 bots + 1 humain passif, Montreuil) : le joueur passif finit à ×0,76–0,91 ; les bots
+    de ×0,5 à ×1,9 (certains perdent : malédiction du vainqueur) ; ~22 % des enchères sont disputées ; aucun bot en faillite.
+  Interface : onglet « Marché » (mes offres, terrains en vente), contour doré des terrains en vente, filtre « en vente »,
+  panneau d'offre dans la fiche d'un terrain (prix libre, somme bloquée, frais), choix de la difficulté à la création,
+  objectif et découvert en haut, écran de fin avec faillite et objectif. Pistes : surenchère en direct, appels d'offres de
+  la commune, négociation avec le propriétaire, réputation, scénarios (crise, remontée des taux).
 - À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, appels d'offres, programmes (TVA 5,5 %,
   ZAC), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 

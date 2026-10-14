@@ -3,6 +3,8 @@ import type { Bilan, BilanParams, Criteria, Market, Parcel } from '../engine';
 export type PlayerId = string;
 export type PlotId = string;
 
+export type Difficulty = 'facile' | 'normal' | 'difficile';
+
 /** Un tour = un trimestre. */
 export interface GameConfig {
   market: Market;
@@ -30,6 +32,32 @@ export interface GameConfig {
   rateReversion: number;
   /** Logements que les ménages achètent par trimestre dans le quartier (0 = automatique : 3 % du nombre de parcelles, au moins 6). */
   salesDemand: number;
+  /**
+   * Achat des terrains : `instant` (on paie le prix affiché, tout de suite) ou `auction` : on dépose une offre, les terrains
+   * mis en vente restent ouverts aux offres quelques trimestres, les autres demandent de prospecter, et en cas de
+   * concurrence le plus offrant l'emporte.
+   */
+  landMarket: 'instant' | 'auction';
+  /** Durée pendant laquelle un terrain mis en vente reste ouvert aux offres (trimestres). */
+  auctionRounds: number;
+  /** Part des terrains libres mis en vente à chaque trimestre. */
+  listingShare: number;
+  /** Frais de prospection d'un terrain qui n'est pas en vente : part de l'offre, avec un minimum (non remboursés). */
+  prospectFeeRate: number;
+  prospectFeeMin: number;
+  /** Un propriétaire non vendeur n'accepte que s'il obtient 0 à `reserveSpread` de plus que le prix affiché (selon le terrain). */
+  reserveSpread: number;
+  /** Frais de structure de la société par trimestre, en part de la trésorerie de départ (équipe, loyers) : 0 = aucun. */
+  structureCostRate: number;
+  /** Frais de structure par trimestre en euros (calculé à la création de la partie). */
+  structureCost: number;
+  /** Surcoût du découvert bancaire par rapport au taux du crédit promoteur (par an). */
+  debtSpread: number;
+  /** Objectif : patrimoine final en multiple de la trésorerie de départ (0 = aucun). */
+  goalMultiple: number;
+  /** Multiplicateur de la trésorerie de départ automatique (difficulté). */
+  startCashFactor: number;
+  difficulty: Difficulty;
   /** Part des lots à vendre sur plan avant que la banque débloque le chantier. */
   presaleThreshold: number;
   /** Part du prix versée pendant le chantier, par appels de fonds au prorata de l'avancement (le solde à la livraison). */
@@ -56,6 +84,8 @@ export interface Plot {
   /** Familles de zones du PLU qui touchent ce terrain (plusieurs après un assemblage à cheval) et code de la zone principale. */
   zones: ZoneFamily[];
   zoneCode?: string;
+  /** Terrain mis en vente : ouvert aux offres jusqu'à ce tour (non compris), prix minimum figé à la mise en vente. */
+  listing?: { until: number; minPrice: number };
   /** Si présent, le terrain n'est pas constructible tel quel (voir `PlotIssue`). */
   issue?: PlotIssue;
   parcel: Parcel;
@@ -102,6 +132,10 @@ export interface Player {
   /** Bilan des opérations soldées (pour l'écran de fin de partie). */
   stats?: PlayerStats;
   cash: number;
+  /** Découvert bancaire : charges impayées, qui portent intérêt et se remboursent sur les premiers encaissements. */
+  debt: number;
+  /** Faillite : patrimoine négatif ; la banque saisit tout et le joueur ne joue plus. */
+  bankrupt?: boolean;
   ready: boolean;
 }
 
@@ -157,6 +191,17 @@ export interface ProjectRun {
   equityInvested: number;
 }
 
+/** Offre d'achat sous pli fermé sur un terrain (les autres joueurs en voient le nombre, pas le prix). */
+export interface Offer {
+  plot: PlotId;
+  player: PlayerId;
+  /** Prix proposé pour le terrain, hors frais de notaire. */
+  price: number;
+  round: number;
+  /** Somme bloquée sur la trésorerie : prix et frais de notaire. */
+  reserved: number;
+}
+
 export interface GameEvent {
   round: number;
   player?: PlayerId;
@@ -170,6 +215,7 @@ export interface GameState {
   players: Player[];
   plots: Plot[];
   projects: ProjectRun[];
+  offers: Offer[];
   /** Indice des prix de vente (1 = référence), évolue au fil des tours. */
   marketIndex: number;
   /** Choc de demande des ménages (retournement ou regain de confiance), qui s'estompe de 25 % par trimestre. */
@@ -185,6 +231,9 @@ export interface GameState {
 
 export type Action =
   | { type: 'buy'; player: PlayerId; plot: PlotId }
+  /** Dépose ou remplace une offre sur un terrain libre (mode enchères). */
+  | { type: 'offer'; player: PlayerId; plot: PlotId; price: number }
+  | { type: 'withdraw'; player: PlayerId; plot: PlotId }
   | { type: 'sellPlot'; player: PlayerId; plot: PlotId }
   /** Assemble plusieurs parcelles mitoyennes que le joueur possède en une seule, plus grande. */
   | { type: 'merge'; player: PlayerId; plots: PlotId[] }

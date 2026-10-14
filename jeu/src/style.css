@@ -172,3 +172,13 @@ label.f.col { flex-direction: column; align-items: stretch; gap: 4px; }
 .rank td { padding: 5px 4px; border-bottom: 1px solid var(--line); }
 .rank td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .rank tr.me { font-weight: 700; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+/* ---- enchères, objectif, difficulté ---- */
+.goalbar { display: block; height: 4px; width: 100%; min-width: 70px; background: var(--line); border-radius: 2px; margin-top: 2px; overflow: hidden; }
+.goalbar i { display: block; height: 100%; background: var(--accent); }
+.goalbar i.ok { background: var(--good); }
+.levels { display: flex; flex-direction: column; gap: 6px; }
+.lvl { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border: 2px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
+.lvl span { font-size: 12px; }
+.lvl[aria-checked='true'] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+input[type='number'] { font: inherit; padding: 6px 8px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; width: 100%; }
