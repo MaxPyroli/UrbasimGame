@@ -127,6 +127,7 @@ collectivité jouent le rôle des enchères du Monopoly.
   Limites : en « ville moyenne » les parties restent trop faciles (terrains très bon marché) ; le profil agressif
   domine encore en moyenne ; les bots ignorent le cycle de marché (n'achètent pas exprès quand il est bas) ;
   parcelles de test identiques (rectangles) — à refaire sur de vraies parcelles cadastrales.
+- À faire ensuite : serveur multijoueur, règles de zone (PLU de jeu), appels d'offres, vraies parcelles d'un quartier.
 
 ## 6. Pour démarrer la nouvelle session
 Donnez-lui ce fichier et dites par exemple : « Reprends le moteur de `./moteur`, crée la structure du jeu, et
