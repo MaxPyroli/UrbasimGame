@@ -14,7 +14,8 @@ import type { ParkingAccess } from './access';
 export type Use = 'logement' | 'commerce' | 'bureaux' | 'parking';
 export type EdgeKind = 'voie' | 'laterale' | 'fond';
 export type Typology = 'T1' | 'T2' | 'T3' | 'T4' | 'T5';
-export type ParkingStrategy = 'auto' | 'sous-sol' | 'surface' | 'rdc' | 'aucun';
+/** `hors-site` : places achetées dans un parking voisin (concession, copropriété), sans rien construire sur le terrain. `auto` y recourt pour le reste quand le terrain ne suffit pas. */
+export type ParkingStrategy = 'auto' | 'sous-sol' | 'surface' | 'rdc' | 'hors-site' | 'aucun';
 export type FootprintShape = 'adapte' | 'rectangle';
 /** Position du bâtiment dans la profondeur du terrain : côté rue, en fond de parcelle, ou là où l'emprise est la plus grande. */
 export type Placement = 'auto' | 'rue' | 'fond';
@@ -160,6 +161,8 @@ export interface ParkingResult {
   provided: number;
   surface: number;
   rdc: number;
+  /** Places achetées dans un parking voisin. */
+  offsite: number;
   basement: number;
   basementLevels: number;
   basementPlate: number;

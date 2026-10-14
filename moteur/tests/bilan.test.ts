@@ -94,3 +94,45 @@ describe('bilan du promoteur', () => {
     expect(computeBilan({ project: none, market: m, landPrice: 0 }).costs.fixed).toBe(0);
   });
 });
+
+describe('stationnement : places achetées à proximité', () => {
+  const lot = (w: number, d: number): Parcel => ({ ring: ([[0, 0], [w, 0], [w, d], [0, d]] as Vec2[]).map((p) => O.toLonLat(p)), streetEdges: [0] });
+
+  it('le mode automatique ne bloque plus : ce que le terrain ne loge pas est acheté dans un parking voisin (avertissement + surcoût)', () => {
+    const p = computeProject(lot(7, 14), { ...DEFAULT_CRITERIA, levels: 3 });
+    expect(p.parking.offsite).toBeGreaterThan(0);
+    expect(p.parking.provided).toBe(p.parking.required);
+    const check = p.checks.find((c) => c.id === 'parking')!;
+    expect(check.status).toBe('warn');
+    expect(check.detail).toMatch(/parking voisin/);
+    const m = MARKETS['petite-couronne'];
+    const withOff = computeBilan({ project: p, market: m, landPrice: 0 });
+    const noOff = computeBilan({ project: p, market: { ...m, offsiteParkingPlace: 0 }, landPrice: 0 });
+    expect(withOff.costs.works - noOff.costs.works).toBeCloseTo(p.parking.offsite * m.offsiteParkingPlace, 4);
+  });
+
+  it('en mode « sous-sol » imposé, un terrain trop petit reste bloqué et le message propose des solutions', () => {
+    const p = computeProject(lot(7, 14), { ...DEFAULT_CRITERIA, levels: 3, parkingStrategy: 'sous-sol' });
+    const check = p.checks.find((c) => c.id === 'parking')!;
+    expect(check.status).toBe('error');
+    expect(check.detail).toMatch(/places achetées à proximité/);
+  });
+
+  it('« hors-site » achète toutes les places sans rien construire', () => {
+    const p = computeProject(lot(10, 30), { ...DEFAULT_CRITERIA, levels: 3, parkingStrategy: 'hors-site' });
+    expect(p.parking.offsite).toBe(p.parking.required);
+    expect(p.parking.basement + p.parking.surface + p.parking.rdc).toBe(0);
+    expect(p.parking.basementLevels).toBe(0);
+  });
+});
+
+describe('constructibilité économique', () => {
+  it('un petit terrain constructible sur le papier mais jamais rentable est signalé « à assembler »', async () => {
+    const { plotIssue, DEFAULT_CONFIG } = await import('../src/game');
+    const cfg = { ...DEFAULT_CONFIG, market: MARKETS['petite-couronne'] };
+    const small: Parcel = { ring: ([[0, 0], [6, 0], [6, 20], [0, 20]] as Vec2[]).map((p) => O.toLonLat(p)), streetEdges: [0] };
+    const big: Parcel = { ring: ([[0, 0], [20, 0], [20, 30], [0, 30]] as Vec2[]).map((p) => O.toLonLat(p)), streetEdges: [0] };
+    expect(plotIssue(big, cfg)).toBeUndefined();
+    expect(plotIssue(small, cfg)).toBeDefined();
+  });
+});

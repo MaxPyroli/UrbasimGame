@@ -85,7 +85,7 @@ let tab: 'terrain' | 'operations' | 'journal' | 'classement' = 'terrain';
 let view: 'hauteur' | 'prix' | 'lieu' = 'hauteur';
 /** Terrains libres mis en avant sur la carte : tous, seulement ceux à ma portée, ou ceux à assembler. */
 let plotFilter: 'tous' | 'abordables' | 'assembler' = 'tous';
-let form: { levels: number; attic: boolean; parking: ParkingStrategy } = { levels: 3, attic: false, parking: 'auto' };
+let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number } = { levels: 3, attic: false, parking: 'auto', depth: 12 };
 
 function save() {
   try {
@@ -116,7 +116,7 @@ function act(a: Action): boolean {
 const me = () => state.players.find((p) => p.id === ME)!;
 const plotById = (id: string) => state.plots.find((p) => p.id === id);
 const quarterLabel = (round: number) => `T${(round % 4) + 1} ${2027 + Math.floor(round / 4)}`;
-const criteria = (): Criteria => ({ ...DEFAULT_CRITERIA, levels: form.levels, attic: form.attic, parkingStrategy: form.parking });
+const criteria = (): Criteria => ({ ...DEFAULT_CRITERIA, levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth });
 
 /** Passe un trimestre sans rien afficher ; retourne les nouvelles du journal qui concernent le joueur. */
 function advanceOne(): { mine: string[]; phases: string } {
@@ -432,17 +432,36 @@ function renderMulti(plots: Plot[]): string {
   drawOverlay(null);
   const area = plots.reduce((s, p) => s + areaOf(p), 0);
   const free = plots.every((p) => p.owner === null);
-  const mine = plots.every((p) => p.owner === ME && !p.projectId);
-  const cost = plots.reduce((s, p) => s + p.askingPrice * (1 + state.config.bilanParams.acquisitionFeeRate), 0);
+  const cost = plots.reduce((s, p) => s + buyCost(p), 0);
+  // Diagnostic en direct : pourquoi l'assemblage est (im)possible.
+  let verdict = '';
+  let canMerge = false;
+  const notMine = plots.filter((p) => p.owner !== ME);
+  const busy = plots.filter((p) => p.projectId);
+  if (notMine.length) {
+    verdict = `<div class="check bad">Il faut posséder toutes les parcelles : achetez ${notMine.map((p) => esc(p.label ?? p.id)).join(', ')} (${eur(notMine.reduce((s, p) => s + buyCost(p), 0))}).</div>`;
+  } else if (busy.length) {
+    verdict = `<div class="check bad">Une opération est en cours sur ${busy.map((p) => esc(p.label ?? p.id)).join(', ')} : elle doit d’abord se terminer.</div>`;
+  } else {
+    const r = mergeParcels(plots.map((p) => p.parcel));
+    if (r.ok) {
+      canMerge = true;
+      verdict = `<div class="check good">Assemblage possible : un terrain de ${Math.round(r.area)} m²${r.parcel.streetEdges.length ? '' : ' <b>sans accès à la rue</b> (à compléter avec une parcelle qui donne sur la rue)'}.</div>`;
+    } else {
+      verdict = `<div class="check bad">Assemblage impossible : ${esc(r.error)}.</div>`;
+    }
+  }
+  const sold = plots.some((p) => p.owner && p.owner !== ME);
   return `<h2>${plots.length} parcelles sélectionnées</h2>
-    <p>${plots.map((p) => esc(p.label ?? p.id)).join('<br>')}</p>
+    <p>${plots.map((p) => `${esc(p.label ?? p.id)} <span class="muted">${p.owner === ME ? '(à vous)' : p.owner ? '(' + esc(state.players.find((x) => x.id === p.owner)!.name) + ')' : '(libre)'}</span>`).join('<br>')}</p>
     <table><tr><td>Surface totale</td><td>${Math.round(area)} m²</td></tr><tr><td>Prix affichés (frais compris)</td><td>${eur(cost)}</td></tr></table>
+    ${verdict}
     <div class="row">
-      <button id="buyAll" ${free ? '' : 'disabled'}>Tout acheter</button>
-      <button id="merge" class="primary" ${mine ? '' : 'disabled'}>Assembler en un seul terrain</button>
+      <button id="buyAll" ${free && !sold ? '' : 'disabled'} title="Achète toutes les parcelles libres de la sélection">Tout acheter</button>
+      <button id="merge" class="primary" ${canMerge ? '' : 'disabled'}>Assembler en un seul terrain</button>
       <button id="clear">Désélectionner</button>
     </div>
-    <p class="muted">${mine ? 'Les parcelles doivent se toucher : l’assemblage permet de construire un ensemble plus grand.' : 'Pour assembler, vous devez posséder toutes les parcelles (sans opération en cours).'}</p>${legend()}`;
+    <p class="muted">Les parcelles doivent se toucher sur au moins 1,5 m. L’assemblage permet de construire un ensemble plus grand et de rendre constructibles des parcelles trop petites ou enclavées.</p>${legend()}`;
 }
 
 function renderSingle(p: Plot): string {
@@ -490,6 +509,21 @@ function renderSingle(p: Plot): string {
   return html + projectForm(p, true) + legend();
 }
 
+/** Cherche le projet le plus rentable sans erreur (R+0 à R+8, avec ou sans attique, stationnement automatique). */
+function bestForm(p: Plot, owned: boolean): { levels: number; attic: boolean; margin: number } | null {
+  const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : p.askingPrice;
+  let best: { levels: number; attic: boolean; margin: number } | null = null;
+  for (let levels = 0; levels <= 8; levels++) {
+    for (const attic of [false, true]) {
+      const proj = computeProject(p.parcel, { ...criteria(), levels, attic, parkingStrategy: 'auto' });
+      if (!proj.footprint || proj.checks.some((c) => c.status === 'error')) continue;
+      const b = computeBilan({ project: proj, market: currentMarket(state, p), landPrice, existingSdp: p.existingSdp, params: currentParams(state) });
+      if (!best || b.margin > best.margin) best = { levels, attic, margin: b.margin };
+    }
+  }
+  return best;
+}
+
 function locationDetail(p: Plot): string {
   const n = p.parcel.ring.length;
   const here = { lon: p.parcel.ring.reduce((t, q) => t + q.lon, 0) / n, lat: p.parcel.ring.reduce((t, q) => t + q.lat, 0) / n };
@@ -506,7 +540,9 @@ function projectForm(p: Plot, owned: boolean): string {
   let html = `<h2>Projet</h2>
     <label class="f">Niveaux (R+x)<select id="f-levels">${Array.from({ length: 11 }, (_, i) => `<option ${i === form.levels ? 'selected' : ''}>${i}</option>`).join('')}</select></label>
     <label class="f">Attique<input type="checkbox" id="f-attic" ${form.attic ? 'checked' : ''}/></label>
-    <label class="f">Stationnement<select id="f-parking">${sel('auto', 'automatique')}${sel('sous-sol', 'sous-sol')}${sel('rdc', 'rez-de-chaussée')}${sel('surface', 'en surface')}${sel('aucun', 'aucun')}</select></label>`;
+    <label class="f">Stationnement<select id="f-parking">${sel('auto', 'automatique')}${sel('sous-sol', 'sous-sol')}${sel('rdc', 'rez-de-chaussée')}${sel('surface', 'en surface')}${sel('hors-site', 'places achetées à proximité')}${sel('aucun', 'aucun')}</select></label>
+    <label class="f" title="Au-delà de 14 m de profondeur, l'éclairement naturel devient difficile">Profondeur max du bâtiment<select id="f-depth">${[10, 12, 15, 18, 22].map((d) => `<option value="${d}" ${form.depth === d ? 'selected' : ''}>${d} m</option>`).join('')}</select></label>
+    <div class="row"><button id="best" title="Teste de R+0 à R+8 avec ou sans attique et choisit le plus rentable sans erreur">Meilleur projet</button></div>`;
   if (!proj.footprint) return html + `<p class="bad">Rien de constructible avec ces critères.</p>`;
 
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : p.askingPrice;
@@ -532,6 +568,7 @@ function projectForm(p: Plot, owned: boolean): string {
       <tr><td>Prix de terrain max (marge ${pct(state.config.bilanParams.targetMargin)})</td><td>${eur(b.maxLandPrice)}</td></tr>
     </table>`;
   html += proj.checks.filter((c) => c.status === 'error' || c.status === 'warn').map((c) => `<div class="check ${c.status === 'error' ? 'bad' : 'warn'}">${esc(c.label)} : ${esc(c.detail)}</div>`).join('');
+  if (!ok) html += `<div class="muted" style="font-size:12px">Pour débloquer : réduisez les niveaux, changez le mode de stationnement, ou cliquez sur « Meilleur projet ».</div>`;
   if (short > 0) html += `<div class="check bad">Trésorerie insuffisante : il vous manque ${eurFull(short)} pour ${owned ? 'lancer' : 'acheter et lancer'} ce projet.</div>`;
   if (owned) html += `<div class="row"><button id="launch" class="primary" ${ok && short <= 0 ? '' : 'disabled'}>Lancer l’opération</button></div>`;
   return html;
@@ -557,12 +594,12 @@ function operationCard(runId: string): string {
   const stage = r.phase === 'permis' ? `${r.phaseElapsed}/${r.permitRounds}` : r.phase === 'chantier' ? `${r.phaseElapsed}/${r.buildRounds}` : r.phase === 'livraison' ? 'derniers lots' : 'attente';
   let html = `<div class="card"><b>${esc(r.id)}</b> · ${esc(owner)} · ${PHASE_LABEL[r.phase]}
     <div class="muted">${Math.round(r.sdp)} m² SDP · étape ${stage} · ${r.roundsRun} trimestre${r.roundsRun > 1 ? 's' : ''} écoulé${r.roundsRun > 1 ? 's' : ''}</div>
-    ${bar}<div>${r.lotsSold}/${r.lots} lots vendus (${share} %) · ${left ? `environ ${sales.toFixed(1).replace('.', ',')} vente${sales >= 1.5 ? 's' : ''} par trimestre` : 'tout est vendu'}</div>`;
+    ${bar}<div>${r.lotsSold}/${r.lots} lots vendus (${share} %) · ${left ? `environ <span data-sales="${esc(r.id)}">${sales.toFixed(1).replace('.', ',')}</span> vente${sales >= 1.5 ? 's' : ''} par trimestre` : 'tout est vendu'}</div>`;
   if (!r.financed) html += `<div class="muted">Crédit bancaire débloqué à ${threshold} % de lots vendus${share >= threshold ? '' : ` : encore ${Math.max(1, Math.ceil(r.lots * state.config.presaleThreshold) - r.lotsSold)} lot(s) à vendre`}.</div>`;
   if (mineOp) {
     html += `<div>Marge attendue ${eur(r.bilan.margin)} (${pct(r.bilan.marginRate)})${r.extraCost ? ` · surcoûts ${eur(r.extraCost)}` : ''}</div>`;
     if (left > 0)
-      html += `<label class="f" title="Une remise vend plus vite ; une prime ralentit les ventes">Prix de vente <span><input type="range" data-price="${esc(r.id)}" min="${MIN_PRICE_POLICY * 100}" max="${MAX_PRICE_POLICY * 100}" step="1" value="${Math.round(r.pricePolicy * 100)}"> <b>${r.pricePolicy > 0 ? '+' : ''}${Math.round(r.pricePolicy * 100)} %</b> <span class="muted">(≈ ${eur(lotPrice(state, r))}/lot)</span></span></label>`;
+      html += `<label class="f" title="Une remise vend plus vite ; une prime ralentit les ventes">Prix de vente <span><input type="range" data-price="${esc(r.id)}" min="${MIN_PRICE_POLICY * 100}" max="${MAX_PRICE_POLICY * 100}" step="1" value="${Math.round(r.pricePolicy * 100)}"> <b data-pct="${esc(r.id)}">${r.pricePolicy > 0 ? '+' : ''}${Math.round(r.pricePolicy * 100)} %</b> <span class="muted">(≈ <span data-lot="${esc(r.id)}">${eur(lotPrice(state, r))}</span>/lot)</span></span></label>`;
   }
   return html + '</div>';
 }
@@ -619,10 +656,37 @@ function bindSelection() {
   });
   on('clear', () => ((selected = new Set()), renderAll()));
   side.querySelectorAll<HTMLInputElement>('[data-price]').forEach((el) => {
-    el.onchange = () => {
-      if (act({ type: 'setPrice', player: ME, project: el.dataset.price!, policy: +el.value / 100 })) renderAll();
+    const id = el.dataset.price!;
+    // En temps réel : le pourcentage, le prix du lot et le rythme de vente attendu suivent le curseur pendant qu'on le déplace.
+    el.oninput = () => {
+      if (!act({ type: 'setPrice', player: ME, project: id, policy: +el.value / 100 })) return;
+      const run = state.projects.find((x) => x.id === id);
+      if (!run) return;
+      const set = (attr: string, text: string) => {
+        const t = side.querySelector<HTMLElement>(`[${attr}="${id}"]`);
+        if (t) t.textContent = text;
+      };
+      const v = Math.round(run.pricePolicy * 100);
+      set('data-pct', `${v > 0 ? '+' : ''}${v} %`);
+      set('data-lot', eur(lotPrice(state, run)));
+      set('data-sales', (expectedSales(state).get(id) ?? 0).toFixed(1).replace('.', ','));
     };
+    el.onchange = () => renderAll(); // met à jour aussi les autres opérations (la demande se partage)
   });
+  const dp = side.querySelector<HTMLSelectElement>('#f-depth');
+  if (dp) dp.onchange = () => ((form.depth = +dp.value), renderAll());
+  const bestBtn = side.querySelector<HTMLButtonElement>('#best');
+  if (bestBtn)
+    bestBtn.onclick = () => {
+      const p = plotById([...selected][0]);
+      const found = p ? bestForm(p, p.owner === ME) : null;
+      if (!found) return toast('Aucun projet réalisable sur ce terrain avec ces réglages : essayez un autre mode de stationnement ou assemblez-le.', true);
+      form.levels = found.levels;
+      form.attic = found.attic;
+      form.parking = 'auto';
+      toast(`Meilleur projet : R+${found.levels}${found.attic ? ' avec attique' : ''}, ${eur(found.margin)} de marge`);
+      renderAll();
+    };
   const pf = side.querySelector<HTMLSelectElement>('#pfilter');
   if (pf) pf.onchange = () => ((plotFilter = pf.value as typeof plotFilter), renderAll());
   const viewSel = side.querySelector<HTMLSelectElement>('#view');

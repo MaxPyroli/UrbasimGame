@@ -72,6 +72,7 @@ export function emptyProject(origin: LonLat, parcelRing: Ring, c: Criteria): Pro
       provided: 0,
       surface: 0,
       rdc: 0,
+      offsite: 0,
       basement: 0,
       basementLevels: 0,
       basementPlate: 0,
@@ -302,15 +303,16 @@ function buildChecks(p: Project, c: Criteria, a: Assumptions): Check[] {
       const where = [
         pk.surface > 0 ? `${pk.surface} en surface` : '',
         pk.rdc > 0 ? `${pk.rdc} en rez-de-chaussée` : '',
+        pk.offsite > 0 ? `${pk.offsite} achetée${pk.offsite > 1 ? 's' : ''} dans un parking voisin` : '',
         pk.basement > 0 ? `${pk.basement} en sous-sol (${pk.basementLevels} niveau${pk.basementLevels > 1 ? 'x' : ''})` : '',
       ].filter(Boolean);
-      add('parking', 'Stationnement', 'ok', `${pk.required} places requises : ${where.join(', ')}`);
+      add('parking', 'Stationnement', pk.offsite > 0 ? 'warn' : 'ok', `${pk.required} places requises : ${where.join(', ')}${pk.offsite > 0 ? ' (surcoût : le terrain ne peut pas tout loger)' : ''}`);
     } else {
       const why =
         (c.parkingStrategy === 'sous-sol' || c.parkingStrategy === 'auto') && !pk.feasibleBasement
           ? ` Sous-sol impossible (terrain < ${fmt(a.minRampWidth, 1)} m de large ou 0 niveau autorisé).`
           : '';
-      add('parking', 'Stationnement', 'error', `${pk.required} places requises, ${pk.provided} réalisables (capacité max ${pk.capacityMax}).${why}`);
+      add('parking', 'Stationnement', 'error', `${pk.required} places requises, ${pk.provided} réalisables (capacité max ${pk.capacityMax}).${why} Essayez « places achetées à proximité », moins de niveaux, ou assemblez avec une parcelle voisine.`);
     }
   }
 

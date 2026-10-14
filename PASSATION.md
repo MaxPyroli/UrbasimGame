@@ -198,6 +198,21 @@ collectivité jouent le rôle des enchères du Monopoly.
 - Équilibrage actuel (4 parties de 40 trimestres sur Montreuil, 3 bots) : patrimoine final / départ ≈ 1,3–1,7 (prudent,
   équilibré) et 2,9–4,2 (agressif) : le profil agressif domine encore. Les bots n'attendent presque jamais les préventes
   (peu de concurrence) : la tension viendra surtout des humains, des retournements de marché et des hausses de taux.
+- Fait (retours de test) : **stationnement** : nouveau mode « places achetées à proximité » (`hors-site`, concession ou
+  copropriété voisine, coût `Market.offsiteParkingPlace`, ajouté aux travaux) ; le mode automatique y recourt pour ce que
+  le terrain ne peut pas loger (avertissement + surcoût au lieu d'un blocage) ; en sous-sol imposé, le blocage reste mais le
+  message propose des solutions. **Assemblage** : diagnostic en direct dans le panneau (pas seulement un message
+  fugitif : « il faut posséder… », « ne se touchent pas (1,5 m) », « une parcelle au milieu »), deux parcelles enclavées
+  peuvent s'assembler entre elles. **Constructibilité** : un terrain est aussi signalé « à assembler » si aucun projet
+  n'est rentable même terrain offert (forme ou taille) ; l'analyse est mémorisée dans l'instantané du quartier
+  (`npm run district` ~15 s) : 218 parcelles constructibles seules, 66 trop petites, 57 enclavées, 5 de forme inadaptée.
+  Formulaire de projet : profondeur maximale du bâtiment (10 à 22 m, utile sur les parcelles profondes), bouton « Meilleur
+  projet ». Curseur de prix de vente : pourcentage, prix du lot et rythme de vente suivent le curseur en temps réel.
+- **À faire (demandes notées)** : (1) **PLU de jeu** : le formulaire laisse aujourd'hui choisir jusqu'à R+10 et le « meilleur
+  projet » monte à R+8 ; il faut des règles par zone (hauteur maximale, emprise, retraits, stationnement, pleine terre)
+  issues du zonage réel (API Carto GPU `zone-urba`, déjà utilisée par `fetchPlu`) et traduites en règles simplifiées ;
+  (2) **simplifier l'affichage** : la fiche d'un terrain est dense (carte + fiche + bilan + équipements + légende) ;
+  hiérarchiser, replier les détails, réduire le nombre de vues et de légendes.
 - À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, appels d'offres, programmes (TVA 5,5 %,
   ZAC), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 

@@ -93,7 +93,7 @@ describe('action merge', () => {
     s = play(play(s, { type: 'buy', player: 'a', plot: 'T1' }), { type: 'buy', player: 'b', plot: 'T2' });
     expect(err(s, { type: 'merge', player: 'a', plots: ['T1', 'T2'] })).toMatch(/posséder/);
     s = play(s, { type: 'buy', player: 'a', plot: 'T3' });
-    expect(err(s, { type: 'merge', player: 'a', plots: ['T1', 'T3'] })).toMatch(/toucher/);
+    expect(err(s, { type: 'merge', player: 'a', plots: ['T1', 'T3'] })).toMatch(/touchent/);
     expect(err(s, { type: 'merge', player: 'a', plots: ['T1'] })).toMatch(/deux/);
     const launched = play(s, { type: 'launch', player: 'a', plot: 'T1', criteria: { ...DEFAULT_CRITERIA, levels: 2 } });
     expect(err(launched, { type: 'merge', player: 'a', plots: ['T1', 'T3'] })).toMatch(/en cours/);
@@ -136,5 +136,38 @@ describe('action merge', () => {
     const m = s.plots[0];
     expect(m.issue).toBeUndefined();
     expect(m.parcel.streetEdges.length).toBeGreaterThan(0);
+  });
+});
+
+describe('assemblage : cas limites et diagnostic', () => {
+  const play = (s: GameState, a: Action) => {
+    const r = applyAction(s, a);
+    if (!r.ok) throw new Error(r.error);
+    return r.state;
+  };
+
+  it('deux parcelles enclavées peuvent s’assembler entre elles (étape intermédiaire) : le résultat reste enclavé', () => {
+    const a: Parcel = { ...rect(0, 0, 10, 10), streetEdges: [] };
+    const b: Parcel = { ...rect(10, 0, 10, 10), streetEdges: [] };
+    const r = mergeParcels([a, b]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.parcel.streetEdges).toEqual([]);
+    let s = createGame({
+      players: [{ id: 'a', name: 'A' }],
+      plots: [{ id: 'A', parcel: a, issue: 'enclavee' }, { id: 'B', parcel: b, issue: 'enclavee' }],
+      config: { market: MARKETS['petite-couronne'], startCash: 5_000_000 },
+    });
+    s = play(play(s, { type: 'buy', player: 'a', plot: 'A' }), { type: 'buy', player: 'a', plot: 'B' });
+    s = play(s, { type: 'merge', player: 'a', plots: ['A', 'B'] });
+    expect(s.plots[0].issue).toBe('enclavee');
+  });
+
+  it('les messages de refus disent pourquoi : non mitoyen, cour enfermée', () => {
+    const far = mergeParcels([rect(0, 0, 10, 10), rect(30, 0, 10, 10)]);
+    expect(far.ok).toBe(false);
+    if (!far.ok) expect(far.error).toMatch(/ne se touchent pas.*1,5 m/);
+    const ring = mergeParcels([rect(0, 0, 30, 10), rect(0, 10, 10, 10), rect(20, 10, 10, 10), rect(0, 20, 30, 10)]);
+    expect(ring.ok).toBe(false);
+    if (!ring.ok) expect(ring.error).toMatch(/au milieu/);
   });
 });

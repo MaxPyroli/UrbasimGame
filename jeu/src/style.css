@@ -92,3 +92,4 @@ label.f select, label.f input[type=number] { font: inherit; padding: 3px 6px; ba
 
 .map-legend { background: rgba(255, 255, 255, 0.92); color: #1d2433; padding: 6px 10px; border-radius: 6px; font-size: 11.5px; line-height: 1.5; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); }
 .map-legend b { display: block; margin-bottom: 2px; }
+.check.good { color: var(--good); }

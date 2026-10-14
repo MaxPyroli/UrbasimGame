@@ -14,6 +14,7 @@ import {
   type Ring,
 } from '../engine';
 import { DEFAULT_CONFIG, defaultAskingPrice, plotIssue, type PlotSeed } from './game';
+import type { PlotIssue } from './types';
 import { locationFactors, type Poi } from './location';
 import { MARKETS } from '../engine';
 
@@ -33,6 +34,8 @@ export interface DistrictParcel {
   existingHeight: number;
   /** Coefficient de situation sur les prix de vente (1 = parcelle médiane du quartier) : transports, centre, équipements. */
   locationFactor: number;
+  /** Résultat de l'analyse : `null` = constructible seul, sinon la raison. Absent tant que le quartier n'a pas été analysé (`withBasePrices`). */
+  issue?: PlotIssue | null;
   /** Prix de référence du terrain avec la configuration par défaut (calcul long, donc mémorisé dans l'instantané). */
   basePrice?: number;
 }
@@ -134,7 +137,7 @@ export function buildDistrict(src: DistrictSource): District {
     const c = outerOf(f.geometry);
     if (!c || c.length < 4) continue;
     const raw = c.slice(0, -1).map(([x, y]) => proj.toLocal({ lon: x, lat: y }));
-    const ring = cleanRing(raw, 0.08);
+    const ring = cleanRing(raw, 0.2);
     if (ring.length < 3) continue;
     const p = f.properties ?? {};
     const id = String(p.idu ?? f.id ?? `${p.section}${p.numero}`);
@@ -229,14 +232,15 @@ export function districtToSeeds(d: District): PlotSeed[] {
   const seeds: PlotSeed[] = [];
   for (const p of d.parcels) {
     const parcel = { ring: p.ring, streetEdges: p.streetEdges };
-    const issue = plotIssue(parcel);
+    // Analyse mémorisée dans l'instantané (longue à calculer) ; sinon, contrôle géométrique rapide.
+    const issue = p.issue !== undefined ? p.issue ?? undefined : plotIssue(parcel);
     seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, locationFactor: p.locationFactor, label: p.label, ...(issue ? { issue } : {}), ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
   }
   return seeds;
 }
 
-/** Calcule et mémorise le prix de référence de chaque parcelle (configuration par défaut du marché du quartier). */
+/** Analyse chaque parcelle une fois pour toutes : prix de référence et constructibilité seule (long : ~10 s) ; mémorisés dans l'instantané (configuration par défaut du marché du quartier). */
 export function withBasePrices(d: District): District {
   const config = { ...DEFAULT_CONFIG, market: MARKETS[d.market] };
-  return { ...d, parcels: d.parcels.map((p) => ({ ...p, basePrice: defaultAskingPrice(p.id, { ring: p.ring, streetEdges: p.streetEdges }, p.existingSdp, config, p.locationFactor) })) };
+  return { ...d, parcels: d.parcels.map((p) => ({ ...p, basePrice: defaultAskingPrice(p.id, { ring: p.ring, streetEdges: p.streetEdges }, p.existingSdp, config, p.locationFactor), issue: plotIssue({ ring: p.ring, streetEdges: p.streetEdges }, config, p.locationFactor) ?? null })) };
 }

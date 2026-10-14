@@ -82,20 +82,22 @@ export const MAX_PRICE_POLICY = 0.15;
 const SMALL_PLOT_AREA = 150;
 
 /** Un terrain est-il constructible seul ? Retourne la raison sinon (façade sur rue absente, trop petit, retraits). */
-export function plotIssue(parcel: Parcel): PlotIssue | undefined {
+export function plotIssue(parcel: Parcel, config?: GameConfig, locationFactor = 1): PlotIssue | undefined {
   if (parcel.streetEdges.length === 0) return 'enclavee';
   const ok = [1, 3].some((levels) => {
     const pr = computeProject(parcel, { ...DEFAULT_CRITERIA, levels });
     return pr.footprint !== null && pr.checks.every((c) => c.status !== 'error');
   });
-  if (ok) return undefined;
-  return parcelArea(parcel) < SMALL_PLOT_AREA ? 'trop-petite' : 'inconstructible';
+  if (!ok) return parcelArea(parcel) < SMALL_PLOT_AREA ? 'trop-petite' : 'inconstructible';
+  // Constructible sur le papier, mais aucun projet n'est rentable même terrain offert (forme ou taille inadaptée).
+  if (config && appraise(parcel, 0, config, locationFactor).best <= 0) return parcelArea(parcel) < SMALL_PLOT_AREA ? 'trop-petite' : 'inconstructible';
+  return undefined;
 }
 
 export const ISSUE_MESSAGE: Record<PlotIssue, string> = {
   enclavee: 'Parcelle enclavée : aucun accès à la rue. À assembler avec une parcelle voisine qui donne sur la rue.',
-  'trop-petite': 'Terrain trop petit pour être construit seul. À assembler avec des parcelles voisines.',
-  inconstructible: 'Rien de constructible sur ce terrain seul (forme, retraits). À assembler avec des parcelles voisines.',
+  'trop-petite': 'Terrain trop petit pour y construire seul de façon rentable. À assembler avec des parcelles voisines.',
+  inconstructible: 'Forme ou taille inadaptée : aucun projet rentable sur ce terrain seul, même offert. À assembler avec des parcelles voisines.',
 };
 
 /** Surface d'une parcelle (m²). */
@@ -106,21 +108,30 @@ export function parcelArea(parcel: Parcel): number {
 }
 
 /**
- * Prix de départ d'un terrain : ce que le meilleur projet réalisable (jusqu'à R+5, attique compris) peut payer en gardant la marge
- * visée, multiplié par 0,9 à 1,5 selon le terrain (attentes du vendeur) : certains sont de bonnes affaires, d'autres trop chers.
+ * Meilleur prix de terrain que peut payer un projet réalisable (jusqu'à R+5, attique compris) en gardant la marge visée,
+ * et surface du terrain. Un résultat ≤ 0 veut dire qu'aucun projet n'est rentable, même terrain offert.
  */
-export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1): number {
+export function appraise(parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1): { best: number; area: number } {
   const market = marketAt(config.market, locationFactor);
+  const area = parcelArea(parcel);
+  if (parcel.streetEdges.length === 0) return { best: 0, area };
   let best = 0;
-  let area = parcelArea(parcel);
-  if (parcel.streetEdges.length === 0) return Math.max(Math.round(Math.max(MIN_PLOT_PRICE, 0.6 * area * market.landPerSdp * locationFactor) / 1000) * 1000, MIN_PLOT_PRICE);
   for (let levels = 0; levels <= 5; levels++) for (const attic of [false, true]) {
     const project = computeProject(parcel, { ...DEFAULT_CRITERIA, levels, attic });
-    area = project.parcelArea;
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
     const b = computeBilan({ project, market, landPrice: 0, existingSdp, params: { ...config.bilanParams, targetMargin: config.askMargin } });
     best = Math.max(best, b.maxLandPrice);
   }
+  return { best, area };
+}
+
+/**
+ * Prix de départ d'un terrain : ce que le meilleur projet réalisable peut payer, multiplié par 0,9 à 1,5 selon le
+ * terrain (attentes du vendeur) : certains sont de bonnes affaires, d'autres trop chers.
+ */
+export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1): number {
+  const market = marketAt(config.market, locationFactor);
+  const { best, area } = appraise(parcel, existingSdp, config, locationFactor);
   let h = 0;
   for (const ch of id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
   const factor = 0.9 + 0.6 * ((h % 1000) / 999);
@@ -251,7 +262,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
       paid: plots.reduce((t, p) => t + p.paid, 0),
       projectId: null,
     };
-    const issue = plotIssue(merged.parcel);
+    const issue = plotIssue(merged.parcel, state.config, fusion.locationFactor);
     if (issue) fusion.issue = issue;
     let s: GameState = { ...state, plots: [...state.plots.filter((p) => !ids.includes(p.id)), fusion] };
     s = reprice(s);

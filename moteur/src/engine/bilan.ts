@@ -20,6 +20,8 @@ export interface Market {
   buildHousingPerSdp: number;
   buildCommercePerSdp: number;
   buildOfficePerSdp: number;
+  /** Achat d'une place dans un parking voisin (concession, copropriété), €. */
+  offsiteParkingPlace: number;
   /** Coût d'une place : sous-sol (terrassement, structure, rampe) ou en surface. */
   buildBasementSpace: number;
   buildOtherSpace: number;
@@ -46,6 +48,7 @@ export const MARKETS = {
     buildHousingPerSdp: 2_300,
     buildCommercePerSdp: 1_900,
     buildOfficePerSdp: 2_400,
+    offsiteParkingPlace: 45_000,
     buildBasementSpace: 38_000,
     buildOtherSpace: 5_000,
     demolitionPerSdp: 200,
@@ -62,6 +65,7 @@ export const MARKETS = {
     buildHousingPerSdp: 2_000,
     buildCommercePerSdp: 1_700,
     buildOfficePerSdp: 2_100,
+    offsiteParkingPlace: 20_000,
     buildBasementSpace: 30_000,
     buildOtherSpace: 4_000,
     demolitionPerSdp: 170,
@@ -78,6 +82,7 @@ export const MARKETS = {
     buildHousingPerSdp: 1_850,
     buildCommercePerSdp: 1_550,
     buildOfficePerSdp: 1_900,
+    offsiteParkingPlace: 14_000,
     buildBasementSpace: 26_000,
     buildOtherSpace: 3_500,
     demolitionPerSdp: 140,
@@ -94,6 +99,7 @@ export const MARKETS = {
     buildHousingPerSdp: 1_600,
     buildCommercePerSdp: 1_400,
     buildOfficePerSdp: 1_700,
+    offsiteParkingPlace: 8_000,
     buildBasementSpace: 16_000,
     buildOtherSpace: 3_000,
     demolitionPerSdp: 120,
@@ -230,7 +236,8 @@ export function computeBilan(input: BilanInput): Bilan {
     ind.sdpCommerce * market.buildCommercePerSdp +
     ind.sdpOffice * market.buildOfficePerSdp +
     pk.basement * market.buildBasementSpace +
-    (pk.rdc + pk.surface) * market.buildOtherSpace;
+    (pk.rdc + pk.surface) * market.buildOtherSpace +
+    pk.offsite * market.offsiteParkingPlace;
   const demolition = (input.existingSdp ?? 0) * market.demolitionPerSdp;
   const acquisitionFees = landPrice * p.acquisitionFeeRate;
   const design = works * p.designFeeRate;

@@ -38,6 +38,7 @@ export function computeParking(input: ParkingInput): ParkingResult {
     provided: 0,
     surface: 0,
     rdc: 0,
+    offsite: 0,
     basement: 0,
     basementLevels: 0,
     basementPlate: 0,
@@ -46,6 +47,12 @@ export function computeParking(input: ParkingInput): ParkingResult {
     surfaceArea: 0,
   };
   if (strategy === 'aucun') return result;
+  if (strategy === 'hors-site') {
+    result.offsite = required;
+    result.provided = required;
+    result.capacityMax = required;
+    return result;
+  }
 
   let remaining = required;
 
@@ -95,6 +102,11 @@ export function computeParking(input: ParkingInput): ParkingResult {
       }
     }
   }
-  result.provided = result.surface + result.basement;
+  // Mode automatique : ce que le terrain ne peut pas loger s'achète dans un parking voisin.
+  if (strategy === 'auto' && remaining > 0) {
+    result.offsite = remaining;
+    result.capacityMax += remaining;
+  }
+  result.provided = result.surface + result.basement + result.offsite;
   return result;
 }

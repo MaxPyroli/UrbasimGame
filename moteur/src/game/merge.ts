@@ -96,15 +96,15 @@ export function mergeParcels(parcels: Parcel[]): MergeResult {
       }
     });
   }
-  if (seen.size !== parcels.length) return { ok: false, error: 'les parcelles doivent se toucher (mitoyenneté d’au moins 1,5 m)' };
+  if (seen.size !== parcels.length) return { ok: false, error: 'ces parcelles ne se touchent pas : il faut au moins 1,5 m de limite commune (un simple coin ne suffit pas)' };
 
   const grown = rings.map((r) => toMulti(offsetRing(r, CLOSE)));
   const merged = union(grown[0], ...grown.slice(1));
   const poly = largestPolygon(merged);
-  if (!poly || merged.length !== 1) return { ok: false, error: 'assemblage impossible : le contour obtenu n’est pas d’un seul tenant' };
+  if (!poly || merged.length !== 1) return { ok: false, error: 'assemblage impossible : le contour obtenu n’est pas d’un seul tenant (parcelles séparées par un jour trop large)' };
   if (poly.length > 1) {
     const holes = poly.slice(1).reduce((s, h) => s + ringArea(h), 0);
-    if (holes > 3) return { ok: false, error: 'l’assemblage enfermerait une cour ou une parcelle non achetée' };
+    if (holes > 3) return { ok: false, error: 'l’assemblage entourerait une parcelle que vous ne possédez pas (au milieu) : achetez-la d’abord' };
   }
   const outer = cleanRing(offsetRing(poly[0], -CLOSE), 0.1);
   if (outer.length < 3) return { ok: false, error: 'assemblage impossible' };
@@ -125,7 +125,6 @@ export function mergeParcels(parcels: Parcel[]): MergeResult {
     const mid: Vec2 = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     if (streetSegs.some(([s, t]) => distToSegment(mid, s, t) < 0.5)) streetEdges.push(i);
   });
-  if (streetEdges.length === 0) return { ok: false, error: 'l’assemblage n’a aucune façade sur rue' };
 
   const ring: LonLat[] = outer.map((v) => proj.toLonLat(v));
   return { ok: true, parcel: { ring, streetEdges }, area };
