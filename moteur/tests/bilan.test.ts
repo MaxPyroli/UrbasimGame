@@ -15,7 +15,7 @@ describe('bilan du promoteur', () => {
     const b = computeBilan({ project: pr, market: MARKETS['petite-couronne'], landPrice: 800_000 });
     expect(b.revenue.housing).toBeCloseTo(pr.indicators.shab * MARKETS['petite-couronne'].housingPerShab, 0);
     const c = b.costs;
-    const sum = c.land + c.acquisitionFees + c.demolition + c.works + c.design + c.insurance + c.contingency + c.taxes + c.salesFees + c.overhead + c.financing;
+    const sum = c.land + c.acquisitionFees + c.demolition + c.works + c.fixed + c.design + c.insurance + c.contingency + c.taxes + c.salesFees + c.overhead + c.financing;
     expect(c.total).toBeCloseTo(sum, 4);
     expect(b.margin).toBeCloseTo(b.revenue.total - c.total, 4);
     expect(b.quarters).toBe(Math.ceil(b.months / 3));
@@ -71,8 +71,26 @@ describe('bilan du promoteur', () => {
     for (const id of ['paris', 'petite-couronne', 'grande-ville', 'ville-moyenne'] as const) {
       const m = MARKETS[id];
       const b = computeBilan({ project: pr, market: m, landPrice: suggestLandPrice(pr, m) });
-      expect(b.marginRate).toBeGreaterThan(-0.05);
+      expect(b.marginRate).toBeGreaterThan(-0.1);
       expect(b.marginRate).toBeLessThan(0.25);
     }
+  });
+
+  it('les coûts fixes pèsent d’autant plus que l’opération est petite (raison économique des micro-projets déficitaires)', () => {
+    const m = MARKETS['petite-couronne'];
+    const lot = (w: number): Parcel => ({ ring: ([[0, 0], [w, 0], [w, 20], [0, 20]] as Vec2[]).map((p) => O.toLonLat(p)), streetEdges: [0] });
+    const small = computeProject(lot(6), { ...DEFAULT_CRITERIA, levels: 1, parkingStrategy: 'aucun' });
+    const large = computeProject(lot(30), { ...DEFAULT_CRITERIA, levels: 4, parkingStrategy: 'aucun' });
+    const bs = computeBilan({ project: small, market: m, landPrice: 0 });
+    const bl = computeBilan({ project: large, market: m, landPrice: 0 });
+    expect(bs.costs.fixed).toBe(m.fixedCostPerOperation);
+    expect(bl.costs.fixed).toBe(m.fixedCostPerOperation);
+    // Une petite opération peut payer beaucoup moins cher son terrain, au m² de plancher construit.
+    expect(bs.maxLandPrice / small.indicators.sdpTotal).toBeLessThan(0.5 * (bl.maxLandPrice / large.indicators.sdpTotal));
+    expect(bl.margin).toBeGreaterThan(0);
+    expect(bs.costs.fixed / bs.revenue.total).toBeGreaterThan(5 * (bl.costs.fixed / bl.revenue.total));
+    // Sans bâtiment, pas de coûts fixes.
+    const none = computeProject(lot(6), { ...DEFAULT_CRITERIA, setbackLateral: 4 });
+    expect(computeBilan({ project: none, market: m, landPrice: 0 }).costs.fixed).toBe(0);
   });
 });

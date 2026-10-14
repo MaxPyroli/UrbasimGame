@@ -150,6 +150,21 @@ collectivité jouent le rôle des enchères du Monopoly.
   multiple »), projet (R+x, attique, stationnement, bilan en direct, lancement), opérations, journal, classement.
   Vérifié dans Chromium (parcours achat → assemblage → opération → 6 trimestres, sans erreur) ; pas de test
   automatisé de l'interface. `window.__urbasim` (serveur de développement seulement) sert aux essais automatisés.
+- Fait : **coûts fixes d'opération** (`Market.fixedCostPerOperation`, ligne `costs.fixed` du bilan) : étude de sol,
+  géomètre, diagnostics, dossier de permis, garantie d'achèvement, raccordements, installation de chantier, dus quelle
+  que soit la taille (150 k€ Paris, 90 k€ petite couronne, 65 k€ grande ville, 45 k€ ville moyenne ; ordres de
+  grandeur à valider). C'est la raison réelle qui décourage les micro-projets : un terrain de 100 m² ne peut plus
+  payer son prix. Les terrains trop petits pour un projet rentable ont un prix plancher (0,6 × surface × charge
+  foncière) : ils servent surtout à être assemblés. Sur le quartier réel, la plus petite opération des bots passe de
+  30–60 m² à ~170 m² de SDP (médiane ~890 m²).
+- Fait : **couche « hauteur du bâti existant »** sur la carte (BD TOPO, instantané du quartier : 666 bâtiments avec
+  hauteur) : 5 classes de couleur (≤ 6 m, 6–10, 10–16, 16–25, > 25 m, avec équivalent R+x), légende, bascule avec la vue
+  « prix des terrains » ; hauteur existante affichée dans la fiche du terrain. Limite : le bâti dessiné est celui de
+  l'instantané (2025) ; les bâtiments construits ou démolis pendant la partie ne sont pas redessinés.
+- **Taxes de construction** : seul un forfait de 100 €/m² de SDP (`taxPerSdp`) approxime la taxe d'aménagement et les
+  participations. À affiner : valeur forfaitaire au m² × (taux communal + départemental [+ régional en Île-de-France]),
+  forfait par place de stationnement, redevance d'archéologie préventive, PUP, participation à l'assainissement ;
+  à paramétrer par commune/quartier (dans `Market` ou le fichier du quartier). Taux exacts à vérifier.
 - À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, appels d'offres, programmes (TVA 5,5 %,
   ZAC), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 

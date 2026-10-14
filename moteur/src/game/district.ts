@@ -30,8 +30,20 @@ export interface DistrictParcel {
   area: number;
   /** Surface de plancher du bâti existant (emprise × niveaux, BD TOPO), m². */
   existingSdp: number;
+  /** Hauteur du plus haut bâtiment existant sur la parcelle (m), 0 si aucun. */
+  existingHeight: number;
   /** Prix de référence du terrain avec la configuration par défaut (calcul long, donc mémorisé dans l'instantané). */
   basePrice?: number;
+}
+
+/** Bâtiment existant, pour l'affichage de la carte (BD TOPO). */
+export interface DistrictBuilding {
+  /** Contour extérieur [lon, lat], 6 décimales. */
+  ring: [number, number][];
+  /** Hauteur (m). */
+  height: number;
+  /** Vrai si la hauteur est estimée (non renseignée dans la donnée). */
+  estimated: boolean;
 }
 
 /** Un quartier jouable : instantané de données ouvertes, utilisable hors ligne. */
@@ -42,6 +54,7 @@ export interface District {
   /** Marché de référence du bilan. */
   market: MarketId;
   parcels: DistrictParcel[];
+  buildings: DistrictBuilding[];
   /** Mentions de licence à afficher (IGN, Licence Ouverte 2.0). */
   credits: string[];
   /** Date de l'instantané (AAAA-MM-JJ). */
@@ -124,7 +137,7 @@ export function buildDistrict(src: DistrictSource): District {
   // Bâtiments projetés une fois.
   const blds = src.buildings.map((b) => {
     const outer = b.outer.map((q) => proj.toLocal(q));
-    return { outer, holes: b.holes.map((h) => h.map((q) => proj.toLocal(q))), box: bbox(outer), floors: Math.max(1, Math.round(b.height / FLOOR_FALLBACK)) };
+    return { outer, holes: b.holes.map((h) => h.map((q) => proj.toLocal(q))), box: bbox(outer), floors: Math.max(1, Math.round(b.height / FLOOR_FALLBACK)), height: b.height };
   });
 
   const parcels: DistrictParcel[] = [];
@@ -149,13 +162,17 @@ export function buildDistrict(src: DistrictSource): District {
     if (streetEdges.length === 0) return;
 
     let sdp = 0;
+    let tallest = 0;
     const pMulti = toMulti(it.ring);
     const pb = boxes[i];
     for (const b of blds) {
       if (b.box.maxX < pb.minX || b.box.minX > pb.maxX || b.box.maxY < pb.minY || b.box.minY > pb.maxY) continue;
       try {
         const overlap = multiArea(intersection(pMulti, [[b.outer, ...b.holes]]));
-        if (overlap >= 5) sdp += overlap * b.floors;
+        if (overlap >= 5) {
+          sdp += overlap * b.floors;
+          tallest = Math.max(tallest, b.height);
+        }
       } catch {
         /* géométrie dégénérée : ce bâtiment est ignoré */
       }
@@ -168,11 +185,21 @@ export function buildDistrict(src: DistrictSource): District {
       streetEdges,
       area: Math.round(area),
       existingSdp: Math.round(sdp),
+      existingHeight: Math.round(tallest * 10) / 10,
     });
   });
 
   parcels.sort((a, b) => (a.id < b.id ? -1 : 1));
-  return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, credits: src.credits, fetchedAt: src.fetchedAt };
+  const buildings: DistrictBuilding[] = [];
+  for (const b of src.buildings) {
+    if (b.outer.length < 3) continue;
+    const loc = b.outer.map((q) => proj.toLocal(q));
+    const cx = loc.reduce((t, q) => t + q[0], 0) / loc.length;
+    const cy = loc.reduce((t, q) => t + q[1], 0) / loc.length;
+    if (Math.hypot(cx, cy) > src.radius + 15) continue;
+    buildings.push({ ring: b.outer.map((q) => [Math.round(q.lon * 1e6) / 1e6, Math.round(q.lat * 1e6) / 1e6]), height: Math.round(b.height * 10) / 10, estimated: b.estimated });
+  }
+  return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, buildings, credits: src.credits, fetchedAt: src.fetchedAt };
 }
 
 /**
@@ -187,7 +214,7 @@ export function districtToSeeds(d: District): PlotSeed[] {
       const pr = computeProject(parcel, { ...DEFAULT_CRITERIA, levels });
       return pr.footprint !== null && pr.checks.every((c) => c.status !== 'error');
     });
-    if (ok) seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, label: p.label, ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
+    if (ok) seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, label: p.label, ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
   }
   return seeds;
 }

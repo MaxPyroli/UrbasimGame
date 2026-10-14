@@ -41,6 +41,8 @@ export interface Plot {
   owner: PlayerId | null;
   /** SDP du bâti existant (m²) : démoli au lancement d'une opération. */
   existingSdp: number;
+  /** Hauteur du bâti existant (m). */
+  existingHeight: number;
   askingPrice: number;
   /** Prix de référence (indice de marché et demande à 1) ; le prix affiché en découle. */
   basePrice: number;
@@ -76,6 +78,8 @@ export interface ProjectRun {
   /** Bilan calculé au lancement (prix de l'époque). */
   bilan: Bilan;
   sdp: number;
+  /** Hauteur du bâtiment projeté (m). */
+  height: number;
   marketIndexAtLaunch: number;
   /** Fonds propres encore réservés pour le chantier, et versement à chaque tour de chantier. */
   escrow: number;

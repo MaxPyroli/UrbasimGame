@@ -63,6 +63,17 @@ describe('quartier à partir du cadastre', () => {
     expect(byId('B000')!.existingSdp).toBe(0);
   });
 
+  it('retient la hauteur du bâti existant et les bâtiments à afficher', () => {
+    expect(byId('A000')!.existingHeight).toBeCloseTo(9, 1);
+    expect(byId('B000')!.existingHeight).toBe(0);
+    expect(d.buildings).toHaveLength(1);
+    expect(d.buildings[0].height).toBeCloseTo(9, 1);
+    expect(d.buildings[0].ring.length).toBe(4);
+    // un bâtiment hors du rayon n'est pas conservé
+    const far = { ...house, id: 'far', outer: rect(900, 900, 5, 5).map((p) => P.toLonLat(p)) };
+    expect(buildDistrict({ ...src, buildings: [house, far] }).buildings).toHaveLength(1);
+  });
+
   it('est déterministe et sérialisable', () => {
     expect(JSON.stringify(buildDistrict(src))).toBe(JSON.stringify(d));
     expect(JSON.parse(JSON.stringify(d))).toEqual(d);
@@ -83,6 +94,8 @@ describe('instantané réel : Montreuil – Mairie (IGN)', () => {
     expect(real.parcels.length).toBeGreaterThan(200);
     expect(real.credits.join(' ')).toMatch(/Licence Ouverte/);
     expect(real.parcels.every((p) => p.streetEdges.length > 0 && p.basePrice! >= 20_000)).toBe(true);
+    expect(real.buildings.length).toBeGreaterThan(300);
+    expect(real.buildings.every((b) => b.height > 0 && b.ring.length >= 3)).toBe(true);
   });
 
   it('une partie démarre vite et les bots y jouent', () => {

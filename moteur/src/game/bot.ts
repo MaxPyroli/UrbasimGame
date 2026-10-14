@@ -55,7 +55,7 @@ export function bestPlan(state: GameState, plot: Plot, landPrice: number, profil
 /** Fonds propres à réunir pour mener le chantier, une fois le terrain refinancé. */
 function buildEquity(state: GameState, bilan: Bilan): number {
   const c = bilan.costs;
-  return (c.demolition + c.works + c.design + c.insurance + c.contingency + c.taxes) * (1 - state.config.bilanParams.loanShare);
+  return (c.demolition + c.works + c.fixed + c.design + c.insurance + c.contingency + c.taxes) * (1 - state.config.bilanParams.loanShare);
 }
 
 function tryLaunch(state: GameState, player: Player, profile: BotProfile): GameState {

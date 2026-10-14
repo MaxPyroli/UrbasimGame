@@ -39,6 +39,8 @@ export interface PlotSeed {
   id: string;
   parcel: Parcel;
   existingSdp?: number;
+  /** Hauteur du bâti existant (m). */
+  existingHeight?: number;
   askingPrice?: number;
   /** Libellé affichable (section, numéro, surface). */
   label?: string;
@@ -66,8 +68,10 @@ const MIN_PLOT_PRICE = 20_000;
  */
 export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig): number {
   let best = 0;
+  let area = 0;
   for (let levels = 0; levels <= 5; levels++) for (const attic of [false, true]) {
     const project = computeProject(parcel, { ...DEFAULT_CRITERIA, levels, attic });
+    area = project.parcelArea;
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
     const b = computeBilan({ project, market: config.market, landPrice: 0, existingSdp, params: { ...config.bilanParams, targetMargin: config.askMargin } });
     best = Math.max(best, b.maxLandPrice);
@@ -75,7 +79,9 @@ export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: numb
   let h = 0;
   for (const ch of id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
   const factor = 0.9 + 0.6 * ((h % 1000) / 999);
-  return Math.max(MIN_PLOT_PRICE, Math.round((best * factor) / 1000) * 1000);
+  // Même sans projet rentable, un terrain vaut quelque chose : usage actuel, jardin, intérêt pour un voisin qui assemble.
+  const floor = Math.max(MIN_PLOT_PRICE, 0.6 * area * config.market.landPerSdp);
+  return Math.max(Math.round(floor / 1000) * 1000, Math.round((best * factor) / 1000) * 1000);
 }
 
 /** Marché au niveau de prix actuel : seuls les prix de vente suivent l'indice, pas les coûts. */
@@ -109,6 +115,7 @@ export function createGame(g: NewGame): GameState {
       parcel: s.parcel,
       owner: null,
       existingSdp: s.existingSdp ?? 0,
+      existingHeight: s.existingHeight ?? 0,
       askingPrice: 0,
       basePrice: s.askingPrice ?? defaultAskingPrice(s.id, s.parcel, s.existingSdp ?? 0, config),
       paid: 0,
@@ -198,6 +205,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
       parcel: merged.parcel,
       owner: player.id,
       existingSdp: plots.reduce((t, p) => t + p.existingSdp, 0),
+      existingHeight: Math.max(...plots.map((p) => p.existingHeight)),
       askingPrice: 0,
       basePrice: plots.reduce((t, p) => t + p.basePrice, 0),
       paid: plots.reduce((t, p) => t + p.paid, 0),
@@ -248,7 +256,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     params: currentParams(state),
   });
   const c = bilan.costs;
-  const buildSpend = c.demolition + c.works + c.design + c.insurance + c.contingency + c.taxes;
+  const buildSpend = c.demolition + c.works + c.fixed + c.design + c.insurance + c.contingency + c.taxes;
   const landAndFees = c.land + c.acquisitionFees;
   const equityBuild = buildSpend * (1 - ls);
   const refund = landAndFees * ls;
@@ -270,6 +278,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     sellRounds: q(d.sellOut),
     bilan,
     sdp: project.indicators.sdpTotal,
+    height: project.indicators.height,
     marketIndexAtLaunch: state.marketIndex,
     rateAtLaunch: state.interestRate,
     rateAccum: 0,
@@ -416,7 +425,7 @@ export function advanceRound(state: GameState): GameState {
     const owner = s.players.find((x) => x.id === p.owner)!;
     s = mapPlayer(s, p.owner, (x) => ({ ...x, cash: x.cash + gain }));
     const base = Math.max(MIN_PLOT_PRICE, Math.round((p.sdp * config.market.landPerSdp * 1.2) / 1000) * 1000);
-    s = mapPlot(s, p.plotId, (x) => ({ ...x, owner: null, paid: 0, projectId: null, existingSdp: p.sdp, basePrice: base }));
+    s = mapPlot(s, p.plotId, (x) => ({ ...x, owner: null, paid: 0, projectId: null, existingSdp: p.sdp, existingHeight: p.height, basePrice: base }));
     s = { ...s, projects: s.projects.filter((x) => x.id !== p.id) };
     s = withEvent(s, { player: p.owner, text: `${owner.name} livre ${p.id} : ventes ${eur(revenue)}, encaissement net ${eur(gain)}` });
   }

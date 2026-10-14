@@ -25,6 +25,12 @@ export interface Market {
   buildOtherSpace: number;
   /** Démolition de l'existant, €/m² de SDP démolie. */
   demolitionPerSdp: number;
+  /**
+   * Coûts fixes d'une opération, quelle que soit sa taille : étude de sol, géomètre, diagnostics (amiante, plomb),
+   * dossier de permis, garantie financière d'achèvement, raccordements aux réseaux, installation et base de chantier.
+   * C'est ce qui rend les très petites opérations déficitaires.
+   */
+  fixedCostPerOperation: number;
   /** Charge foncière « normale » du quartier, €/m² de SDP constructible (sert à proposer un prix de terrain). */
   landPerSdp: number;
 }
@@ -43,6 +49,7 @@ export const MARKETS = {
     buildBasementSpace: 38_000,
     buildOtherSpace: 5_000,
     demolitionPerSdp: 200,
+    fixedCostPerOperation: 150_000,
     landPerSdp: 3_200,
   },
   'petite-couronne': {
@@ -58,6 +65,7 @@ export const MARKETS = {
     buildBasementSpace: 30_000,
     buildOtherSpace: 4_000,
     demolitionPerSdp: 170,
+    fixedCostPerOperation: 90_000,
     landPerSdp: 750,
   },
   'grande-ville': {
@@ -73,6 +81,7 @@ export const MARKETS = {
     buildBasementSpace: 26_000,
     buildOtherSpace: 3_500,
     demolitionPerSdp: 140,
+    fixedCostPerOperation: 65_000,
     landPerSdp: 280,
   },
   'ville-moyenne': {
@@ -88,6 +97,7 @@ export const MARKETS = {
     buildBasementSpace: 16_000,
     buildOtherSpace: 3_000,
     demolitionPerSdp: 120,
+    fixedCostPerOperation: 45_000,
     landPerSdp: 100,
   },
 } as const satisfies Record<string, Market>;
@@ -161,6 +171,7 @@ export interface Bilan {
     demolition: number;
     works: number;
     design: number;
+    fixed: number;
     insurance: number;
     contingency: number;
     taxes: number;
@@ -223,6 +234,7 @@ export function computeBilan(input: BilanInput): Bilan {
   const demolition = (input.existingSdp ?? 0) * market.demolitionPerSdp;
   const acquisitionFees = landPrice * p.acquisitionFeeRate;
   const design = works * p.designFeeRate;
+  const fixed = ind.sdpTotal > 0 ? market.fixedCostPerOperation : 0;
   const insurance = works * p.insuranceRate;
   const contingency = works * p.contingencyRate;
   const taxes = ind.sdpTotal * p.taxPerSdp;
@@ -234,21 +246,21 @@ export function computeBilan(input: BilanInput): Bilan {
   const d = buildDuration(project, p);
   const rate = p.interestRate / 12;
   const landLoan = (landPrice + acquisitionFees) * p.loanShare;
-  const buildSpend = works + demolition + design + insurance + contingency + taxes;
+  const buildSpend = works + demolition + fixed + design + insurance + contingency + taxes;
   const buildLoan = buildSpend * p.loanShare;
   const financing = landLoan * rate * d.total + buildLoan * rate * (d.build / 2 + d.sellOut);
 
-  const costTotal = landPrice + acquisitionFees + demolition + works + design + insurance + contingency + taxes + salesFees + overhead + financing;
+  const costTotal = landPrice + acquisitionFees + demolition + works + fixed + design + insurance + contingency + taxes + salesFees + overhead + financing;
   const margin = revenueTotal - costTotal;
   const marginRate = revenueTotal > 0 ? margin / revenueTotal : 0;
   const returnOnCost = costTotal > 0 ? margin / costTotal : 0;
   const equity = (landPrice + acquisitionFees + buildSpend) * (1 - p.loanShare);
 
   // Terrain maximal : on résout margin(land) = targetMargin × CA. Les coûts sont affines en `landPrice` :
-  // coût(land) = fixe + land × (1 + frais) × (1 + loanShare × taux × durée).
+  // coût(land) = hors terrain + land × (1 + frais) × (1 + loanShare × taux × durée).
   const landCoefExact = (1 + p.acquisitionFeeRate) * (1 + p.loanShare * rate * d.total);
-  const fixed = costTotal - landPrice * landCoefExact;
-  const maxLandPrice = Math.floor((revenueTotal * (1 - p.targetMargin) - fixed) / landCoefExact);
+  const nonLandCosts = costTotal - landPrice * landCoefExact;
+  const maxLandPrice = Math.floor((revenueTotal * (1 - p.targetMargin) - nonLandCosts) / landCoefExact);
 
   // Seuil de rentabilité : le CA logement est proportionnel au prix au m² ; les frais de vente/gestion aussi.
   const feeRate = p.salesFeeRate + p.overheadRate;
@@ -259,7 +271,7 @@ export function computeBilan(input: BilanInput): Bilan {
 
   return {
     revenue: { housing, commerce, office, parking, total: revenueTotal },
-    costs: { land: landPrice, acquisitionFees, demolition, works, design, insurance, contingency, taxes, salesFees, overhead, financing, total: costTotal },
+    costs: { land: landPrice, acquisitionFees, demolition, works, fixed, design, insurance, contingency, taxes, salesFees, overhead, financing, total: costTotal },
     margin,
     marginRate,
     returnOnCost,

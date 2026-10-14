@@ -72,6 +72,7 @@ let state: GameState = load();
 let selected = new Set<string>();
 let multi = false;
 let tab: 'terrain' | 'operations' | 'journal' | 'classement' = 'terrain';
+let view: 'hauteur' | 'prix' = 'hauteur';
 let form: { levels: number; attic: boolean; parking: ParkingStrategy } = { levels: 3, attic: false, parking: 'auto' };
 
 function save() {
@@ -147,12 +148,58 @@ function plotStyle(p: Plot): L.PathOptions {
   const t = Math.min(1, Math.max(0, (ppm - lo) / Math.max(1, hi - lo)));
   const free = `hsl(${40 - 30 * t} 80% ${78 - 28 * t}%)`;
   return {
-    color: sel ? '#000' : col ?? '#7a6b4f',
-    weight: sel ? 3 : p.projectId ? 2.5 : 1,
+    color: sel ? '#000' : col ?? (view === 'hauteur' ? '#2b6cb0' : '#7a6b4f'),
+    weight: sel ? 3 : p.projectId ? 2.5 : view === 'hauteur' ? 1.5 : 1,
     fillColor: col ?? free,
-    fillOpacity: col ? (p.projectId ? 0.75 : 0.55) : 0.45,
+    // Vue « hauteur » : les parcelles libres restent transparentes pour laisser voir le bâti.
+    fillOpacity: col ? (p.projectId ? 0.7 : view === 'hauteur' ? 0.35 : 0.55) : view === 'hauteur' ? 0 : 0.45,
     dashArray: p.projectId ? '4 3' : undefined,
   };
+}
+
+/** Classes de hauteur du bâti existant (m) : borne haute, couleur, libellé en niveaux. */
+const HEIGHT_CLASSES: { max: number; color: string; label: string }[] = [
+  { max: 6, color: '#fde9a6', label: 'jusqu’à 6 m · RDC à R+1' },
+  { max: 10, color: '#f9b657', label: '6 à 10 m · R+2 à R+3' },
+  { max: 16, color: '#ee7230', label: '10 à 16 m · R+3 à R+5' },
+  { max: 25, color: '#c0302f', label: '16 à 25 m · R+5 à R+8' },
+  { max: Infinity, color: '#5d1a4a', label: 'plus de 25 m · R+8 et plus' },
+];
+const heightColor = (h: number) => (HEIGHT_CLASSES.find((c) => h <= c.max) ?? HEIGHT_CLASSES[HEIGHT_CLASSES.length - 1]).color;
+const levelsOf = (h: number) => Math.max(0, Math.round(h / 2.95) - 1);
+
+map.createPane('bati');
+map.getPane('bati')!.style.zIndex = '350';
+map.getPane('bati')!.style.pointerEvents = 'none';
+const buildingsLayer = L.layerGroup();
+for (const b of district.buildings) {
+  L.polygon(b.ring.map(([lon, lat]) => [lat, lon] as [number, number]), {
+    pane: 'bati',
+    interactive: false,
+    stroke: true,
+    color: '#3b2a1a',
+    weight: 0.5,
+    opacity: 0.6,
+    fillColor: heightColor(b.height),
+    fillOpacity: b.estimated ? 0.7 : 0.9,
+  }).addTo(buildingsLayer);
+}
+
+const mapLegend = new L.Control({ position: 'bottomleft' });
+mapLegend.onAdd = () => {
+  const el = L.DomUtil.create('div', 'map-legend');
+  el.innerHTML = `<b>Hauteur du bâti existant</b>${HEIGHT_CLASSES.map((c) => `<div><i class="swatch" style="background:${c.color}"></i>${c.label}</div>`).join('')}`;
+  return el;
+};
+
+function applyView() {
+  if (view === 'hauteur') {
+    buildingsLayer.addTo(map);
+    mapLegend.addTo(map);
+  } else {
+    buildingsLayer.remove();
+    mapLegend.remove();
+  }
 }
 
 const areaCache = new WeakMap<object, number>();
@@ -192,7 +239,7 @@ function drawPlots() {
       layers.set(p.id, layer);
     }
     layer.setStyle(plotStyle(p));
-    layer.bindTooltip(`${esc(p.label ?? p.id)}<br>${eur(p.askingPrice)}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : ''}`, { sticky: true });
+    layer.bindTooltip(`${esc(p.label ?? p.id)}<br>${eur(p.askingPrice)}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : ''}`, { sticky: true });
   }
 }
 
@@ -251,12 +298,16 @@ function renderSide() {
 }
 
 function legend(): string {
-  return `<p class="legend">
+  const heights =
+    view === 'hauteur'
+      ? `<div class="legend" style="margin:6px 0">${HEIGHT_CLASSES.map((c) => `<div><i class="swatch" style="background:${c.color}"></i>${c.label}</div>`).join('')}<div class="muted">teinte plus claire = hauteur estimée (non renseignée)</div></div>`
+      : '';
+  return `<label class="f" style="margin-top:14px">Vue de la carte<select id="view"><option value="hauteur" ${view === 'hauteur' ? 'selected' : ''}>Hauteur du bâti existant</option><option value="prix" ${view === 'prix' ? 'selected' : ''}>Prix des terrains</option></select></label>${heights}<p class="legend">
     <label><input type="checkbox" id="multi" ${multi ? 'checked' : ''}/> sélection multiple</label>
     <br><span><i class="swatch" style="background:${COLORS.moi}"></i>vous</span>${state.players
       .filter((p) => p.bot)
       .map((p) => `<span><i class="swatch" style="background:${COLORS[p.id]}"></i>${esc(p.name)}</span>`)
-      .join('')}<br><span>terrains libres : plus foncé = plus cher au m²</span> <span>pointillés = opération en cours</span></p>`;
+      .join('')}<br>${view === 'prix' ? '<span>terrains libres : plus foncé = plus cher au m²</span> ' : '<span>terrains libres : contour bleu</span> '}<span>pointillés = opération en cours</span></p>`;
 }
 
 function renderSelection(): string {
@@ -296,7 +347,7 @@ function renderSingle(p: Plot): string {
   let html = `<h2>${esc(p.label ?? p.id)}</h2>
     <table>
       <tr><td>Surface</td><td>${Math.round(area)} m²${p.parts ? ` · assemblage de ${p.parts.length}` : ''}</td></tr>
-      <tr><td>Bâti existant</td><td>${p.existingSdp ? `${p.existingSdp} m² SDP (à démolir)` : 'aucun'}</td></tr>
+      <tr><td>Bâti existant</td><td>${p.existingSdp ? `${p.existingSdp} m² SDP${p.existingHeight ? ` · ${Math.round(p.existingHeight)} m (≈ R+${levelsOf(p.existingHeight)})` : ''}<br><span class="muted">à démolir avant de construire</span>` : 'aucun'}</td></tr>
       <tr><td>Prix affiché</td><td>${eurFull(p.askingPrice)} <span class="muted">(${Math.round(p.askingPrice / area)} €/m²)</span></td></tr>
       <tr><td>Propriétaire</td><td>${owner ? esc(owner) : '<span class="muted">libre</span>'}</td></tr>
     </table>`;
@@ -341,7 +392,8 @@ function projectForm(p: Plot, owned: boolean): string {
       <tr><td>Chiffre d’affaires</td><td>${eur(b.revenue.total)}</td></tr>
       <tr><td>Terrain et frais</td><td>${eur(b.costs.land + b.costs.acquisitionFees)}</td></tr>
       <tr><td>Travaux${p.existingSdp ? ' et démolition' : ''}</td><td>${eur(b.costs.works + b.costs.demolition)}</td></tr>
-      <tr><td>Autres frais et crédit</td><td>${eur(b.costs.total - b.costs.land - b.costs.acquisitionFees - b.costs.works - b.costs.demolition)}</td></tr>
+      <tr><td>Coûts fixes d’opération <span class="muted" title="études de sol, géomètre, diagnostics, dossier de permis, garantie d’achèvement, raccordements, installation de chantier : dus quelle que soit la taille">ⓘ</span></td><td>${eur(b.costs.fixed)}</td></tr>
+      <tr><td>Autres frais et crédit</td><td>${eur(b.costs.total - b.costs.land - b.costs.acquisitionFees - b.costs.works - b.costs.demolition - b.costs.fixed)}</td></tr>
       <tr class="total"><td>Marge</td><td class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)} (${pct(b.marginRate)})</td></tr>
       <tr><td>Durée</td><td>${b.quarters} trimestres</td></tr>
       <tr><td>Prix de terrain max (marge ${pct(state.config.bilanParams.targetMargin)})</td><td>${eur(b.maxLandPrice)}</td></tr>
@@ -415,6 +467,8 @@ function bindSelection() {
     }
   });
   on('clear', () => ((selected = new Set()), renderAll()));
+  const viewSel = side.querySelector<HTMLSelectElement>('#view');
+  if (viewSel) viewSel.onchange = () => ((view = viewSel.value as typeof view), applyView(), renderAll());
   const multiBox = side.querySelector<HTMLInputElement>('#multi');
   if (multiBox) multiBox.onchange = () => (multi = multiBox.checked);
   const lv = side.querySelector<HTMLSelectElement>('#f-levels');
@@ -444,6 +498,7 @@ function renderAll() {
 
 $('credits').textContent = district.credits.join(' · ') + ' · Fond de carte : © contributeurs OpenStreetMap · Prix et coûts : ordres de grandeur, pas une expertise.';
 fitDistrict();
+applyView();
 renderAll();
 
 // Outils de test automatisé (serveur de développement uniquement).
