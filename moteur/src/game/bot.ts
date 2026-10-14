@@ -105,8 +105,12 @@ function tryLaunch(state: GameState, player: Player, profile: BotProfile): GameS
   let s = state;
   for (const plot of s.plots.filter((p) => p.owner === player.id && !p.projectId)) {
     const landPrice = plot.paid / (1 + s.config.bilanParams.acquisitionFeeRate);
-    const plan = bestPlan(s, plot, landPrice, profile);
-    if (!plan || saturated(s, plan.lots, profile)) continue;
+    // Un terrain obtenu auprès de la commune se perd (10 % du prix) s'il n'est pas lancé à temps : à l'approche de
+    // l'échéance, le bot accepte une marge nulle et ne s'arrête plus à la saturation du marché.
+    const left = plot.obligation ? plot.obligation.launchBy - s.round : Infinity;
+    const urgent = left <= 1;
+    const plan = bestPlan(s, plot, landPrice, urgent ? { ...profile, minMargin: Math.min(profile.minMargin, 0) } : profile);
+    if (!plan || (!urgent && saturated(s, plan.lots, profile))) continue;
     const r = applyAction(s, { type: 'launch', player: player.id, plot: plot.id, criteria: plan.criteria });
     if (r.ok) s = r.state;
   }

@@ -310,6 +310,13 @@ collectivité jouent le rôle des enchères du Monopoly.
   lieux bientôt »), encart bêta et « à venir » (choix du lieu, multijoueur sans serveur, programmes, carte plus belle puis 3D),
   crédits des données. Accessible aussi par le menu « ⋯ ». Annuler la création de société ramène à l'accueil.
 
+- Hébergement de secours : `netlify.toml` (dossier `jeu`, commande `npm ci --prefix ../moteur && npm ci && npm run build`,
+  sortie `dist`). Pour Cloudflare Pages ou Vercel : mêmes réglages à saisir à la main (racine `jeu`, sortie `dist`, `npm ci` dans
+  `moteur` avant le build). Le premier déploiement GitHub Pages d'un dépôt neuf peut rester bloqué à `updating_pages` (observé
+  le jour de la création du dépôt) : relancer le workflow « Publier le jeu » ou attendre.
+- Bots : à l'approche de l'échéance de lancement d'un terrain de la commune (dernier trimestre), ils acceptent une marge nulle
+  et ignorent la saturation du marché, pour ne pas perdre 10 % du prix.
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,

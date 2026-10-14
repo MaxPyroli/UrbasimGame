@@ -1,0 +1,8 @@
+# Hébergement de secours (Netlify) : même construction que le workflow GitHub Pages.
+[build]
+  base = "jeu"
+  command = "npm ci --prefix ../moteur && npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
