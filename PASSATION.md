@@ -314,9 +314,11 @@ collectivité jouent le rôle des enchères du Monopoly.
 ### Notes de la partie « clarté » (à traiter plus tard)
 - **Voir les bâtiments construits par les autres sur la carte** : les opérations (en cours et livrées) doivent remplacer le
   bâti existant sur la carte, avec leur hauteur réelle, au lieu de seulement colorer la parcelle.
-- **Construire en limite de parcelle** : possibilité de construire en bord de parcelle côté rue, ou à l'arrière du terrain
-  (aujourd'hui retraits de fond/côtés fixés par la zone), avec les règles de PLU associées (implantation à l'alignement, en
-  limite séparative, prospects, mitoyenneté) à ajouter aux zones.
+- **Choix de l'implantation du bâtiment** : le joueur choisit de construire **le long de la route** (à l'alignement, en front
+  de rue) **ou en retrait, à l'arrière / au cœur du terrain** (cour ou jardin côté rue). Aujourd'hui le bâtiment est
+  placé automatiquement avec les retraits de la zone. À ajouter : option d'implantation dans le formulaire de projet, règles de
+  PLU associées (alignement ou retrait obligatoire sur rue, retrait de fond, limites séparatives, prospects, mitoyenneté,
+  distance entre bâtiments) et effets sur le bilan (stationnement, vue, éclairement, valeur des logements).
 - **Vue 3D des bâtiments** (pour bien plus tard) : visualiser les immeubles en volume, existants et construits par les
   joueurs (les hauteurs sont déjà dans les données et dans les projets).
 - **Un affichage plus joli et plus lisible** : routes, parcelles, bâtiments, parcs, équipements avec des icônes (gare,
