@@ -99,7 +99,15 @@ collectivité jouent le rôle des enchères du Monopoly.
   frais financiers, marge, durée (en trimestres pour le tour de jeu), prix de terrain maximal, seuil de rentabilité.
 - Décisions prises : prix approximatifs proches du réel ; un quartier pour la version de test ; multijoueur visé dès le
   début, concurrents ordinateur pour tester.
-- À faire ensuite : état de partie + tour trimestriel (module pur), concurrents ordinateur, puis serveur multijoueur.
+- Fait : `moteur/src/game/` — état de partie pur, sérialisable et déterministe (`createGame`, `applyAction`,
+  `advanceRound`, `netWorth`, `ranking`). Un tour = un trimestre ; actions `buy`, `sellPlot`, `launch`, `ready` ;
+  le trimestre se résout quand tous les joueurs sont prêts (asynchrone possible). Indice de marché aléatoire (graine
+  dans l'état, rejouable). Flux de trésorerie : terrain payé comptant, refinancé à 80 % au lancement, fonds propres du
+  chantier mis sous séquestre, solde encaissé à la fin des ventes ; à marché stable le gain = marge du bilan (testé).
+  Après livraison le terrain redevient achetable avec le bâti existant (démolition-reconstruction, surélévation).
+  Limites : premier arrivé premier servi pour un même terrain (les appels d'offres viendront), pas de faillite
+  (le séquestre garantit le chantier), pas d'événements, pas de zonage/PLU de jeu.
+- À faire ensuite : concurrents ordinateur (module `bot`), puis serveur multijoueur, règles de zone, appels d'offres.
 
 ## 6. Pour démarrer la nouvelle session
 Donnez-lui ce fichier et dites par exemple : « Reprends le moteur de `./moteur`, crée la structure du jeu, et
