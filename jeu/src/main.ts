@@ -17,6 +17,10 @@ import {
   DIFFICULTIES,
   campaignConfig,
   bidProblem,
+  isRelevant,
+  watchList,
+  type GameEvent,
+  type Watch,
   committedCash,
   committedTenderCash,
   isListed,
@@ -67,6 +71,7 @@ import {
   type District,
   type GameState,
   type Plot,
+  type ProjectRun,
 } from '../../moteur/src/game';
 import districtData from '../../moteur/data/districts/montreuil-mairie.json';
 
@@ -127,6 +132,11 @@ const bidDraft: Record<string, number> = {};
 const tenderDraft: Record<string, { price: number; share: number; quality: Quality; delivery: number }> = {};
 /** Appels d'offres dont j'ai déjà été prévenu que le dernier trimestre approche. */
 const warnedTenders = new Set<string>();
+/** Nombre d'entrées du journal déjà vues dans les notifications (le reste est « nouveau »). */
+const SEEN_KEY = 'urbasim-seen-v1';
+let seenLog = Math.max(0, Math.round(+(localStorage_get(SEEN_KEY) ?? 0)) || 0);
+type NotifFilter = 'tout' | 'alea' | 'commune' | 'operation' | 'terrain';
+let notifFilter: NotifFilter = 'tout';
 let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number } = { levels: 3, attic: false, parking: 'auto', depth: 12 };
 
 function save() {
@@ -167,24 +177,28 @@ function advanceOne(): { mine: string[]; phases: string } {
   if (!me().ready && !act({ type: 'ready', player: ME })) return { mine: [], phases: phasesBefore };
   state = playBots(state);
   save();
-  const mine = state.log.slice(before).filter((e) => e.player === ME).map((e) => e.text);
+  const mine = state.log.slice(before).filter((e) => e.player === ME || (!e.player && e.popup)).map((e) => e.text);
   return { mine, phases: phasesBefore };
 }
 
 const myPhases = () => state.projects.filter((p) => p.owner === ME).map((p) => `${p.id}:${p.phase}`).join(',');
 
-function afterAdvance(message: string) {
+function afterAdvance(message: string, before = state.log.length) {
   selected = new Set([...selected].filter((id) => plotById(id)));
   if (state.over) tab = 'classement';
   else toast(message);
   renderAll();
-  if (state.over) openEndScreen();
+  if (state.over) return openEndScreen();
+  // Les aléas et verdicts importants s'affichent dans une fenêtre, un par un.
+  const popups = state.log.slice(before).filter((e) => e.popup && isRelevant(e, ME) && (e.player === ME || !e.player));
+  if (popups.length) showPopups(popups);
 }
 
 function endTurn() {
   if (state.over) return;
+  const before = state.log.length;
   const { mine } = advanceOne();
-  afterAdvance(`${quarterLabel(state.round)}${mine.length ? ` — ${mine.length} nouvelle${mine.length > 1 ? 's' : ''} pour vous` : ''}`);
+  afterAdvance(`${quarterLabel(state.round)}${mine.length ? ` — ${mine.length} nouvelle${mine.length > 1 ? 's' : ''} pour vous` : ''}`, before);
 }
 
 /** Avance jusqu'à ce qu'il se passe quelque chose pour vous (étape d'une opération, aléa), au plus 8 trimestres. */
@@ -192,6 +206,7 @@ function fastForward() {
   if (state.over) return;
   const hasStake = state.projects.some((p) => p.owner === ME);
   const limit = hasStake ? 8 : 4;
+  const before = state.log.length;
   let n = 0;
   let why = '';
   const seenTenders = new Set(state.tenders.map((t) => t.id));
@@ -218,7 +233,7 @@ function fastForward() {
       break;
     }
   }
-  afterAdvance(`${n} trimestre${n > 1 ? 's' : ''} → ${quarterLabel(state.round)}${why ? ` : ${why}` : ''}`);
+  afterAdvance(`${n} trimestre${n > 1 ? 's' : ''} → ${quarterLabel(state.round)}${why ? ` : ${why}` : ''}`, before);
 }
 
 // ---------------------------------------------------------------- carte
@@ -733,7 +748,7 @@ function renderTop() {
   $('top').innerHTML = `
     <h1>Urbasim</h1>
     <div class="company" title="${esc(me().slogan ?? '')}"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><span class="cname">${esc(me().name)}</span></div>
-    <div class="stat"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b></div>
+    <div class="stat" title="Avancement de la partie"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b><span class="goalbar"><i style="width:${Math.min(100, (state.round / state.config.rounds) * 100)}%"></i></span></div>
     <div class="stat"><small>Trésorerie</small><b>${eur(me().cash)}</b></div>
     <div class="stat" title="Trésorerie + terrains (au prix de reprise) + fonds propres engagés dans les opérations, moins les dettes"><small>Patrimoine</small><b>${eur(w)}</b></div>
     ${objectiveStat(w)}
@@ -744,9 +759,11 @@ function renderTop() {
     <span class="spacer"></span>
     <button id="end" class="primary">${state.over ? 'Résultats' : me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
     <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">▶▶</button>
+    <button id="bell" class="bell" title="Notifications et échéances" aria-label="Notifications">🔔${unreadCount() ? `<span class="badge hot">${unreadCount()}</span>` : urgentWatch() ? '<span class="badge hot">!</span>' : ''}</button>
     <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="howto">Mode d’emploi</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
   $('end').onclick = () => (state.over ? openEndScreen() : endTurn());
   $('ff').onclick = fastForward;
+  $('bell').onclick = openNotif;
   $('howto').onclick = () => (closeMenu(), openTutorial());
   $('company').onclick = () => (closeMenu(), openIdentity('edit'));
   const nb = $('new');
@@ -788,6 +805,7 @@ function renderSide() {
   $('side').querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => (b.onclick = () => ((tab = b.dataset.tab as typeof tab), renderAll())));
   bindSelection();
   if (tab === 'commune') bindTenders();
+  bindRefs($('side'));
 }
 
 /** Sections repliables : l'essentiel est visible, le détail se déplie. */
@@ -913,6 +931,176 @@ function renderSingle(p: Plot): string {
   return html + projectForm(p, true) + details(p);
 }
 
+// ---------------------------------------------------------------- barres de progression, notifications, fenêtres d'alerte
+
+/** Barre de progression ; `late` la passe au rouge, `warnAt` à l'orange quand elle est presque pleine. */
+function pbar(value: number, max: number, label: string, opts: { late?: boolean; warnAt?: number; mark?: number } = {}): string {
+  const frac = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
+  const cls = opts.late ? 'late' : opts.warnAt !== undefined && frac >= opts.warnAt ? 'warn' : '';
+  return `<div class="pbar-row"><div class="pbar ${cls}"><i style="width:${Math.round(frac * 100)}%"></i>${opts.mark !== undefined ? `<b style="left:${Math.round(opts.mark * 100)}%"></b>` : ''}</div><span class="pbar-label ${cls}">${esc(label)}</span></div>`;
+}
+
+/** Les quatre étapes d'une opération sur une frise proportionnelle à leur durée. */
+function phaseTimeline(r: ProjectRun): string {
+  const need = Math.max(1, Math.ceil(r.lots * state.config.presaleThreshold));
+  const order = ['permis', 'preventes', 'chantier', 'livraison'] as const;
+  const at = order.indexOf(r.phase);
+  const steps: { label: string; weight: number; frac: number }[] = [
+    { label: 'Permis', weight: r.permitRounds, frac: r.phase === 'permis' ? r.phaseElapsed / r.permitRounds : 1 },
+    { label: 'Préventes', weight: 1.2, frac: at > 1 ? 1 : at === 1 ? Math.min(1, r.lotsSold / need) : 0 },
+    { label: 'Chantier', weight: r.buildRounds, frac: at > 2 ? 1 : at === 2 ? r.phaseElapsed / r.buildRounds : 0 },
+    { label: 'Ventes', weight: Math.max(1, r.sellRounds), frac: at === 3 ? soldShare(r) : 0 },
+  ];
+  return `<div class="timeline">${steps.map((s, i) => `<div class="tl ${i < at ? 'done' : i === at ? 'now' : ''}" style="flex:${s.weight}"><div class="tlbar"><i style="width:${Math.round(Math.min(1, s.frac) * 100)}%"></i></div><small>${s.label}</small></div>`).join('')}</div>`;
+}
+
+/** Délai de livraison promis à la commune : trimestres écoulés depuis le lancement sur trimestres promis. */
+function deliveryBar(r: { terms?: { delivery: number }; roundsRun: number; phase: string }): string {
+  const promised = r.terms!.delivery;
+  if (r.phase === 'livraison') return `<div class="muted" style="font-size:12px">Livré en ${r.roundsRun} trim. pour ${promised} promis à la commune</div>`;
+  const late = r.roundsRun >= promised;
+  return `<div style="font-size:12px;margin-top:4px">Délai promis à la commune</div>${pbar(Math.min(r.roundsRun, promised), promised, late ? `dépassé (trim. ${r.roundsRun}/${promised})` : `trim. ${r.roundsRun}/${promised}`, { late, warnAt: 0.8 })}`;
+}
+
+const TONE_COLOR: Record<string, string> = { good: 'var(--good)', bad: 'var(--bad)', warn: 'var(--warn)', info: 'var(--accent)' };
+
+/** Un point de vigilance (échéance, appel d'offres, préventes…) avec sa barre. */
+function watchItem(w: Watch): string {
+  const ref = w.ref ? ` data-ref-plot="${esc(w.ref.plot ?? '')}" data-ref-tender="${esc(w.ref.tender ?? '')}"` : '';
+  return `<div class="watch" style="--wc:${TONE_COLOR[w.tone]}"><div class="wtitle">${esc(w.title)}</div>${w.detail ? `<div class="muted" style="font-size:12px">${esc(w.detail)}</div>` : ''}${w.progress ? pbar(w.progress.value, w.progress.max, w.progress.label, { late: w.progress.late || w.tone === 'bad', warnAt: w.tone === 'warn' ? 0 : undefined }) : ''}${w.ref ? `<a href="#" class="wgo"${ref}>Voir</a>` : ''}</div>`;
+}
+
+const renderWatch = (items: Watch[]) => items.map(watchItem).join('');
+
+function bindRefs(root: HTMLElement) {
+  root.querySelectorAll<HTMLAnchorElement>('.wgo').forEach((a) => {
+    a.onclick = (e) => {
+      e.preventDefault();
+      gotoRef({ plot: a.dataset.refPlot || undefined, tender: a.dataset.refTender || undefined });
+    };
+  });
+}
+
+/** Va voir ce qu'un événement ou un point de vigilance concerne. */
+function gotoRef(ref: { plot?: string; tender?: string; project?: string }) {
+  closeNotif();
+  closeModal();
+  const plot = ref.plot ? plotById(ref.plot) : undefined;
+  if (ref.tender) tab = 'commune';
+  else if (plot) {
+    selected = new Set([plot.id]);
+    tab = 'terrain';
+    map.panTo([plot.parcel.ring[0].lat, plot.parcel.ring[0].lon]);
+  } else if (ref.project) tab = 'operations';
+  renderAll();
+}
+
+const relevant = (e: GameEvent) => isRelevant(e, ME);
+/** Événements nouveaux pour moi (hors ceux déjà montrés par une fenêtre). */
+const unreadCount = () => state.log.slice(Math.min(seenLog, state.log.length)).filter((e) => relevant(e) && !e.popup).length;
+const urgentWatch = () => watchList(state, ME).some((w) => w.tone === 'bad');
+
+const KIND_LABEL: Record<string, string> = { alea: 'Aléa', commune: 'Commune', operation: 'Opération', terrain: 'Terrain', finance: 'Finances' };
+const FILTERS: [NotifFilter, string][] = [['tout', 'Tout'], ['alea', 'Aléas'], ['commune', 'Commune'], ['operation', 'Opérations'], ['terrain', 'Terrains']];
+
+function closeNotif() {
+  const n = $('notif');
+  n.hidden = true;
+  n.innerHTML = '';
+}
+
+function openNotif() {
+  const previouslySeen = seenLog;
+  seenLog = state.log.length;
+  try {
+    localStorage.setItem(SEEN_KEY, String(seenLog));
+  } catch {
+    /* stockage indisponible */
+  }
+  renderTop();
+  const render = () => {
+    const n = $('notif');
+    const watches = watchList(state, ME);
+    const items = state.log
+      .map((e, i) => ({ e, i }))
+      .filter(({ e }) => relevant(e) && (notifFilter === 'tout' || e.kind === notifFilter || (notifFilter === 'operation' && e.kind === 'finance')))
+      .slice(-60)
+      .reverse();
+    n.innerHTML = `<div class="notif-back"></div><aside class="notif-panel" role="dialog" aria-label="Notifications">
+      <div class="notif-head"><b>Notifications</b><button id="notif-close" aria-label="Fermer">✕</button></div>
+      <div class="notif-body">
+        <h3>À surveiller${watches.length ? ` (${watches.length})` : ''}</h3>
+        ${renderWatch(watches) || '<p class="muted">Rien d’urgent : aucune échéance en cours.</p>'}
+        <h3>Historique</h3>
+        <div class="chips">${FILTERS.map(([k, l]) => `<button data-nf="${k}" class="chipbtn ${notifFilter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <ul class="nlist">${items
+          .map(({ e, i }) => {
+            const fresh = i >= previouslySeen;
+            const go = e.ref ? ` data-ref-plot="${esc(e.ref.plot ?? '')}" data-ref-tender="${esc(e.ref.tender ?? '')}" data-ref-project="${esc(e.ref.project ?? '')}"` : '';
+            return `<li class="${fresh ? 'fresh' : ''}" style="--wc:${TONE_COLOR[e.tone ?? 'info']}"><div class="nmeta"><span class="kind">${esc(KIND_LABEL[e.kind ?? ''] ?? 'Info')}</span> <span class="muted">${quarterLabel(e.round)}</span>${fresh ? ' <span class="new">nouveau</span>' : ''}</div><div>${esc(e.text)}</div>${e.ref && (e.ref.plot || e.ref.tender) ? `<a href="#" class="ngo"${go}>Voir</a>` : ''}</li>`;
+          })
+          .join('') || '<li class="muted">Rien pour le moment.</li>'}</ul>
+      </div></aside>`;
+    n.hidden = false;
+    n.querySelector<HTMLElement>('.notif-back')!.onclick = closeNotif;
+    n.querySelector<HTMLButtonElement>('#notif-close')!.onclick = closeNotif;
+    n.querySelectorAll<HTMLButtonElement>('[data-nf]').forEach((b) => (b.onclick = () => ((notifFilter = b.dataset.nf as NotifFilter), render())));
+    bindRefs(n);
+    n.querySelectorAll<HTMLAnchorElement>('.ngo').forEach((a) => {
+      a.onclick = (ev) => {
+        ev.preventDefault();
+        gotoRef({ plot: a.dataset.refPlot || undefined, tender: a.dataset.refTender || undefined, project: a.dataset.refProject || undefined });
+      };
+    });
+  };
+  render();
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('notif').hidden) closeNotif();
+});
+
+/** Explication pédagogique de chaque aléa ou verdict : ce que c'est, ce que ça change, quoi faire. */
+const ALERT_INFO: Record<string, { icon: string; title: string; why: string; tip?: string }> = {
+  'marche-baisse': { icon: '📉', title: 'Retournement du marché', why: 'Les acheteurs se font rares : les prix de vente baissent et la demande se refroidit pour quelques trimestres.', tip: 'Baissez le prix de vos lots invendus pour continuer à vendre, ou patientez en sachant que les intérêts courent.' },
+  'marche-hausse': { icon: '📈', title: 'Regain du marché', why: 'Les acheteurs reviennent : les prix de vente montent et les lots partent plus vite.', tip: 'C’est le moment de vendre sans remise, et d’acheter des terrains avant qu’ils ne renchérissent.' },
+  recours: { icon: '⚖️', title: 'Recours de voisins', why: 'Des riverains contestent le permis de construire devant le tribunal administratif : l’instruction est suspendue.', tip: 'Un trimestre de retard et des frais financiers. Sur un engagement de délai envers la commune, ce retard peut coûter des pénalités.' },
+  pollution: { icon: '☣️', title: 'Sol pollué', why: 'Des terres polluées sont découvertes au terrassement : il faut les évacuer et les traiter.', tip: 'Le surcoût est retranché du solde de l’opération à la livraison.' },
+  fouilles: { icon: '🏺', title: 'Fouilles archéologiques', why: 'Le sous-sol contient des vestiges : le chantier s’arrête le temps des fouilles préventives.', tip: 'Deux trimestres de retard. Un projet sans sous-sol n’est pas concerné.' },
+  'taux-hausse': { icon: '🏦', title: 'Les taux montent', why: 'Le crédit promoteur coûte plus cher : vos opérations non vendues et votre découvert vous coûtent davantage.', tip: 'Vendez vite les lots en cours, et évitez de lancer sans fonds propres suffisants.' },
+  'taux-baisse': { icon: '🏦', title: 'Les taux baissent', why: 'Le crédit promoteur devient moins cher : les opérations en cours coûtent moins en intérêts.' },
+  'ao-gagne': { icon: '🏆', title: 'Appel d’offres remporté', why: 'La commune vous cède le terrain : vos engagements (logements sociaux, qualité, délai) sont désormais contractuels.', tip: 'Lancez l’opération avant l’échéance, sinon la commune reprend le terrain et garde 10 % du prix.' },
+  'ao-perdu': { icon: '📋', title: 'Appel d’offres perdu', why: 'Un autre promoteur a obtenu une meilleure note. Votre somme bloquée vous est rendue.', tip: 'Regardez la pondération annoncée : un critère lourd (mixité, délai…) peut valoir plus qu’un meilleur prix.' },
+  'ao-reprise': { icon: '⏰', title: 'Terrain repris par la commune', why: 'Vous n’avez pas lancé l’opération dans le délai accordé : la commune reprend son terrain et garde une pénalité.' },
+  'retard-livraison': { icon: '⏱️', title: 'Livraison en retard', why: 'Vous avez livré après le délai promis à la commune : des pénalités sont déduites de votre résultat.', tip: 'Promettre un délai court améliore la note à l’appel d’offres mais ne pardonne aucun retard.' },
+  solde: { icon: '🏁', title: 'Opération soldée', why: 'Tous les lots sont vendus et le crédit est remboursé : le résultat net est encaissé.' },
+  'terrain-remporte': { icon: '🔑', title: 'Terrain remporté', why: 'Votre offre l’emporte : le terrain est à vous, prix et frais de notaire payés.', tip: 'Étudiez le « Meilleur projet » puis lancez l’opération : un terrain qui dort coûte du portage.' },
+  faillite: { icon: '💥', title: 'Faillite', why: 'Votre patrimoine est négatif : la banque saisit vos terrains et arrête vos chantiers.' },
+};
+
+/** Fenêtre d'alerte pour les aléas et verdicts importants, un par un. */
+function showPopups(list: GameEvent[], i = 0) {
+  const e = list[i];
+  const info = ALERT_INFO[e.code ?? ''] ?? { icon: 'ℹ️', title: KIND_LABEL[e.kind ?? ''] ?? 'Information', why: '' };
+  const last = i === list.length - 1;
+  const canGo = !!(e.ref && (e.ref.plot || e.ref.tender) && (e.ref.tender || (e.ref.plot && plotById(e.ref.plot))));
+  openModal(
+    `<div class="alert" style="--wc:${TONE_COLOR[e.tone ?? 'info']}">
+      ${list.length > 1 ? `<div class="muted" style="font-size:12px">${i + 1} / ${list.length} · ${quarterLabel(e.round)}</div>` : `<div class="muted" style="font-size:12px">${quarterLabel(e.round)}</div>`}
+      <div class="alert-icon" aria-hidden="true">${info.icon}</div>
+      <h2 class="mh">${esc(info.title)}</h2>
+      <p class="alert-text">${esc(e.text)}</p>
+      ${info.why ? `<p class="muted">${esc(info.why)}</p>` : ''}
+      ${info.tip ? `<div class="notice" style="--nc:var(--wc)"><b>À savoir</b> ${esc(info.tip)}</div>` : ''}
+      <div class="row" style="margin-top:12px">${canGo ? '<button id="al-go" type="button">Voir</button>' : ''}<span class="spacer"></span><button id="al-next" type="button" class="primary">${last ? 'Compris' : 'Suivant'}</button></div>
+    </div>`,
+    (root) => {
+      root.querySelector<HTMLButtonElement>('#al-next')!.onclick = () => (last ? closeModal() : showPopups(list, i + 1));
+      const go = root.querySelector<HTMLButtonElement>('#al-go');
+      if (go) go.onclick = () => gotoRef(e.ref!);
+    },
+  );
+}
+
 const QUALITY_LABEL = ['standard', 'performant', 'exemplaire'];
 const qualityHint = (q: number) => (q === 0 ? 'aucun surcoût' : `travaux +${Math.round((QUALITY_COST[q] - 1) * 100)} %, prix de vente +${Math.round((QUALITY_PREMIUM[q] - 1) * 100)} %`);
 const programmePill = (t: Pick<Tender['spec'], 'programme'>['programme']) => pill(esc(t.label), '#0f8b8d');
@@ -930,6 +1118,7 @@ function obligationNotice(p: Plot): string {
       o.groundCommerce ? '<span class="chip">commerces en rez-de-chaussée</span>' : '',
     ].join('')}</div>
     <div class="muted" style="font-size:12px;margin-top:4px">${esc(o.programme.summary)}</div>
+    <div style="font-size:12px;margin-top:6px">Délai pour lancer l’opération</div>${pbar(LAUNCH_GRACE - Math.max(0, left), LAUNCH_GRACE, left > 0 ? `encore ${left} trim.` : 'dépassé', { late: left <= 1, warnAt: 0.6 })}
     <div style="margin-top:4px">${left > 0 ? `À lancer avant la fin de <b>${quarterLabel(o.launchBy - 1)}</b> (encore ${left} trimestre${left > 1 ? 's' : ''})` : '<b class="bad">Délai dépassé</b>'}, sinon la commune reprend le terrain et garde 10 % du prix. Livrer en retard coûte des pénalités. Ce terrain ne peut ni se revendre ni s’assembler tant que l’opération n’est pas lancée.</div></div>`;
 }
 
@@ -991,7 +1180,8 @@ function tenderCard(t: Tender): string {
       `<span class="chip">prix de cession ≥ <b>${eur(s.minPrice)}</b></span>`,
     ].join('')}</div>
     <div class="muted" style="font-size:12px;margin-top:4px">Critères de choix : prix <b>${Math.round(w.price * 100)} %</b> · mixité sociale <b>${Math.round(w.social * 100)} %</b> · qualité <b>${Math.round(w.quality * 100)} %</b> · délai <b>${Math.round(w.delay * 100)} %</b>. Les autres propositions restent secrètes (${t.bids.length} déposée${t.bids.length > 1 ? 's' : ''}).</div>
-    <div class="muted" style="font-size:12px">Dernier trimestre pour répondre : <b>${quarterLabel(t.closesAt - 1)}</b> (encore ${left} trimestre${left > 1 ? 's' : ''}). Le lauréat dispose ensuite de ${LAUNCH_GRACE} trimestres pour lancer.</div>
+    ${pbar(state.round - t.opensAt, t.closesAt - t.opensAt, `${left} trimestre${left > 1 ? 's' : ''} pour répondre`, { warnAt: 0.6 })}
+    <div class="muted" style="font-size:12px">Dernier trimestre pour répondre : <b>${quarterLabel(t.closesAt - 1)}</b>. Le lauréat dispose ensuite de ${LAUNCH_GRACE} trimestres pour lancer.</div>
     <label class="f col">Prix du terrain<input type="number" data-t="price" step="1000" min="${s.minPrice}" value="${d.price}"></label>
     <label class="f col">Logements sociaux <span><input type="range" data-t="share" min="${Math.round(s.minSocialShare * 100)}" max="${Math.round(MAX_SOCIAL_SHARE * 100)}" step="1" value="${Math.round(d.share * 100)}"> <b data-t="sharev">${Math.round(d.share * 100)} %</b> <span class="muted">(vendus à un bailleur à prix réduit)</span></span></label>
     <label class="f col">Qualité<select data-t="quality">${qOpts}</select></label>
@@ -1007,7 +1197,7 @@ function renderCommune(): string {
   const open = openTenders(state);
   const done = state.tenders.filter((t) => t.status !== 'open').slice(-6).reverse();
   const committed = committedTenderCash(state, ME);
-  const bound = state.plots.filter((p) => p.owner === ME && p.obligation);
+  const commitments = watchList(state, ME).filter((w) => /^(launch|delivery):/.test(w.id));
   const resultRow = (t: Tender) => {
     const p = plotById(t.plotId);
     const who = t.status === 'awarded' ? `attribué à <b>${esc(state.players.find((x) => x.id === t.winner)?.name ?? '?')}</b>` : 'infructueux';
@@ -1017,7 +1207,7 @@ function renderCommune(): string {
     <p class="muted" style="font-size:12px">La commune cède ses terrains au <b>meilleur projet</b>, pas au plus offrant : chaque proposition (prix, logements sociaux, qualité, délai) est notée selon des critères annoncés. En échange du cahier des charges, le cadre de l’opération (ZAC, PUP, quartier prioritaire) apporte des avantages.</p>
     ${open.map(tenderCard).join('') || '<p class="muted">Aucun appel d’offres ouvert pour le moment : la commune en lance régulièrement.</p>'}
     ${committed ? `<p class="muted" style="font-size:12px">${eur(committed)} sont bloqués sur votre trésorerie tant que les appels d’offres sont ouverts.</p>` : ''}
-    ${bound.length ? `<h2>Mes engagements</h2>${bound.map((p) => `<div class="card"><a href="#" data-goto="${esc(p.id)}">${esc(shortLabel(p))}</a> ${programmePill(p.obligation!.programme)}<div class="muted">à lancer avant la fin de ${quarterLabel(p.obligation!.launchBy - 1)}</div></div>`).join('')}` : ''}
+    ${commitments.length ? `<h2>Mes engagements envers la commune</h2>${renderWatch(commitments)}` : ''}
     ${done.length ? `<h2>Résultats</h2><ul class="log">${done.map(resultRow).join('')}</ul>` : ''}`;
 }
 
@@ -1224,6 +1414,8 @@ function operationCard(runId: string): string {
   const stage = r.phase === 'permis' ? `trimestre ${r.phaseElapsed + 1}/${r.permitRounds}` : r.phase === 'chantier' ? `trimestre ${r.phaseElapsed + 1}/${r.buildRounds}` : r.phase === 'livraison' ? 'derniers lots' : 'en attente';
   let html = `<div class="card"><div><b>${esc(r.id)}</b> <span class="muted">${esc(owner)} · ${Math.round(r.sdp)} m²</span></div>
     <div>${PHASE_LABEL[r.phase]} <span class="muted">· ${stage}</span></div>
+    ${phaseTimeline(r)}
+    ${r.terms ? deliveryBar(r) : ''}
     ${bar}<div>${r.lotsSold}/${r.lots} lots vendus${left ? ` <span class="muted">· ≈ <span data-sales="${esc(r.id)}">${sales.toFixed(1).replace('.', ',')}</span> par trimestre</span>` : ' · tout est vendu'}</div>`;
   html += r.financed ? '<div class="muted">Crédit bancaire débloqué</div>' : `<div class="muted">Crédit débloqué à ${threshold} % vendus${share >= threshold ? '' : ` · encore ${Math.max(1, Math.ceil(r.lots * state.config.presaleThreshold) - r.lotsSold)} lot(s)`}</div>`;
   if (mineOp) {
@@ -1261,7 +1453,8 @@ function renderOperations(): string {
   drawOverlay(null);
   const mine = state.projects.filter((r) => r.owner === ME);
   const holdings = state.plots.filter((p) => p.owner === ME && !p.projectId);
-  return `<h2>Mes opérations (${mine.length})</h2>${mine.map((r) => operationCard(r.id)).join('') || '<p class="muted">Aucune opération en cours.</p>'}
+  const watches = watchList(state, ME).filter((w) => /^(launch|delivery|presales|debt):/.test(w.id + ':'));
+  return `${watches.length ? `<h2>À surveiller</h2>${renderWatch(watches)}` : ''}<h2>Mes opérations (${mine.length})</h2>${mine.map((r) => operationCard(r.id)).join('') || '<p class="muted">Aucune opération en cours.</p>'}
     <h2>Mes terrains libres (${holdings.length})</h2>
     ${holdings.map((p) => `<div class="card"><a href="#" data-goto="${esc(p.id)}">${esc(p.label ?? p.id)}</a><div class="muted">payé ${eur(p.paid)} · portage ${eur(p.paid * state.config.holdingCostRate)}/trim.</div></div>`).join('') || '<p class="muted">Aucun.</p>'}`;
 }

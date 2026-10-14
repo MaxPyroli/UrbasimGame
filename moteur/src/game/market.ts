@@ -89,13 +89,13 @@ export function resolveMarket(state: GameState): GameState {
     const threshold = plot.listing ? plot.listing.minPrice : plot.askingPrice * reserveFactor(plot, config.reserveSpread);
     const refund = (o: Offer) => (s = mapPlayer(s, o.player, (p) => ({ ...p, cash: p.cash + o.reserved })));
     const humanEvent = (o: Offer, text: string) => {
-      if (!s.players.find((p) => p.id === o.player)?.bot) s = withEvent(s, { player: o.player, text });
+      if (!s.players.find((p) => p.id === o.player)?.bot) s = withEvent(s, { player: o.player, kind: 'terrain', tone: text.startsWith('Vous') ? 'info' : 'info', text });
     };
     if (best && best.price >= threshold) {
       const winner = s.players.find((p) => p.id === best.player)!;
       s = mapPlot(s, plot.id, (p) => ({ ...p, owner: best.player, paid: best.reserved, listing: undefined }));
       s = { ...s, landHeat: s.landHeat * (1 + config.landHeatStep) };
-      s = withEvent(s, { player: best.player, text: `${winner.name} remporte ${label} pour ${eur(best.price)}${ranked.length > 1 ? ` (${ranked.length} offres, la 2e : ${eur(ranked[1].price)})` : ''}` });
+      s = withEvent(s, { player: best.player, kind: 'terrain', tone: 'good', popup: true, code: 'terrain-remporte', ref: { plot: plot.id }, text: `${winner.name} remporte ${label} pour ${eur(best.price)}${ranked.length > 1 ? ` (${ranked.length} offres, la 2e : ${eur(ranked[1].price)})` : ''}` });
       for (const o of ranked.slice(1)) {
         refund(o);
         humanEvent(o, `Vous perdez ${label} : ${winner.name} a offert ${eur(best.price)} contre ${eur(o.price)}`);
@@ -125,7 +125,7 @@ export function listPlots(state: GameState, count: number): GameState {
     picked.push(pool.splice(i, 1)[0].id);
   }
   for (const id of picked) s = mapPlot(s, id, (p) => ({ ...p, listing: { until: s.round + s.config.auctionRounds, minPrice: p.askingPrice } }));
-  return picked.length ? withEvent(s, { text: `${picked.length} terrain${picked.length > 1 ? 's' : ''} mis en vente : offres ouvertes jusqu’au trimestre ${s.round + s.config.auctionRounds + 1}` }) : s;
+  return picked.length ? withEvent(s, { kind: 'terrain', tone: 'info', text: `${picked.length} terrain${picked.length > 1 ? 's' : ''} mis en vente : offres ouvertes jusqu’au trimestre ${s.round + s.config.auctionRounds + 1}` }) : s;
 }
 
 /** Nombre de terrains à mettre en vente ce trimestre. */

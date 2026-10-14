@@ -339,7 +339,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     if (issue) fusion.issue = issue;
     let s: GameState = { ...state, plots: [...state.plots.filter((p) => !ids.includes(p.id)), fusion] };
     s = reprice(s);
-    return { ok: true, state: withEvent(s, { player: player.id, text: `${player.name} assemble ${ids.join(', ')} (${Math.round(merged.area)} m²)` }) };
+    return { ok: true, state: withEvent(s, { player: player.id, kind: 'terrain', tone: 'info', text: `${player.name} assemble ${ids.join(', ')} (${Math.round(merged.area)} m²)` }) };
   }
 
   if (action.type === 'setPrice') {
@@ -379,7 +379,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     let s = mapPlayer(state, player.id, (p) => ({ ...p, cash: p.cash - total }));
     s = mapPlot(s, plot.id, (p) => ({ ...p, owner: player.id, paid: total }));
     s = reprice({ ...s, landHeat: s.landHeat * (1 + s.config.landHeatStep) });
-    return { ok: true, state: withEvent(s, { player: player.id, text: `${player.name} achète ${plot.id} pour ${eur(plot.askingPrice)}` }) };
+    return { ok: true, state: withEvent(s, { player: player.id, kind: 'terrain', tone: 'good', ref: { plot: plot.id }, text: `${player.name} achète ${plot.id} pour ${eur(plot.askingPrice)}` }) };
   }
 
   if (plot.owner !== player.id) return fail('ce terrain ne vous appartient pas');
@@ -390,7 +390,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     const price = Math.round(plot.askingPrice * (1 - state.config.plotSpread));
     let s = credit(state, player.id, price);
     s = mapPlot(s, plot.id, (p) => ({ ...p, owner: null, paid: 0 }));
-    return { ok: true, state: withEvent(s, { player: player.id, text: `${player.name} revend ${plot.id} pour ${eur(price)}` }) };
+    return { ok: true, state: withEvent(s, { player: player.id, kind: 'terrain', tone: 'info', text: `${player.name} revend ${plot.id} pour ${eur(price)}` }) };
   }
 
   // launch
@@ -481,6 +481,9 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     ok: true,
     state: withEvent(s, {
       player: player.id,
+      kind: 'operation',
+      tone: 'good',
+      ref: { project: run.id, plot: plot.id },
       text: `${player.name} lance ${run.id} sur ${plot.id} : ${Math.round(run.sdp)} m² SDP, ${project.indicators.dwellings} logements, ${total} trimestres, marge attendue ${eur(bilan.margin)}`,
     }),
   };
@@ -520,7 +523,7 @@ function rollEvent(state: GameState): GameState {
     const factor = g < 0.5 ? 0.92 : 1.07;
     // Un retournement de marché refroidit aussi les acheteurs ; un regain les ramène.
     s = { ...s, marketIndex: clamp(s.marketIndex * factor, 0.6, 1.5), demandShock: factor < 1 ? -0.35 : 0.25 };
-    return withEvent(s, { text: factor < 1 ? 'Retournement du marché : les prix de vente baissent de 8 %' : 'Regain du marché : les prix de vente montent de 7 %' });
+    return withEvent(s, { kind: 'alea', tone: factor < 1 ? 'bad' : 'good', code: factor < 1 ? 'marche-baisse' : 'marche-hausse', popup: true, text: factor < 1 ? 'Retournement du marché : les prix de vente baissent de 8 %' : 'Regain du marché : les prix de vente montent de 7 %' });
   }
   if (u < 0.45) {
     // Recours de voisins sur un permis ou un projet commençant.
@@ -529,7 +532,7 @@ function rollEvent(state: GameState): GameState {
     if (!p) return s;
     const cost = (p.loanRepayment * s.interestRate) / 4;
     s = mapProject(s, p.id, (x) => ({ ...x, permitRounds: x.permitRounds + 1, extraCost: x.extraCost + cost }));
-    return withEvent(s, { player: p.owner, text: `Recours de voisins contre ${p.id} (${owner(p)}) : permis retardé d'un trimestre` });
+    return withEvent(s, { player: p.owner, kind: 'alea', tone: 'bad', code: 'recours', popup: true, ref: { project: p.id, plot: p.plotId }, text: `Recours de voisins contre ${p.id} (${owner(p)}) : permis retardé d'un trimestre` });
   }
   if (u < 0.65) {
     // Sol pollué découvert pendant le chantier.
@@ -540,7 +543,7 @@ function rollEvent(state: GameState): GameState {
     [v, s] = uniform(s);
     const cost = p.bilan.costs.works * (0.03 + 0.05 * v);
     s = mapProject(s, p.id, (x) => ({ ...x, extraCost: x.extraCost + cost }));
-    return withEvent(s, { player: p.owner, text: `Sol pollué sous ${p.id} (${owner(p)}) : surcoût de ${eur(cost)}` });
+    return withEvent(s, { player: p.owner, kind: 'alea', tone: 'bad', code: 'pollution', popup: true, ref: { project: p.id, plot: p.plotId }, text: `Sol pollué sous ${p.id} (${owner(p)}) : surcoût de ${eur(cost)}` });
   }
   if (u < 0.8) {
     // Fouilles archéologiques : seulement si le projet a un sous-sol.
@@ -549,14 +552,14 @@ function rollEvent(state: GameState): GameState {
     if (!p) return s;
     const cost = (p.loanRepayment * s.interestRate) / 2 + p.bilan.costs.works * 0.01;
     s = mapProject(s, p.id, (x) => ({ ...x, buildRounds: x.phase === 'chantier' ? x.buildRounds + 2 : x.buildRounds, permitRounds: x.phase === 'permis' ? x.permitRounds + 2 : x.permitRounds, extraCost: x.extraCost + cost }));
-    return withEvent(s, { player: p.owner, text: `Fouilles archéologiques sur ${p.id} (${owner(p)}) : deux trimestres de retard` });
+    return withEvent(s, { player: p.owner, kind: 'alea', tone: 'bad', code: 'fouilles', popup: true, ref: { project: p.id, plot: p.plotId }, text: `Fouilles archéologiques sur ${p.id} (${owner(p)}) : deux trimestres de retard` });
   }
   // Décision de la banque centrale.
   let g: number;
   [g, s] = uniform(s);
   const delta = g < 0.5 ? -0.01 : 0.01;
   s = { ...s, interestRate: clamp(s.interestRate + delta, s.config.minRate, s.config.maxRate) };
-  return withEvent(s, { text: `Les taux ${delta > 0 ? 'montent' : 'baissent'} : crédit promoteur à ${(s.interestRate * 100).toFixed(1)} %` });
+  return withEvent(s, { kind: 'alea', tone: delta > 0 ? 'bad' : 'good', code: delta > 0 ? 'taux-hausse' : 'taux-baisse', popup: true, text: `Les taux ${delta > 0 ? 'montent' : 'baissent'} : crédit promoteur à ${(s.interestRate * 100).toFixed(1)} %` });
 }
 
 /** Résout un trimestre : chantiers, marché, ventes, encaissements, aléas, livraisons. Appelée quand tous les joueurs sont prêts. */
@@ -662,13 +665,13 @@ export function advanceRound(state: GameState): GameState {
   };
 
   for (const { run, rounds } of late) {
-    s = withEvent(s, { player: run.owner, text: `Livraison de ${run.id} avec ${rounds} trimestre${rounds > 1 ? 's' : ''} de retard sur l’engagement pris auprès de la commune : pénalités de ${eur(Math.min(0.15, rounds * 0.02) * run.bilan.revenue.total)}` });
+    s = withEvent(s, { player: run.owner, kind: 'commune', tone: 'bad', popup: true, code: 'retard-livraison', ref: { project: run.id, plot: run.plotId }, text: `Livraison de ${run.id} avec ${rounds} trimestre${rounds > 1 ? 's' : ''} de retard sur l’engagement pris auprès de la commune : pénalités de ${eur(Math.min(0.15, rounds * 0.02) * run.bilan.revenue.total)}` });
   }
 
   // Le seuil de préventes est atteint : la banque débloque le crédit et refinance le terrain, le chantier peut démarrer.
   for (const p of released) {
     s = credit(s, p.owner, p.landRefund);
-    s = withEvent(s, { player: p.owner, text: `La banque débloque le crédit de ${p.id} : ${Math.round(soldShare(p) * 100)} % des lots vendus sur plan, ${eur(p.landRefund)} de terrain refinancés, chantier lancé` });
+    s = withEvent(s, { player: p.owner, kind: 'operation', tone: 'good', ref: { project: p.id, plot: p.plotId }, text: `La banque débloque le crédit de ${p.id} : ${Math.round(soldShare(p) * 100)} % des lots vendus sur plan, ${eur(p.landRefund)} de terrain refinancés, chantier lancé` });
   }
 
   for (const p of closing) {
@@ -689,7 +692,7 @@ export function advanceRound(state: GameState): GameState {
     const base = Math.max(MIN_PLOT_PRICE, Math.round((p.sdp * config.market.landPerSdp * 1.2) / 1000) * 1000);
     s = mapPlot(s, p.plotId, (x) => ({ ...x, owner: null, paid: 0, projectId: null, existingSdp: p.sdp, existingHeight: p.height, basePrice: base, obligation: undefined }));
     s = { ...s, projects: s.projects.filter((x) => x.id !== p.id) };
-    s = withEvent(s, { player: p.owner, text: `${owner.name} solde ${p.id} : ${p.lots} lots vendus ${eur(p.soldRevenue)}, résultat net ${eur(net)} en ${p.roundsRun} trimestres` });
+    s = withEvent(s, { player: p.owner, kind: 'operation', tone: net >= 0 ? 'good' : 'bad', popup: true, code: 'solde', ref: { project: p.id, plot: p.plotId }, text: `${owner.name} solde ${p.id} : ${p.lots} lots vendus ${eur(p.soldRevenue)}, résultat net ${eur(net)} en ${p.roundsRun} trimestres` });
   }
 
   // Appels d'offres de la commune : clôture des appels échus, reprise des terrains non lancés, nouvel appel.
@@ -727,7 +730,7 @@ function declareBankruptcy(state: GameState, id: string): GameState {
     plots: s.plots.map((p) => (p.owner === id ? { ...p, owner: null, paid: 0, projectId: null, ...(p.obligation ? { municipal: true, obligation: undefined } : {}) } : p)),
   };
   s = mapPlayer(s, id, (p) => ({ ...p, bankrupt: true, cash: 0, debt: 0 }));
-  return withEvent(s, { player: id, text: `${name} fait faillite : la banque saisit ${plots.length} terrain${plots.length > 1 ? 's' : ''}${runs.length ? ` et arrête ${runs.length} chantier${runs.length > 1 ? 's' : ''}` : ''}` });
+  return withEvent(s, { player: id, kind: 'finance', tone: 'bad', popup: true, code: 'faillite', text: `${name} fait faillite : la banque saisit ${plots.length} terrain${plots.length > 1 ? 's' : ''}${runs.length ? ` et arrête ${runs.length} chantier${runs.length > 1 ? 's' : ''}` : ''}` });
 }
 
 /** Valeur du patrimoine d'un joueur : trésorerie + terrains (au prix de reprise) + fonds propres engagés dans les opérations. */

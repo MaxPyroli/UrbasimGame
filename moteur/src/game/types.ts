@@ -302,10 +302,22 @@ export interface Offer {
   reserved: number;
 }
 
+/** Famille d'un événement du journal : sert à filtrer les notifications et à choisir l'icône. */
+export type EventKind = 'alea' | 'commune' | 'terrain' | 'operation' | 'finance';
+
 export interface GameEvent {
   round: number;
+  /** Joueur concerné ; absent = événement public (marché, taux, appel d'offres lancé). */
   player?: PlayerId;
   text: string;
+  kind?: EventKind;
+  tone?: 'good' | 'bad' | 'info';
+  /** Identifiant de l'aléa ou de l'événement type (recours, pollution, fouilles, marche-baisse…), pour l'explication affichée. */
+  code?: string;
+  /** Ce que l'événement concerne, pour y aller d'un clic. */
+  ref?: { plot?: PlotId; project?: string; tender?: string };
+  /** À signaler au joueur par une fenêtre, en plus du journal. */
+  popup?: boolean;
 }
 
 export interface GameState {

@@ -289,6 +289,14 @@ collectivité jouent le rôle des enchères du Monopoly.
   la ZAC pris en compte dans le projet), arrêt du ▶▶ à l'ouverture d'un appel et au dernier trimestre pour répondre, étape du
   mode d'emploi. Pistes : programmes à TVA 5,5 % en accession sur toute la ville, PUP négocié, surenchère, réputation (elle
   pourrait peser dans la note), bots qui assemblent des parcelles.
+- Fait : **clarté** (retour « plus clair »). Journal d'événements enrichi (`GameEvent.kind/tone/code/ref/popup`) ;
+  `moteur/src/game/alerts.ts` : `watchList` (échéances et points de vigilance : délai pour lancer accordé par la commune,
+  délai de livraison promis avec projection du retard, préventes à atteindre, appels d'offres ouverts, offres en cours,
+  découvert) et `isRelevant`/`relevantEvents` (événements du joueur et annonces publiques). Interface : cloche de
+  notifications (panneau latéral : « À surveiller » avec barres de progression, historique filtrable, nouveautés, lien « Voir »),
+  **fenêtres d'alerte** pour les aléas et verdicts (explication pédagogique et conseil), frise des étapes d'une opération
+  (permis, préventes, chantier, ventes), barres de délai (lancer, livrer, répondre à un appel d'offres), avancement de la
+  partie en haut. Le ▶▶ s'arrête aussi sur les événements publics importants.
 - À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, programmes plus variés (TVA 5,5 %,
   ZAC propres à un territoire), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 
@@ -302,6 +310,17 @@ collectivité jouent le rôle des enchères du Monopoly.
   communales), **ZAC** (charges foncières imposées, cahier des charges, aménageur). À modéliser comme des « règles
   de programme » attachées à une parcelle ou une zone, qui modifient le bilan (TVA/prix de vente plafonné, aides,
   contraintes de programme) et se combinent avec les appels d'offres.
+
+### Notes de la partie « clarté » (à traiter plus tard)
+- **Voir les bâtiments construits par les autres sur la carte** : les opérations (en cours et livrées) doivent remplacer le
+  bâti existant sur la carte, avec leur hauteur réelle, au lieu de seulement colorer la parcelle.
+- **Construire en limite de parcelle** : possibilité de construire en bord de parcelle côté rue, ou à l'arrière du terrain
+  (aujourd'hui retraits de fond/côtés fixés par la zone), avec les règles de PLU associées (implantation à l'alignement, en
+  limite séparative, prospects, mitoyenneté) à ajouter aux zones.
+- **Vue 3D des bâtiments** (pour bien plus tard) : visualiser les immeubles en volume, existants et construits par les
+  joueurs (les hauteurs sont déjà dans les données et dans les projets).
+- **Un affichage plus joli et plus lisible** : routes, parcelles, bâtiments, parcs, équipements avec des icônes (gare,
+  école, mairie, commerces…), hiérarchie visuelle claire, thèmes.
 
 ## 5 quater. Multijoueur pair-à-pair (souhait, sans serveur à gérer)
 Le moteur est déjà adapté : état pur, sérialisable, déterministe, aléa dans l'état (graine). Pistes :

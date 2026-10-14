@@ -206,7 +206,7 @@ export function openTender(state: GameState, worth: (s: GameState, plot: Plot, s
   const id = `AO${s.nextTenderId}`;
   const tender: Tender = { id, plotId: plot.id, opensAt: s.round, closesAt: s.round + s.config.tenderRounds, spec, bids: [], status: 'open' };
   s = { ...s, tenders: [...s.tenders, tender], nextTenderId: s.nextTenderId + 1 };
-  return withEvent(s, { text: `La commune lance l’appel d’offres ${id} sur ${plot.label ? plot.label.replace(' · Montreuil', '') : plot.id} : ${programme.label} ; ${Math.round(spec.minSocialShare * 100)} % de logements sociaux au moins, R+${spec.maxLevels} maximum, réponse avant le trimestre ${tender.closesAt + 1}` });
+  return withEvent(s, { kind: 'commune', tone: 'info', code: 'ao-ouvert', ref: { tender: id, plot: plot.id }, text: `La commune lance l’appel d’offres ${id} sur ${plot.label ? plot.label.replace(' · Montreuil', '') : plot.id} : ${programme.label} ; ${Math.round(spec.minSocialShare * 100)} % de logements sociaux au moins, R+${spec.maxLevels} maximum, réponse avant le trimestre ${tender.closesAt + 1}` });
 }
 
 /** Clôt les appels d'offres échus : la meilleure note l'emporte, les autres sont remboursés. */
@@ -223,7 +223,7 @@ export function resolveTenders(state: GameState): GameState {
     const refund = (b: TenderBid) => (s = mapPlayer(s, b.player, (p) => ({ ...p, cash: p.cash + b.reserved })));
     if (!ranked.length) {
       s = { ...s, tenders: s.tenders.map((x) => (x.id === t.id ? { ...x, status: 'void' as const } : x)) };
-      s = withEvent(s, { text: `Appel d’offres ${t.id} infructueux : aucune proposition pour ${label}` });
+      s = withEvent(s, { kind: 'commune', tone: 'info', ref: { tender: t.id, plot: plot.id }, text: `Appel d’offres ${t.id} infructueux : aucune proposition pour ${label}` });
       continue;
     }
     const win = ranked[0];
@@ -243,11 +243,16 @@ export function resolveTenders(state: GameState): GameState {
     s = { ...s, landHeat: s.landHeat * (1 + s.config.landHeatStep), tenders: s.tenders.map((x) => (x.id === t.id ? { ...x, status: 'awarded' as const, winner: win.b.player } : x)) };
     s = withEvent(s, {
       player: win.b.player,
+      kind: 'commune',
+      tone: 'good',
+      popup: true,
+      code: 'ao-gagne',
+      ref: { tender: t.id, plot: plot.id },
       text: `${winner.name} remporte l’appel d’offres ${t.id} (${label}) : note ${win.score.total.toFixed(2).replace('.', ',')}, ${eur(win.b.price)}, ${Math.round(win.b.socialShare * 100)} % de logements sociaux${win.b.quality ? `, qualité ${win.b.quality === 2 ? 'bas carbone' : 'performante'}` : ''}, livraison en ${win.b.delivery} trimestres${ranked.length > 1 ? ` (${ranked.length} propositions, la 2e notée ${ranked[1].score.total.toFixed(2).replace('.', ',')})` : ''}`,
     });
     for (const r of ranked.slice(1)) {
       refund(r.b);
-      if (!s.players.find((p) => p.id === r.b.player)?.bot) s = withEvent(s, { player: r.b.player, text: `Vous perdez l’appel d’offres ${t.id} : votre note ${r.score.total.toFixed(2).replace('.', ',')} contre ${win.score.total.toFixed(2).replace('.', ',')}` });
+      if (!s.players.find((p) => p.id === r.b.player)?.bot) s = withEvent(s, { player: r.b.player, kind: 'commune', tone: 'bad', popup: true, code: 'ao-perdu', ref: { tender: t.id, plot: plot.id }, text: `Vous perdez l’appel d’offres ${t.id} : votre note ${r.score.total.toFixed(2).replace('.', ',')} contre ${win.score.total.toFixed(2).replace('.', ',')}` });
     }
   }
   return s;
@@ -265,7 +270,7 @@ export function enforceObligations(state: GameState): GameState {
     const back = Math.max(0, Math.round(ob.price) - penalty);
     s = mapPlayer(s, owner.id, (p) => ({ ...p, cash: p.cash + back }));
     s = mapPlot(s, plot.id, (p) => ({ ...p, owner: null, paid: 0, municipal: true, obligation: undefined }));
-    s = withEvent(s, { player: owner.id, text: `${owner.name} n’a pas lancé son opération à temps : la commune reprend le terrain et garde ${eur(penalty)} de pénalité` });
+    s = withEvent(s, { player: owner.id, kind: 'commune', tone: 'bad', popup: true, code: 'ao-reprise', ref: { plot: plot.id }, text: `${owner.name} n’a pas lancé son opération à temps : la commune reprend le terrain et garde ${eur(penalty)} de pénalité` });
   }
   return s;
 }
