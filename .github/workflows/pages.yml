@@ -1,0 +1,44 @@
+name: Publier le jeu (GitHub Pages)
+
+# À chaque push sur la branche de développement (ou sur main), le jeu est reconstruit et publié
+# sur la branche `gh-pages`, que GitHub Pages sert à https://maxpyroli.github.io/UrbasimGame/
+on:
+  push:
+    branches: [claude/blissful-lovelace-0tlrkm, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            moteur/package-lock.json
+            jeu/package-lock.json
+      - name: Dépendances du moteur
+        run: npm ci
+        working-directory: moteur
+      - name: Dépendances du jeu
+        run: npm ci
+        working-directory: jeu
+      - name: Construction (vérification des types incluse)
+        run: npm run build
+        working-directory: jeu
+      - name: Publication sur gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: jeu/dist
+          force_orphan: true
+          commit_message: "Publication du jeu (${{ github.sha }})"

@@ -300,6 +300,11 @@ collectivité jouent le rôle des enchères du Monopoly.
 - À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, programmes plus variés (TVA 5,5 %,
   ZAC propres à un territoire), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 
+- Fait : **publication automatique** (`.github/workflows/pages.yml`) : à chaque push sur la branche de développement ou sur
+  `main`, GitHub Actions reconstruit le jeu (`jeu/`, avec les vraies tuiles de carte) et le publie sur la branche `gh-pages`,
+  servie par GitHub Pages à https://maxpyroli.github.io/UrbasimGame/. Réglage unique à faire dans le dépôt :
+  Settings → Pages → Source « Deploy from a branch » → branche `gh-pages`, dossier `/ (root)`.
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,
