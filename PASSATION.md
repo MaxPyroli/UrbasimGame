@@ -138,8 +138,20 @@ collectivité jouent le rôle des enchères du Monopoly.
   +5 %/achat qui retombe de 10 %/tour ; patrimoine final / départ ≈ 1,1 à 4,8 (médiane ≈ 2) sur 4 graines, 40 tours.
   Limites : toutes les parcelles utilisent les mêmes critères par défaut (pas de PLU de jeu) ; le bâti existant n'a pas
   de valeur propre ; parcelles voisines pas fusionnables ; les bots ne regroupent pas de parcelles.
+- Fait : **assemblage de parcelles** (`moteur/src/game/merge.ts`, action `merge`) : le joueur possède plusieurs
+  parcelles mitoyennes (≥ 1,5 m de limite commune, jours de numérisation ≤ 20 cm tolérés), il les fusionne en un terrain
+  unique ; contour fusionné, façades sur rue conservées, SDP existante / prix payé / prix de référence additionnés ;
+  refus si elles ne se touchent pas ou enferment une cour. Les bots n'assemblent pas encore.
+- Fait : **interface avec carte** (`jeu/`, Vite + TypeScript + Leaflet, fond OpenStreetMap). Lancer : `cd moteur &&
+  npm install`, puis `cd jeu && npm install && npm run dev` (build : `npm run build`). Une partie solo contre 3 bots
+  (prudent, équilibré, agressif) sur le quartier de Montreuil, sauvegardée dans le navigateur (localStorage).
+  Carte : parcelles colorées par propriétaire, prix au m² des terrains libres en dégradé, opérations en pointillés,
+  emprise du bâtiment projeté en orange. Panneaux : terrain (acheter, revendre, assembler via Maj+clic ou « sélection
+  multiple »), projet (R+x, attique, stationnement, bilan en direct, lancement), opérations, journal, classement.
+  Vérifié dans Chromium (parcours achat → assemblage → opération → 6 trimestres, sans erreur) ; pas de test
+  automatisé de l'interface. `window.__urbasim` (serveur de développement seulement) sert aux essais automatisés.
 - À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, appels d'offres, programmes (TVA 5,5 %,
-  ZAC), multijoueur pair-à-pair, interface (carte).
+  ZAC), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
