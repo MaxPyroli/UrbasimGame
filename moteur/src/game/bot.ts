@@ -1,5 +1,5 @@
 import { DEFAULT_CRITERIA, computeBilan, computeProject, type Bilan, type Criteria, type Parcel, type Project } from '../engine';
-import { MAX_PRICE_POLICY, MIN_PRICE_POLICY, applyAction, currentMarket, currentParams } from './game';
+import { MAX_PRICE_POLICY, MIN_PRICE_POLICY, applyAction, criteriaFor, currentMarket, currentParams } from './game';
 import { lotsLeft, marketDemand, sellingPace, unitsOnOffer } from './sales';
 import type { BotProfileName, GameState, Plot, Player } from './types';
 
@@ -32,8 +32,9 @@ export interface Plan {
 // Les projets ne dépendent que de la géométrie et du gabarit : on les mémorise par terrain.
 const projectCache = new WeakMap<Parcel, Map<string, Project>>();
 
-function projectFor(parcel: Parcel, levels: number, attic: boolean): { criteria: Criteria; project: Project } {
-  const criteria: Criteria = { ...DEFAULT_CRITERIA, levels, attic };
+function projectFor(plot: Plot, levels: number, attic: boolean): { criteria: Criteria; project: Project } {
+  const parcel: Parcel = plot.parcel;
+  const criteria: Criteria = criteriaFor(plot, { ...DEFAULT_CRITERIA, levels, attic });
   let byKey = projectCache.get(parcel);
   if (!byKey) projectCache.set(parcel, (byKey = new Map()));
   const key = `${levels}/${attic}`;
@@ -48,7 +49,7 @@ export function bestPlan(state: GameState, plot: Plot, landPrice: number, profil
   if (plot.issue) return null;
   for (let levels = 0; levels <= profile.maxLevels; levels++) {
     for (const attic of levels >= 2 ? [false, true] : [false]) {
-      const { criteria, project } = projectFor(plot.parcel, levels, attic);
+      const { criteria, project } = projectFor(plot, levels, attic);
       if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
       const bilan = computeBilan({ project, market: currentMarket(state, plot), landPrice, existingSdp: plot.existingSdp, params: currentParams(state) });
       if (bilan.marginRate < profile.minMargin) continue;

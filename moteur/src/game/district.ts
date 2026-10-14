@@ -14,7 +14,8 @@ import {
   type Ring,
 } from '../engine';
 import { DEFAULT_CONFIG, defaultAskingPrice, plotIssue, type PlotSeed } from './game';
-import type { PlotIssue } from './types';
+import { ZONE_RULES } from './plu';
+import type { PlotIssue, ZoneFamily } from './types';
 import { locationFactors, type Poi } from './location';
 import { MARKETS } from '../engine';
 
@@ -32,6 +33,9 @@ export interface DistrictParcel {
   existingSdp: number;
   /** Hauteur du plus haut bâtiment existant sur la parcelle (m), 0 si aucun. */
   existingHeight: number;
+  /** Famille et code de la zone du PLU au centre de la parcelle (absent si le zonage n'est pas connu). */
+  zone?: ZoneFamily;
+  zoneCode?: string;
   /** Coefficient de situation sur les prix de vente (1 = parcelle médiane du quartier) : transports, centre, équipements. */
   locationFactor: number;
   /** Résultat de l'analyse : `null` = constructible seul, sinon la raison. Absent tant que le quartier n'a pas été analysé (`withBasePrices`). */
@@ -58,6 +62,15 @@ export interface DistrictRoad {
   importance: number;
 }
 
+/** Zone du PLU, pour la carte : contours extérieurs simplifiés [lon, lat]. */
+export interface DistrictZone {
+  code: string;
+  /** Libellé long du Géoportail de l'Urbanisme (ex. « Centralité »). */
+  label: string;
+  family: ZoneFamily;
+  rings: [number, number][][];
+}
+
 /** Un quartier jouable : instantané de données ouvertes, utilisable hors ligne. */
 export interface District {
   name: string;
@@ -71,6 +84,8 @@ export interface District {
   pois: Poi[];
   /** Voies autour du quartier, pour dessiner la carte sans fond de plan (facultatif dans les anciens instantanés). */
   roads?: DistrictRoad[];
+  /** Zonage du PLU (facultatif dans les anciens instantanés). */
+  zones?: DistrictZone[];
   /** Mentions de licence à afficher (IGN, Licence Ouverte 2.0). */
   credits: string[];
   /** Date de l'instantané (AAAA-MM-JJ). */
@@ -87,8 +102,20 @@ export interface DistrictSource {
   buildings: ContextBuilding[];
   pois: Poi[];
   roads?: DistrictRoad[];
+  zones?: DistrictZone[];
   credits: string[];
   fetchedAt: string;
+}
+
+/** Point dans un contour [lon, lat] (lancer de rayon). */
+export function pointInRing(x: number, y: number, ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 export const MIN_PARCEL_AREA = 20;
@@ -212,6 +239,15 @@ export function buildDistrict(src: DistrictSource): District {
     src.pois,
   );
   parcels.forEach((p, i) => (p.locationFactor = Math.round(factors[i] * 1000) / 1000));
+  // Zone du PLU : celle qui contient le centre de la parcelle (sinon la plus proche en contenance : rien).
+  for (const p of parcels) {
+    const c = { lon: p.ring.reduce((t, q) => t + q.lon, 0) / p.ring.length, lat: p.ring.reduce((t, q) => t + q.lat, 0) / p.ring.length };
+    const z = (src.zones ?? []).find((zone) => zone.rings.some((r) => pointInRing(c.lon, c.lat, r)));
+    if (z) {
+      p.zone = z.family;
+      p.zoneCode = z.code;
+    }
+  }
   const buildings: DistrictBuilding[] = [];
   for (const b of src.buildings) {
     if (b.outer.length < 3) continue;
@@ -221,7 +257,7 @@ export function buildDistrict(src: DistrictSource): District {
     if (Math.hypot(cx, cy) > src.radius + 15) continue;
     buildings.push({ ring: b.outer.map((q) => [Math.round(q.lon * 1e6) / 1e6, Math.round(q.lat * 1e6) / 1e6]), height: Math.round(b.height * 10) / 10, estimated: b.estimated });
   }
-  return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, buildings, pois: src.pois, ...(src.roads ? { roads: src.roads } : {}), credits: src.credits, fetchedAt: src.fetchedAt };
+  return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, buildings, pois: src.pois, ...(src.roads ? { roads: src.roads } : {}), ...(src.zones ? { zones: src.zones } : {}), credits: src.credits, fetchedAt: src.fetchedAt };
 }
 
 /**
@@ -233,8 +269,8 @@ export function districtToSeeds(d: District): PlotSeed[] {
   for (const p of d.parcels) {
     const parcel = { ring: p.ring, streetEdges: p.streetEdges };
     // Analyse mémorisée dans l'instantané (longue à calculer) ; sinon, contrôle géométrique rapide.
-    const issue = p.issue !== undefined ? p.issue ?? undefined : plotIssue(parcel);
-    seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, locationFactor: p.locationFactor, label: p.label, ...(issue ? { issue } : {}), ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
+    const issue = p.issue !== undefined ? p.issue ?? undefined : plotIssue(parcel, undefined, 1, p.zone ? ZONE_RULES[p.zone] : null);
+    seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, locationFactor: p.locationFactor, label: p.label, ...(issue ? { issue } : {}), ...(p.zone ? { zones: [p.zone], ...(p.zoneCode ? { zoneCode: p.zoneCode } : {}) } : {}), ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
   }
   return seeds;
 }
@@ -242,5 +278,5 @@ export function districtToSeeds(d: District): PlotSeed[] {
 /** Analyse chaque parcelle une fois pour toutes : prix de référence et constructibilité seule (long : ~10 s) ; mémorisés dans l'instantané (configuration par défaut du marché du quartier). */
 export function withBasePrices(d: District): District {
   const config = { ...DEFAULT_CONFIG, market: MARKETS[d.market] };
-  return { ...d, parcels: d.parcels.map((p) => ({ ...p, basePrice: defaultAskingPrice(p.id, { ring: p.ring, streetEdges: p.streetEdges }, p.existingSdp, config, p.locationFactor), issue: plotIssue({ ring: p.ring, streetEdges: p.streetEdges }, config, p.locationFactor) ?? null })) };
+  return { ...d, parcels: d.parcels.map((p) => ({ ...p, basePrice: defaultAskingPrice(p.id, { ring: p.ring, streetEdges: p.streetEdges }, p.existingSdp, config, p.locationFactor, p.zone ? ZONE_RULES[p.zone] : null), issue: plotIssue({ ring: p.ring, streetEdges: p.streetEdges }, config, p.locationFactor, p.zone ? ZONE_RULES[p.zone] : null) ?? null })) };
 }

@@ -42,14 +42,20 @@ export interface GameConfig {
   maxRate: number;
 }
 
+/** Famille de zone du PLU simplifié (voir `plu.ts`). */
+export type ZoneFamily = 'centre' | 'renouvellement' | 'mixte' | 'preservation' | 'activites' | 'equipement' | 'nature';
+
 /** Pourquoi un terrain ne peut pas être construit seul : à combiner avec des parcelles voisines. */
-export type PlotIssue = 'trop-petite' | 'enclavee' | 'inconstructible';
+export type PlotIssue = 'trop-petite' | 'enclavee' | 'inconstructible' | 'zone';
 
 export interface Plot {
   id: PlotId;
   label?: string;
   /** Parcelles cadastrales d'origine quand ce terrain est un assemblage. */
   parts?: PlotId[];
+  /** Familles de zones du PLU qui touchent ce terrain (plusieurs après un assemblage à cheval) et code de la zone principale. */
+  zones: ZoneFamily[];
+  zoneCode?: string;
   /** Si présent, le terrain n'est pas constructible tel quel (voir `PlotIssue`). */
   issue?: PlotIssue;
   parcel: Parcel;

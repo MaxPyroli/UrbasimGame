@@ -7,14 +7,16 @@ import {
   computeProject,
   LocalProjection,
   ringArea,
+  type Criteria,
   type Market,
   type Parcel,
 } from '../engine';
 import { marketAt } from './location';
+import { applyRule, combineRules, type ZoneRule } from './plu';
 import { mergeParcels } from './merge';
 import { nextGaussian, nextRandom } from './rng';
 import { expectedSales, lotPrice, lotsLeft, soldShare } from './sales';
-import type { Action, ActionResult, BotProfileName, GameConfig, GameEvent, GameState, Plot, PlotIssue, Player, ProjectPhase, ProjectRun } from './types';
+import type { Action, ActionResult, BotProfileName, GameConfig, GameEvent, GameState, Plot, PlotIssue, Player, ProjectPhase, ProjectRun, ZoneFamily } from './types';
 
 export const DEFAULT_CONFIG: GameConfig = {
   market: MARKETS['petite-couronne'],
@@ -57,6 +59,9 @@ export interface PlotSeed {
   label?: string;
   /** Le terrain n'est pas constructible seul. */
   issue?: PlotIssue;
+  /** Zone(s) du PLU qui touchent le terrain ; absent = aucune contrainte de zone. */
+  zones?: ZoneFamily[];
+  zoneCode?: string;
 }
 
 export interface PlayerSeed {
@@ -78,25 +83,37 @@ const MIN_PLOT_PRICE = 20_000;
 export const MIN_PRICE_POLICY = -0.2;
 export const MAX_PRICE_POLICY = 0.15;
 
+/** Règle du PLU qui s'applique à un terrain ; null quand le terrain n'a pas de zone (aucune contrainte). */
+export const ruleOf = (plot: Pick<Plot, 'zones'>): ZoneRule | null => (plot.zones.length ? combineRules(plot.zones) : null);
+
+/** Critères avec les contraintes du PLU de la zone. */
+export const criteriaFor = (plot: Pick<Plot, 'zones'>, base: Criteria): Criteria => {
+  const rule = ruleOf(plot);
+  return rule ? applyRule(base, rule) : base;
+};
+
 /** Surface en dessous de laquelle un terrain sans projet réalisable est dit « trop petit » plutôt qu'« inconstructible ». */
 const SMALL_PLOT_AREA = 150;
 
 /** Un terrain est-il constructible seul ? Retourne la raison sinon (façade sur rue absente, trop petit, retraits). */
-export function plotIssue(parcel: Parcel, config?: GameConfig, locationFactor = 1): PlotIssue | undefined {
+export function plotIssue(parcel: Parcel, config?: GameConfig, locationFactor = 1, rule: ZoneRule | null = null): PlotIssue | undefined {
+  if (rule && !rule.buildable) return 'zone';
   if (parcel.streetEdges.length === 0) return 'enclavee';
   const ok = [1, 3].some((levels) => {
-    const pr = computeProject(parcel, { ...DEFAULT_CRITERIA, levels });
+    const base: Criteria = { ...DEFAULT_CRITERIA, levels };
+    const pr = computeProject(parcel, rule ? applyRule(base, rule) : base);
     return pr.footprint !== null && pr.checks.every((c) => c.status !== 'error');
   });
   if (!ok) return parcelArea(parcel) < SMALL_PLOT_AREA ? 'trop-petite' : 'inconstructible';
   // Constructible sur le papier, mais aucun projet n'est rentable même terrain offert (forme ou taille inadaptée).
-  if (config && appraise(parcel, 0, config, locationFactor).best <= 0) return parcelArea(parcel) < SMALL_PLOT_AREA ? 'trop-petite' : 'inconstructible';
+  if (config && appraise(parcel, 0, config, locationFactor, rule).best <= 0) return parcelArea(parcel) < SMALL_PLOT_AREA ? 'trop-petite' : 'inconstructible';
   return undefined;
 }
 
 export const ISSUE_MESSAGE: Record<PlotIssue, string> = {
   enclavee: 'Parcelle enclavée : aucun accès à la rue. À assembler avec une parcelle voisine qui donne sur la rue.',
   'trop-petite': 'Terrain trop petit pour y construire seul de façon rentable. À assembler avec des parcelles voisines.',
+  zone: 'Zone inconstructible pour un promoteur (équipement public ou espace naturel).',
   inconstructible: 'Forme ou taille inadaptée : aucun projet rentable sur ce terrain seul, même offert. À assembler avec des parcelles voisines.',
 };
 
@@ -111,13 +128,14 @@ export function parcelArea(parcel: Parcel): number {
  * Meilleur prix de terrain que peut payer un projet réalisable (jusqu'à R+5, attique compris) en gardant la marge visée,
  * et surface du terrain. Un résultat ≤ 0 veut dire qu'aucun projet n'est rentable, même terrain offert.
  */
-export function appraise(parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1): { best: number; area: number } {
+export function appraise(parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1, rule: ZoneRule | null = null): { best: number; area: number } {
   const market = marketAt(config.market, locationFactor);
   const area = parcelArea(parcel);
-  if (parcel.streetEdges.length === 0) return { best: 0, area };
+  if (parcel.streetEdges.length === 0 || (rule && !rule.buildable)) return { best: 0, area };
   let best = 0;
   for (let levels = 0; levels <= 5; levels++) for (const attic of [false, true]) {
-    const project = computeProject(parcel, { ...DEFAULT_CRITERIA, levels, attic });
+    const base: Criteria = { ...DEFAULT_CRITERIA, levels, attic };
+    const project = computeProject(parcel, rule ? applyRule(base, rule) : base);
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
     const b = computeBilan({ project, market, landPrice: 0, existingSdp, params: { ...config.bilanParams, targetMargin: config.askMargin } });
     best = Math.max(best, b.maxLandPrice);
@@ -129,9 +147,9 @@ export function appraise(parcel: Parcel, existingSdp: number, config: GameConfig
  * Prix de départ d'un terrain : ce que le meilleur projet réalisable peut payer, multiplié par 0,9 à 1,5 selon le
  * terrain (attentes du vendeur) : certains sont de bonnes affaires, d'autres trop chers.
  */
-export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1): number {
+export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1, rule: ZoneRule | null = null): number {
   const market = marketAt(config.market, locationFactor);
-  const { best, area } = appraise(parcel, existingSdp, config, locationFactor);
+  const { best, area } = appraise(parcel, existingSdp, config, locationFactor, rule);
   let h = 0;
   for (const ch of id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
   const factor = 0.9 + 0.6 * ((h % 1000) / 999);
@@ -160,6 +178,8 @@ export function createGame(g: NewGame): GameState {
       id: s.id,
       ...(s.label ? { label: s.label } : {}),
       ...(s.issue ? { issue: s.issue } : {}),
+      zones: s.zones ?? [],
+      ...(s.zoneCode ? { zoneCode: s.zoneCode } : {}),
       parcel: s.parcel,
       owner: null,
       existingSdp: s.existingSdp ?? 0,
@@ -255,6 +275,8 @@ export function applyAction(state: GameState, action: Action): ActionResult {
       owner: player.id,
       existingSdp: plots.reduce((t, p) => t + p.existingSdp, 0),
       existingHeight: Math.max(...plots.map((p) => p.existingHeight)),
+      zones: [...new Set(plots.flatMap((p) => p.zones))],
+      ...(plots.slice().sort((a, b) => b.area - a.area)[0].zoneCode ? { zoneCode: plots.slice().sort((a, b) => b.area - a.area)[0].zoneCode } : {}),
       locationFactor: plots.reduce((t, p) => t + p.locationFactor * p.area, 0) / plots.reduce((t, p) => t + p.area, 0),
       area: merged.area,
       askingPrice: 0,
@@ -262,7 +284,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
       paid: plots.reduce((t, p) => t + p.paid, 0),
       projectId: null,
     };
-    const issue = plotIssue(merged.parcel, state.config, fusion.locationFactor);
+    const issue = plotIssue(merged.parcel, state.config, fusion.locationFactor, ruleOf(fusion));
     if (issue) fusion.issue = issue;
     let s: GameState = { ...state, plots: [...state.plots.filter((p) => !ids.includes(p.id)), fusion] };
     s = reprice(s);
@@ -304,10 +326,11 @@ export function applyAction(state: GameState, action: Action): ActionResult {
 
   // launch
   if (plot.issue) return fail(ISSUE_MESSAGE[plot.issue]);
-  const project = computeProject(plot.parcel, action.criteria);
+  const criteria = criteriaFor(plot, action.criteria);
+  const project = computeProject(plot.parcel, criteria);
   if (project.footprint === null) return fail('rien de constructible avec ces critères');
   const errors = project.checks.filter((c) => c.status === 'error');
-  if (errors.length) return fail(`projet non conforme : ${errors.map((c) => c.label).join(', ')}`);
+  if (errors.length) return fail(`projet non conforme : ${errors.map((c) => `${c.label} (${c.detail})`).join(' ; ')}`);
 
   const { config } = state;
   const ls = config.bilanParams.loanShare;
@@ -334,7 +357,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     id: `P${state.nextProjectId}`,
     plotId: plot.id,
     owner: player.id,
-    criteria: action.criteria,
+    criteria,
     launchedAt: state.round,
     permitRounds: q(d.permit),
     buildRounds,
@@ -347,7 +370,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     financed: false,
     landRefund: refund,
     phaseElapsed: 0,
-    lots: Math.max(1, project.indicators.dwellings + (project.indicators.sdpCommerce > 0 ? 1 : 0) + (project.indicators.sdpOffice > 0 ? 1 : 0)),
+    lots: Math.max(1, project.indicators.dwellings + Math.ceil(project.indicators.sdpCommerce / 120) + Math.ceil(project.indicators.sdpOffice / 200)),
     lotsSold: 0,
     soldRevenue: 0,
     paidGross: 0,

@@ -12,6 +12,10 @@ import {
 } from '../../moteur/src/engine';
 import {
   ISSUE_MESSAGE,
+  ZONE_RULES,
+  allowedLevels,
+  criteriaFor,
+  ruleOf,
   MAX_PRICE_POLICY,
   MIN_PRICE_POLICY,
   applyAction,
@@ -40,7 +44,7 @@ import districtData from '../../moteur/data/districts/montreuil-mairie.json';
 
 const district = districtData as unknown as District;
 const ME = 'moi';
-const SAVE_KEY = 'urbasim-save-v3';
+const SAVE_KEY = 'urbasim-save-v4';
 const COLORS: Record<string, string> = { moi: '#1a9850', prudent: '#3b6fd4', equilibre: '#8e54c9', agressif: '#d6336c' };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -70,7 +74,7 @@ function load(): GameState {
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) {
       const s = JSON.parse(raw) as GameState;
-      if (s?.players?.some((p) => p.id === ME) && Array.isArray(s.plots) && typeof s.demandShock === 'number' && s.config?.salesDemand > 0) return s;
+      if (s?.players?.some((p) => p.id === ME) && Array.isArray(s.plots) && typeof s.demandShock === 'number' && s.config?.salesDemand > 0 && s.plots.every((p) => Array.isArray(p.zones))) return s;
     }
   } catch {
     /* sauvegarde absente ou illisible : nouvelle partie */
@@ -82,7 +86,7 @@ let state: GameState = load();
 let selected = new Set<string>();
 let multi = false;
 let tab: 'terrain' | 'operations' | 'journal' | 'classement' = 'terrain';
-let view: 'hauteur' | 'prix' | 'lieu' = 'hauteur';
+let view: 'hauteur' | 'prix' | 'lieu' | 'zonage' = 'hauteur';
 /** Terrains libres mis en avant sur la carte : tous, seulement ceux à ma portée, ou ceux à assembler. */
 let plotFilter: 'tous' | 'abordables' | 'assembler' = 'tous';
 let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number } = { levels: 3, attic: false, parking: 'auto', depth: 12 };
@@ -214,14 +218,15 @@ function plotStyle(p: Plot): L.PathOptions {
   const freePlot = !p.owner;
   const small = !!p.issue;
   // Terrains libres hors de portée (trop chers pour moi) ou écartés par le filtre : estompés.
+  const zoneBlocked = p.issue === 'zone';
   const dim = freePlot && (plotFilter === 'abordables' ? !affordable(p) : plotFilter === 'assembler' ? !small : false);
   const faded = freePlot && !affordable(p) && !small;
   const base: L.PathOptions = {
-    color: sel ? '#000' : small && freePlot ? '#7b3fa0' : col ?? (view === 'hauteur' ? '#2b6cb0' : '#7a6b4f'),
+    color: sel ? '#000' : zoneBlocked && freePlot ? '#777' : small && freePlot ? '#7b3fa0' : col ?? (view === 'hauteur' ? '#2b6cb0' : '#7a6b4f'),
     weight: sel ? 3 : p.projectId ? 2.5 : small ? 1.8 : view === 'hauteur' ? 1.5 : 1,
-    fillColor: col ?? (small ? '#cdb6e6' : lieu ? lieuColor(p.locationFactor) : free),
+    fillColor: col ?? (zoneBlocked ? '#bdbdbd' : small ? '#cdb6e6' : lieu ? lieuColor(p.locationFactor) : free),
     // Vue « hauteur » : les parcelles libres restent transparentes pour laisser voir le bâti.
-    fillOpacity: col ? (p.projectId ? 0.7 : view === 'hauteur' ? 0.35 : 0.55) : small ? 0.5 : view === 'hauteur' ? 0 : lieu ? 0.8 : 0.45,
+    fillOpacity: col ? (p.projectId ? 0.7 : view === 'hauteur' || view === 'zonage' ? 0.35 : 0.55) : zoneBlocked ? 0.35 : small ? 0.5 : view === 'hauteur' || view === 'zonage' ? 0 : lieu ? 0.8 : 0.45,
     dashArray: p.projectId ? '4 3' : small ? '2 4' : undefined,
   };
   if (dim) return { ...base, opacity: 0.2, fillOpacity: (base.fillOpacity ?? 0) * 0.2 };
@@ -258,6 +263,18 @@ for (const poi of district.pois) {
     .addTo(poiLayer);
 }
 
+map.createPane('zones');
+map.getPane('zones')!.style.zIndex = '330';
+map.getPane('zones')!.style.pointerEvents = 'none';
+const zonesLayer = L.layerGroup();
+for (const z of district.zones ?? []) {
+  for (const ring of z.rings) {
+    L.polygon(ring.map(([lon, lat]) => [lat, lon] as [number, number]), { pane: 'zones', interactive: false, stroke: true, color: ZONE_RULES[z.family].color, weight: 1, opacity: 0.8, fillColor: ZONE_RULES[z.family].color, fillOpacity: 0.38 })
+      .bindTooltip(`${esc(z.code)} · ${esc(ZONE_RULES[z.family].label)}`, { sticky: true })
+      .addTo(zonesLayer);
+  }
+}
+
 map.createPane('bati');
 map.getPane('bati')!.style.zIndex = '350';
 map.getPane('bati')!.style.pointerEvents = 'none';
@@ -282,6 +299,13 @@ function updateMapLegend() {
   if (!el) return;
   if (view === 'hauteur') {
     el.innerHTML = `<b>Hauteur du bâti existant</b>${HEIGHT_CLASSES.map((c) => `<div><i class="swatch" style="background:${c.color}"></i>${c.label}</div>`).join('')}`;
+  } else if (view === 'zonage') {
+    el.innerHTML = `<b>Règles d’urbanisme (PLU simplifié)</b>${(['renouvellement', 'centre', 'mixte', 'preservation', 'activites', 'equipement'] as const)
+      .map((f) => {
+        const r = ZONE_RULES[f];
+        return `<div><i class="swatch" style="background:${r.color}"></i>${esc(r.label)} · ${r.buildable ? `R+${r.maxLevels}${r.use === 'bureaux' ? ' bureaux' : ''}` : 'inconstructible'}</div>`;
+      })
+      .join('')}`;
   } else if (view === 'lieu') {
     const ramp = [0.95, 0.98, 1, 1.03, 1.06, 1.09].map((f) => `<i class="swatch" style="background:${lieuColor(f)};width:18px"></i>`).join('');
     const kinds = ['metro', 'tram', 'mairie', 'ecole', 'parc', 'sante'].map((k) => `<span><i class="swatch" style="background:${POI_COLORS[k]}"></i>${k === 'ecole' ? 'école' : k === 'sante' ? 'hôpital' : k === 'parc' ? 'espace public' : k === 'mairie' ? 'mairie' : k === 'tram' ? 'tramway' : 'métro'}</span>`).join(' ');
@@ -296,6 +320,8 @@ function applyView() {
   else buildingsLayer.remove();
   if (view === 'lieu') poiLayer.addTo(map);
   else poiLayer.remove();
+  if (view === 'zonage') zonesLayer.addTo(map);
+  else zonesLayer.remove();
   updateMapLegend();
 }
 
@@ -336,7 +362,7 @@ function drawPlots() {
       layers.set(p.id, layer);
     }
     layer.setStyle(plotStyle(p));
-    layer.bindTooltip(`${esc(p.label ?? p.id)}<br>${eur(p.askingPrice)} · situation ×${p.locationFactor.toFixed(2).replace('.', ',')}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : ''}`, { sticky: true });
+    layer.bindTooltip(`${esc(p.label ?? p.id)}${p.zones.length ? ` · ${esc(ruleOf(p)!.label)}` : ''}<br>${eur(p.askingPrice)} · situation ×${p.locationFactor.toFixed(2).replace('.', ',')}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : ''}`, { sticky: true });
   }
 }
 
@@ -409,7 +435,7 @@ function renderSide() {
 function legend(): string {
   const heights = view === 'hauteur' ? `<div class="legend muted" style="margin:6px 0">teinte plus claire = hauteur estimée (non renseignée dans la donnée)</div>` : '';
   return `<label class="f" style="margin-top:14px">Terrains libres<select id="pfilter"><option value="tous" ${plotFilter === 'tous' ? 'selected' : ''}>tous</option><option value="abordables" ${plotFilter === 'abordables' ? 'selected' : ''}>à ma portée</option><option value="assembler" ${plotFilter === 'assembler' ? 'selected' : ''}>à assembler</option></select></label>
-    <label class="f">Vue de la carte<select id="view"><option value="hauteur" ${view === 'hauteur' ? 'selected' : ''}>Hauteur du bâti existant</option><option value="lieu" ${view === 'lieu' ? 'selected' : ''}>Valeur du lieu</option><option value="prix" ${view === 'prix' ? 'selected' : ''}>Prix des terrains</option></select></label>${heights}<p class="legend">
+    <label class="f">Vue de la carte<select id="view"><option value="hauteur" ${view === 'hauteur' ? 'selected' : ''}>Hauteur du bâti existant</option><option value="zonage" ${view === 'zonage' ? 'selected' : ''}>Règles d’urbanisme (PLU)</option><option value="lieu" ${view === 'lieu' ? 'selected' : ''}>Valeur du lieu</option><option value="prix" ${view === 'prix' ? 'selected' : ''}>Prix des terrains</option></select></label>${heights}<p class="legend">
     <label><input type="checkbox" id="multi" ${multi ? 'checked' : ''}/> sélection multiple</label>
     <br><span><i class="swatch" style="background:${COLORS.moi}"></i>vous</span>${state.players
       .filter((p) => p.bot)
@@ -477,16 +503,18 @@ function renderSingle(p: Plot): string {
       <tr><td>Prix affiché</td><td>${eurFull(p.askingPrice)} <span class="muted">(${Math.round(p.askingPrice / area)} €/m²)</span></td></tr>
       <tr><td>Propriétaire</td><td>${owner ? esc(owner) : '<span class="muted">libre</span>'}</td></tr>
       <tr><td>Situation</td><td>prix de vente <b class="${p.locationFactor >= 1 ? 'good' : 'bad'}">×${p.locationFactor.toFixed(2).replace('.', ',')}</b></td></tr>
-    </table>${locationDetail(p)}`;
+    </table>${zoneCard(p)}${locationDetail(p)}`;
 
   if (run) {
     html += `<h2>Opération ${esc(run.id)}</h2>` + operationCard(run.id);
     drawOverlay(null);
     return html + legend();
   }
-  const issueBox = p.issue
-    ? `<div class="card" style="border-color:#7b3fa0"><b style="color:#7b3fa0">Non constructible seul</b><div>${esc(ISSUE_MESSAGE[p.issue])}</div><div class="muted">Sélectionnez les parcelles voisines (Maj+clic ou « sélection multiple »), achetez-les, puis « Assembler ».</div></div>`
-    : '';
+  const issueBox = p.issue === 'zone'
+    ? `<div class="card" style="border-color:#777"><b>Inconstructible</b><div>${esc(ISSUE_MESSAGE.zone)}</div></div>`
+    : p.issue
+      ? `<div class="card" style="border-color:#7b3fa0"><b style="color:#7b3fa0">Non constructible seul</b><div>${esc(ISSUE_MESSAGE[p.issue])}</div><div class="muted">Sélectionnez les parcelles voisines (Maj+clic ou « sélection multiple »), achetez-les, puis « Assembler ».</div></div>`
+      : '';
   if (!p.owner) {
     const missing = buyCost(p) - me().cash;
     html += `${issueBox}<div class="row"><button id="buy" class="primary" ${missing > 0 ? 'disabled' : ''}>Acheter · ${eurFull(buyCost(p))}</button></div>
@@ -515,13 +543,27 @@ function bestForm(p: Plot, owned: boolean): { levels: number; attic: boolean; ma
   let best: { levels: number; attic: boolean; margin: number } | null = null;
   for (let levels = 0; levels <= 8; levels++) {
     for (const attic of [false, true]) {
-      const proj = computeProject(p.parcel, { ...criteria(), levels, attic, parkingStrategy: 'auto' });
+      const proj = computeProject(p.parcel, criteriaFor(p, { ...criteria(), levels, attic, parkingStrategy: 'auto' }));
       if (!proj.footprint || proj.checks.some((c) => c.status === 'error')) continue;
       const b = computeBilan({ project: proj, market: currentMarket(state, p), landPrice, existingSdp: p.existingSdp, params: currentParams(state) });
       if (!best || b.margin > best.margin) best = { levels, attic, margin: b.margin };
     }
   }
   return best;
+}
+
+/** Carte de la zone du PLU : 5 règles, en clair. */
+function zoneCard(p: Plot): string {
+  const rule = ruleOf(p);
+  if (!rule) return '';
+  const several = p.zones.length > 1 ? ' <span class="muted">(terrain à cheval sur plusieurs zones : règle la plus stricte)</span>' : '';
+  const code = p.zoneCode ? `<span class="muted">${esc(p.zoneCode)}</span> · ` : '';
+  if (!rule.buildable) return `<div class="card" style="border-left:4px solid ${rule.color}"><b>${code}${esc(rule.label)}</b>${several}<div class="muted">${esc(rule.summary)}</div></div>`;
+  const chip = (t: string) => `<span style="display:inline-block;border:1px solid var(--line);border-radius:10px;padding:0 8px;margin:2px 4px 2px 0;font-size:12px">${t}</span>`;
+  return `<div class="card" style="border-left:4px solid ${rule.color}"><b>${code}${esc(rule.label)}</b>${several}
+    <div class="muted" style="font-size:12px">${esc(rule.summary)}</div>
+    <div>${chip(`Hauteur max <b>R+${rule.maxLevels}</b>`)}${chip(`Emprise <b>${Math.round(rule.maxCoverage * 100)} %</b>`)}${chip(`Pleine terre <b>${Math.round(rule.minOpenGround * 100)} %</b>`)}${rule.setbackFond || rule.setbackLateral ? chip(`Retraits <b>${rule.setbackFond ? `fond ${rule.setbackFond} m` : ''}${rule.setbackFond && rule.setbackLateral ? ', ' : ''}${rule.setbackLateral ? `côtés ${rule.setbackLateral} m` : ''}</b>`) : chip('Construction en limite possible')}${chip(rule.use === 'bureaux' ? '<b>Bureaux</b> uniquement' : 'Logements, commerces')}</div>
+    <div class="muted" style="font-size:11px">Règles simplifiées inspirées du type de zone, pas le règlement réel.</div></div>`;
 }
 
 function locationDetail(p: Plot): string {
@@ -533,16 +575,19 @@ function locationDetail(p: Plot): string {
 }
 
 function projectForm(p: Plot, owned: boolean): string {
-  const proj = computeProject(p.parcel, criteria());
+  const rule = ruleOf(p);
+  const maxLv = rule ? allowedLevels(rule, form.attic) : 10;
+  if (form.levels > maxLv) form.levels = maxLv;
+  const proj = computeProject(p.parcel, criteriaFor(p, criteria()));
   drawOverlay(proj);
   const errors = proj.checks.filter((c) => c.status === 'error');
   const sel = (v: ParkingStrategy, l: string) => `<option value="${v}" ${form.parking === v ? 'selected' : ''}>${l}</option>`;
   let html = `<h2>Projet</h2>
-    <label class="f">Niveaux (R+x)<select id="f-levels">${Array.from({ length: 11 }, (_, i) => `<option ${i === form.levels ? 'selected' : ''}>${i}</option>`).join('')}</select></label>
-    <label class="f">Attique<input type="checkbox" id="f-attic" ${form.attic ? 'checked' : ''}/></label>
+    <label class="f">Niveaux (R+x)${rule ? ` <span class="muted">max R+${rule.maxLevels}</span>` : ''}<select id="f-levels">${Array.from({ length: maxLv + 1 }, (_, i) => `<option ${i === form.levels ? 'selected' : ''}>${i}</option>`).join('')}</select></label>
+    <label class="f" title="L'attique compte comme un niveau dans la hauteur maximale de la zone">Attique<input type="checkbox" id="f-attic" ${form.attic ? 'checked' : ''} ${rule && rule.maxLevels - 1 < form.levels ? 'disabled' : ''}/></label>
     <label class="f">Stationnement<select id="f-parking">${sel('auto', 'automatique')}${sel('sous-sol', 'sous-sol')}${sel('rdc', 'rez-de-chaussée')}${sel('surface', 'en surface')}${sel('hors-site', 'places achetées à proximité')}${sel('aucun', 'aucun')}</select></label>
     <label class="f" title="Au-delà de 14 m de profondeur, l'éclairement naturel devient difficile">Profondeur max du bâtiment<select id="f-depth">${[10, 12, 15, 18, 22].map((d) => `<option value="${d}" ${form.depth === d ? 'selected' : ''}>${d} m</option>`).join('')}</select></label>
-    <div class="row"><button id="best" title="Teste de R+0 à R+8 avec ou sans attique et choisit le plus rentable sans erreur">Meilleur projet</button></div>`;
+    <div class="row"><button id="best" title="Teste les niveaux autorisés par le PLU, avec ou sans attique, et choisit le plus rentable sans erreur">Meilleur projet</button></div>`;
   if (!proj.footprint) return html + `<p class="bad">Rien de constructible avec ces critères.</p>`;
 
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : p.askingPrice;

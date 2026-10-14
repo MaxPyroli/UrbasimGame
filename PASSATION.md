@@ -208,11 +208,22 @@ collectivité jouent le rôle des enchères du Monopoly.
   (`npm run district` ~15 s) : 218 parcelles constructibles seules, 66 trop petites, 57 enclavées, 5 de forme inadaptée.
   Formulaire de projet : profondeur maximale du bâtiment (10 à 22 m, utile sur les parcelles profondes), bouton « Meilleur
   projet ». Curseur de prix de vente : pourcentage, prix du lot et rythme de vente suivent le curseur en temps réel.
-- **À faire (demandes notées)** : (1) **PLU de jeu** : le formulaire laisse aujourd'hui choisir jusqu'à R+10 et le « meilleur
-  projet » monte à R+8 ; il faut des règles par zone (hauteur maximale, emprise, retraits, stationnement, pleine terre)
-  issues du zonage réel (API Carto GPU `zone-urba`, déjà utilisée par `fetchPlu`) et traduites en règles simplifiées ;
-  (2) **simplifier l'affichage** : la fiche d'un terrain est dense (carte + fiche + bilan + équipements + légende) ;
-  hiérarchiser, replier les détails, réduire le nombre de vues et de légendes.
+- Fait : **PLU simplifié** (`moteur/src/game/plu.ts`). Le vrai règlement (dizaines de pages par zone, hauteurs sur un plan
+  à part) est réduit à **7 familles de zones** (renouvellement urbain R+7, centralité R+6, zone mixte R+4, préservation R+2,
+  activités économiques R+3 bureaux uniquement, équipement public et naturelle inconstructibles) et **5 règles lisibles** :
+  hauteur maximale (R+x, l'attique compte comme un niveau), emprise au sol, pleine terre, retraits, destination. Les familles
+  viennent du vrai zonage (API Carto GPU `zone-urba` : `typezone` + `libelong`, stockées dans l'instantané : 36 zones,
+  parcelle rattachée par son centre) ; les valeurs sont des ordres de grandeur inspirés du type de zone. Le PLU s'impose à
+  tout : lancement d'opération (le joueur ne peut pas contourner les limites), bots, prix du terrain (une zone de préservation
+  vaut bien moins qu'une centralité), terrains de zone inconstructible (`issue: 'zone'`). Un terrain à cheval sur plusieurs
+  zones (assemblage) suit la règle la plus restrictive. Interface : carte de la zone dans la fiche (5 pastilles + phrase),
+  niveaux du formulaire plafonnés, vue « Règles d'urbanisme (PLU) » avec légende. Montreuil : 176 parcelles en centralité,
+  110 en zone mixte, 47 en préservation, 8 en renouvellement, 4 en activités. Équilibrage après PLU (4 parties) :
+  patrimoine final / départ ≈ 1,1–2,2, l'agressif ne domine plus aussi nettement.
+  Pistes : bonus de constructibilité (logement social, performance énergétique), révision du PLU en cours de partie
+  (événement), recours des riverains selon la zone, vraies hauteurs du plan des hauteurs (prescriptions GPU).
+- **À faire (demande notée)** : **simplifier l'affichage** : la fiche d'un terrain est dense (carte + fiche + zone + bilan +
+  équipements + légende) et la barre du haut passe à la ligne ; hiérarchiser, replier les détails, réduire les vues et légendes.
 - À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, appels d'offres, programmes (TVA 5,5 %,
   ZAC), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 

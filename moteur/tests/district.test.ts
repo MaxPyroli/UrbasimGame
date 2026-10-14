@@ -106,6 +106,11 @@ describe('instantané réel : Montreuil – Mairie (IGN)', () => {
     const issues = districtToSeeds(real).filter((x) => x.issue);
     expect(issues.length).toBeGreaterThan(20);
     expect(real.buildings.length).toBeGreaterThan(300);
+    // zonage du PLU : plusieurs familles, chaque parcelle rattachée à une zone
+    expect((real.zones ?? []).length).toBeGreaterThan(10);
+    expect(new Set(real.parcels.map((p) => p.zone)).size).toBeGreaterThanOrEqual(4);
+    expect(real.parcels.filter((p) => !p.zone).length).toBeLessThan(5);
+    expect(real.credits.join(' ')).toMatch(/Zonage/);
     expect(real.buildings.every((b) => b.height > 0 && b.ring.length >= 3)).toBe(true);
   });
 

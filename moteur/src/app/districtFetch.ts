@@ -1,5 +1,6 @@
 import { type ContextBuilding, type LonLat, type MarketId, buildingsCredit } from '../engine';
-import { buildDistrict, type District, type DistrictRoad } from '../game/district';
+import { buildDistrict, type District, type DistrictRoad, type DistrictZone } from '../game/district';
+import { zoneFamily } from '../game/plu';
 import type { Poi, PoiKind } from '../game/location';
 import { fetchNearbyBuildings, fetchWfsPage } from './services';
 
@@ -47,6 +48,7 @@ export async function fetchDistrict(opts: { name: string; center: LonLat; radius
   const b = await fetchNearbyBuildings(center.lon, center.lat, radius + MARGIN);
   const pois = await fetchPois(center, radius);
   const roads = await fetchRoads(center, radius);
+  const zones = await fetchZones(center, radius);
   const fetchedAt = new Date().toISOString().slice(0, 10);
   const buildings: ContextBuilding[] = b.buildings;
   return buildDistrict({
@@ -55,7 +57,8 @@ export async function fetchDistrict(opts: { name: string; center: LonLat; radius
     buildings,
     pois,
     roads,
-    credits: ['Parcelles : IGN / DGFiP, cadastre Etalab (Licence Ouverte 2.0)', buildingsCredit(buildings, fetchedAt), 'Équipements : IGN, BD TOPO® (Licence Ouverte 2.0)'],
+    zones,
+    credits: ['Parcelles : IGN / DGFiP, cadastre Etalab (Licence Ouverte 2.0)', buildingsCredit(buildings, fetchedAt), 'Équipements : IGN, BD TOPO® (Licence Ouverte 2.0)', 'Zonage : Géoportail de l’Urbanisme (PLUi, Licence Ouverte 2.0)'],
     fetchedAt,
   });
 }
@@ -152,6 +155,58 @@ export async function fetchRoads(center: LonLat, radius: number): Promise<Distri
       }
     }
     if (feats.length < 1000) break;
+  }
+  return out;
+}
+
+/** Simplification de Douglas-Peucker d'un contour [lon, lat] (tolérance en mètres, projection locale grossière). */
+function simplifyRing(ring: [number, number][], tolM: number, lat: number): [number, number][] {
+  const kx = 111320 * Math.cos((lat * Math.PI) / 180);
+  const ky = 110574;
+  const pts = ring.map(([x, y]) => [x * kx, y * ky]);
+  const dist = (p: number[], a: number[], b: number[]) => {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const l2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2));
+    return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+  };
+  const keep = new Array(pts.length).fill(false);
+  keep[0] = keep[pts.length - 1] = true;
+  const rec = (i: number, j: number) => {
+    let max = 0;
+    let idx = -1;
+    for (let k = i + 1; k < j; k++) {
+      const d = dist(pts[k], pts[i], pts[j]);
+      if (d > max) (max = d), (idx = k);
+    }
+    if (max > tolM && idx > 0) {
+      keep[idx] = true;
+      rec(i, idx);
+      rec(idx, j);
+    }
+  };
+  rec(0, pts.length - 1);
+  return ring.filter((_, i) => keep[i]);
+}
+
+/** Zonage du PLU (Géoportail de l'Urbanisme, API Carto) autour du quartier, contours simplifiés à 2 m. */
+export async function fetchZones(center: LonLat, radius: number): Promise<DistrictZone[]> {
+  const r = radius + 60;
+  const dLat = r / 110574;
+  const dLon = r / (111320 * Math.cos((center.lat * Math.PI) / 180));
+  const box = [center.lon - dLon, center.lat - dLat, center.lon + dLon, center.lat + dLat];
+  const geom = { type: 'Polygon', coordinates: [[[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]], [box[0], box[1]]]] };
+  const json = await getJson(`https://apicarto.ign.fr/api/gpu/zone-urba?geom=${encodeURIComponent(JSON.stringify(geom))}`);
+  const out: DistrictZone[] = [];
+  for (const f of json.features ?? []) {
+    const p = f.properties ?? {};
+    const polys: number[][][][] = f.geometry?.type === 'MultiPolygon' ? f.geometry.coordinates : f.geometry?.type === 'Polygon' ? [f.geometry.coordinates] : [];
+    const rings = polys
+      .map((poly) => simplifyRing(poly[0].map((q) => [Math.round(q[0] * 1e5) / 1e5, Math.round(q[1] * 1e5) / 1e5] as [number, number]), 2, center.lat))
+      .filter((ring) => ring.length >= 4);
+    if (!rings.length) continue;
+    out.push({ code: String(p.libelle ?? ''), label: String(p.libelong ?? ''), family: zoneFamily(p.typezone ?? '', p.libelle ?? '', p.libelong ?? ''), rings });
   }
   return out;
 }

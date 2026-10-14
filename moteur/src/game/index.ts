@@ -6,3 +6,4 @@ export * from './district';
 export * from './merge';
 export * from './location';
 export * from './sales';
+export * from './plu';
