@@ -116,6 +116,8 @@ function load(): GameState | null {
 }
 
 const saved = load();
+/** Vrai dès qu'une partie existe (sauvegardée ou lancée pendant cette session) : l'écran d'accueil propose alors de la reprendre. */
+let gameStarted = saved !== null;
 /** Sans sauvegarde, une partie provisoire s'affiche derrière la fenêtre de création de société. */
 let state: GameState = saved ?? newGame(randomIdentity(Date.now() % 100000), 'normal', 1);
 const colorOf = (id: string) => state.players.find((p) => p.id === id)?.color ?? FALLBACK_COLORS[id] ?? '#888';
@@ -502,7 +504,7 @@ function openIdentity(mode: 'new' | 'edit') {
     mode === 'edit' ? { name: me().name, slogan: me().slogan ?? '', color: me().color ?? PALETTE[0] } : randomIdentity(Date.now() % 100000);
   let color = current.color;
   let difficulty: Difficulty = state.config.difficulty ?? 'normal';
-  const dismissable = mode === 'edit' || saved !== null || !!localStorage_get(SAVE_KEY);
+  const dismissable = mode === 'edit' || !$('home').hidden || saved !== null || !!localStorage_get(SAVE_KEY);
   openModal(
     `<h2 class="mh">${mode === 'edit' ? 'Ma société' : 'Votre société de promotion'}</h2>
      <p class="muted">${mode === 'edit' ? 'Le nom et la couleur apparaissent sur la carte et dans le classement.' : 'Choisissez un nom et une couleur : ils apparaissent sur la carte et dans le classement. Vous pouvez tout changer plus tard.'}</p>
@@ -547,10 +549,12 @@ function openIdentity(mode: 'new' | 'edit') {
           return;
         }
         state = newGame(id, difficulty);
+        gameStarted = true;
         selected.clear();
         tab = 'terrain';
         save();
         closeModal();
+        hideHome();
         renderAll();
         if (!localStorage_get(TUTO_KEY)) openTutorial();
       };
@@ -719,6 +723,7 @@ function openEndScreen() {
       root.querySelector<HTMLButtonElement>('#en-other')!.onclick = () => (closeModal(), openIdentity('new'));
       root.querySelector<HTMLButtonElement>('#en-again')!.onclick = () => {
         state = newGame({ name: me().name, slogan: me().slogan ?? '', color: me().color ?? PALETTE[0] }, state.config.difficulty);
+        gameStarted = true;
         selected.clear();
         tab = 'terrain';
         save();
@@ -728,6 +733,61 @@ function openEndScreen() {
       };
     },
   );
+}
+
+// ---------------------------------------------------------------- écran d'accueil
+
+function hideHome() {
+  const h = $('home');
+  h.hidden = true;
+  h.innerHTML = '';
+}
+
+/** Écran d'accueil : reprendre la partie, en commencer une nouvelle, lire le mode d'emploi. */
+function showHome() {
+  closeNotif();
+  const h = $('home');
+  const resume = gameStarted && me();
+  const worth = resume ? netWorth(state, ME) : 0;
+  const goal = state.config.goalMultiple;
+  const diff = DIFFICULTIES[state.config.difficulty ?? 'normal'];
+  const saveCard = resume
+    ? `<div class="home-save">
+        <div class="home-save-head"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><div><b>${esc(me().name)}</b><div class="muted">${state.over ? 'Partie terminée' : `${quarterLabel(state.round)} · trimestre ${state.round}/${state.config.rounds}`} · ${esc(diff.label)}</div></div></div>
+        <div class="home-stats"><div><small>Patrimoine</small><b>${eur(worth)}</b></div><div><small>Objectif</small><b>${goal ? `×${(worth / state.config.startCash).toFixed(2).replace('.', ',')} / ×${goal.toFixed(1).replace('.', ',')}` : '—'}</b></div><div><small>Opérations</small><b>${state.projects.filter((p) => p.owner === ME).length}</b></div></div>
+        ${pbar(state.round, state.config.rounds, `${state.config.rounds - state.round} trimestres restants`)}
+      </div>`
+    : '';
+  h.innerHTML = `<div class="home-inner">
+      <div class="home-brand"><div class="home-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></div><h1>Urbasim <span class="beta">bêta</span></h1><p class="home-tag">Le Monopoly de l’immobilier réel.<br>Achetez des terrains sur la vraie carte de ${esc(district.name.split('–')[0].trim())}, construisez, vendez, et battez vos concurrents promoteurs.</p></div>
+      ${saveCard}
+      <div class="home-actions">
+        ${resume ? `<button id="hm-continue" class="primary big">${state.over ? 'Voir les résultats' : 'Continuer la partie'}</button>` : ''}
+        <button id="hm-new" class="${resume ? '' : 'primary '}big">Nouvelle partie</button>
+        <button id="hm-howto" class="big">Mode d’emploi</button>
+      </div>
+      <div class="home-place"><div><small>Lieu de la partie</small><b>${esc(district.name)}</b></div><span class="soon" title="Plus tard, vous choisirez la ville et le quartier">autres lieux bientôt</span></div>
+      <div class="home-beta"><b>Version bêta</b> : le jeu évolue vite, des choses bougent ou cassent, et les prix, coûts et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.
+        <div class="home-soon"><b>À venir</b><ul><li>Choix du lieu : d’autres quartiers et villes de France</li><li>Mode multijoueur : jouer contre vos amis, sans serveur</li><li>Programmes et dispositifs (TVA 5,5 %, ZAC propres à un territoire)</li><li>Une carte plus belle et plus lisible, puis une vue 3D</li></ul></div></div>
+      <ul class="home-points">
+        <li><b>Vraies parcelles</b> du cadastre, PLU simplifié, bâti existant</li>
+        <li><b>Enchères</b> et <b>appels d’offres</b> de la commune (ZAC, PUP)</li>
+        <li><b>Concurrents</b> ordinateur, aléas, dettes et faillite</li>
+      </ul>
+      <div class="home-credits">Prototype · ${esc(district.credits.join(' · '))} · prix et coûts : ordres de grandeur</div>
+    </div>`;
+  h.hidden = false;
+  const q = (id: string) => h.querySelector<HTMLButtonElement>(`#${id}`);
+  const cont = q('hm-continue');
+  if (cont)
+    cont.onclick = () => {
+      hideHome();
+      if (state.over) openEndScreen();
+      else if (!localStorage_get(TUTO_KEY) && state.round === 0 && !state.log.length) openTutorial();
+    };
+  q('hm-new')!.onclick = () => openIdentity('new');
+  q('hm-howto')!.onclick = () => openTutorial();
+  (cont ?? q('hm-new'))!.focus();
 }
 
 // ---------------------------------------------------------------- panneaux
@@ -760,10 +820,11 @@ function renderTop() {
     <button id="end" class="primary">${state.over ? 'Résultats' : me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
     <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">▶▶</button>
     <button id="bell" class="bell" title="Notifications et échéances" aria-label="Notifications">🔔${unreadCount() ? `<span class="badge hot">${unreadCount()}</span>` : urgentWatch() ? '<span class="badge hot">!</span>' : ''}</button>
-    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="howto">Mode d’emploi</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
+    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button><button id="howto">Mode d’emploi</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
   $('end').onclick = () => (state.over ? openEndScreen() : endTurn());
   $('ff').onclick = fastForward;
   $('bell').onclick = openNotif;
+  $('home-btn').onclick = () => (closeMenu(), showHome());
   $('howto').onclick = () => (closeMenu(), openTutorial());
   $('company').onclick = () => (closeMenu(), openIdentity('edit'));
   const nb = $('new');
@@ -1586,9 +1647,7 @@ fitDistrict();
 applyView();
 (document.getElementById('view') as HTMLSelectElement).value = view;
 renderAll();
-if (!saved) openIdentity('new');
-else if (state.over) openEndScreen();
-else if (!localStorage_get(TUTO_KEY) && state.round === 0 && !state.log.length) openTutorial();
+showHome();
 
 // Outils de test automatisé (serveur de développement uniquement).
 if (import.meta.env.DEV) {

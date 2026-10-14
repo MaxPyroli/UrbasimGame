@@ -305,6 +305,11 @@ collectivité jouent le rôle des enchères du Monopoly.
   servie par GitHub Pages à https://maxpyroli.github.io/UrbasimGame/. Réglage unique à faire dans le dépôt :
   Settings → Pages → Source « Deploy from a branch » → branche `gh-pages`, dossier `/ (root)`.
 
+- Fait : **écran d'accueil** (`showHome` dans `jeu/src/main.ts`) : logo, badge « bêta », reprise de la partie (société, trimestre,
+  patrimoine, objectif, barre d'avancement), nouvelle partie, mode d'emploi, lieu de la partie (Montreuil – Mairie, « autres
+  lieux bientôt »), encart bêta et « à venir » (choix du lieu, multijoueur sans serveur, programmes, carte plus belle puis 3D),
+  crédits des données. Accessible aussi par le menu « ⋯ ». Annuler la création de société ramène à l'accueil.
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,

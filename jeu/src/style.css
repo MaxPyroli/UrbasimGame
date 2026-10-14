@@ -233,3 +233,33 @@ table.score td { padding: 2px 4px; }
 .alert-text { font-weight: 600; margin: 4px 0 8px; }
 .tabs { flex-wrap: wrap; gap: 0 2px; }
 .tabs button { padding: 5px 7px; font-size: 13px; }
+
+/* ---- écran d'accueil ---- */
+.home { position: fixed; inset: 0; z-index: 4600; display: flex; padding: 20px; overflow-y: auto; background: linear-gradient(160deg, color-mix(in srgb, var(--bg) 94%, transparent), color-mix(in srgb, var(--bg) 82%, #1f6feb 12%)); backdrop-filter: blur(6px); }
+.home[hidden] { display: none; }
+.home-inner { margin: auto; width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 16px; }
+.home-brand { text-align: center; }
+.home-brand h1 { font-size: 44px; margin: 6px 0 4px; letter-spacing: 0.02em; }
+.home-tag { margin: 0; color: var(--muted); line-height: 1.45; }
+.home-logo { display: inline-grid; grid-template-columns: repeat(2, 22px); gap: 4px; align-items: end; }
+.home-logo i { display: block; border-radius: 3px; background: var(--accent); }
+.home-logo i:nth-child(1) { height: 26px; }
+.home-logo i:nth-child(2) { height: 40px; background: #c2185b; }
+.home-logo i:nth-child(3) { height: 34px; background: #e6ab02; }
+.home-logo i:nth-child(4) { height: 20px; background: #1b9e77; }
+.home-save { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12); }
+.home-save-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.home-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 6px; }
+.home-stats small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.home-actions { display: flex; flex-direction: column; gap: 8px; }
+button.big { padding: 12px 16px; font-size: 16px; border-radius: 10px; }
+.home-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); text-align: center; }
+.home-points b { color: var(--ink); }
+.home-credits { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.4; }
+.beta { font-size: 12px; vertical-align: middle; letter-spacing: 0.08em; text-transform: uppercase; background: var(--warn); color: #fff; border-radius: 10px; padding: 2px 9px; }
+.home-place { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.home-place small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.soon { font-size: 11px; border: 1px dashed var(--muted); color: var(--muted); border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
+.home-beta { font-size: 12.5px; line-height: 1.45; border-left: 4px solid var(--warn); background: color-mix(in srgb, var(--warn) 9%, transparent); border-radius: 4px; padding: 8px 12px; }
+.home-soon { margin-top: 6px; }
+.home-soon ul { margin: 3px 0 0; padding-left: 18px; color: var(--muted); }
