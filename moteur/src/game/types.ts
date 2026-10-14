@@ -28,15 +28,30 @@ export interface GameConfig {
   /** Le taux du crédit marche au hasard (±) et revient vers `bilanParams.interestRate` ; bornes. */
   rateVolatility: number;
   rateReversion: number;
+  /** Logements que les ménages achètent par trimestre dans le quartier (0 = automatique : 3 % du nombre de parcelles, au moins 6). */
+  salesDemand: number;
+  /** Part des lots à vendre sur plan avant que la banque débloque le chantier. */
+  presaleThreshold: number;
+  /** Part du prix versée pendant le chantier, par appels de fonds au prorata de l'avancement (le solde à la livraison). */
+  payDuringBuild: number;
+  /** Sensibilité des ventes au prix : un lot 10 % moins cher capte exp(élasticité × 0,1) fois plus d'acheteurs. */
+  priceElasticity: number;
+  /** Baisse relative de la demande par point de hausse du taux de crédit au-dessus de sa valeur de référence. */
+  demandRateSensitivity: number;
   minRate: number;
   maxRate: number;
 }
+
+/** Pourquoi un terrain ne peut pas être construit seul : à combiner avec des parcelles voisines. */
+export type PlotIssue = 'trop-petite' | 'enclavee' | 'inconstructible';
 
 export interface Plot {
   id: PlotId;
   label?: string;
   /** Parcelles cadastrales d'origine quand ce terrain est un assemblage. */
   parts?: PlotId[];
+  /** Si présent, le terrain n'est pas constructible tel quel (voir `PlotIssue`). */
+  issue?: PlotIssue;
   parcel: Parcel;
   owner: PlayerId | null;
   /** SDP du bâti existant (m²) : démoli au lancement d'une opération. */
@@ -67,7 +82,8 @@ export interface Player {
   ready: boolean;
 }
 
-export type ProjectPhase = 'permis' | 'chantier' | 'vente';
+/** Permis de construire, attente du seuil de préventes exigé par la banque, chantier, puis livraison et dernières ventes. */
+export type ProjectPhase = 'permis' | 'preventes' | 'chantier' | 'livraison';
 
 export interface ProjectRun {
   id: string;
@@ -90,6 +106,24 @@ export interface ProjectRun {
   installment: number;
   /** Solde reçu à la fin des ventes si l'indice de marché est inchangé (hors effet marché). */
   loanRepayment: number;
+  phase: ProjectPhase;
+  /** Vrai une fois le seuil de préventes atteint : la banque a débloqué le crédit (refinancement du terrain, chantier). */
+  financed: boolean;
+  /** Part du terrain financée par la banque, versée au promoteur quand le crédit est débloqué. */
+  landRefund: number;
+  /** Trimestres écoulés dans la phase en cours. */
+  phaseElapsed: number;
+  /** Lots à vendre (logements, commerces, bureaux) et lots vendus. */
+  lots: number;
+  lotsSold: number;
+  /** Prix de vente cumulé des lots vendus (fixé à la vente), et part déjà versée par les acquéreurs. */
+  soldRevenue: number;
+  paidGross: number;
+  /** Crédit encore dû (les encaissements le remboursent en priorité) et trésorerie nette déjà revenue au promoteur. */
+  loanOutstanding: number;
+  cashReceived: number;
+  /** Prix de vente par rapport au marché : -0,1 = 10 % de remise pour vendre plus vite. */
+  pricePolicy: number;
   /** Taux du crédit au lancement, cumul des taux trimestriels et nombre de trimestres écoulés (crédit à taux variable). */
   rateAtLaunch: number;
   rateAccum: number;
@@ -115,6 +149,8 @@ export interface GameState {
   projects: ProjectRun[];
   /** Indice des prix de vente (1 = référence), évolue au fil des tours. */
   marketIndex: number;
+  /** Choc de demande des ménages (retournement ou regain de confiance), qui s'estompe de 25 % par trimestre. */
+  demandShock: number;
   /** Renchérissement des terrains dû à la demande (1 = calme). */
   landHeat: number;
   /** Taux annuel actuel du crédit promoteur. */
@@ -129,6 +165,8 @@ export type Action =
   | { type: 'sellPlot'; player: PlayerId; plot: PlotId }
   /** Assemble plusieurs parcelles mitoyennes que le joueur possède en une seule, plus grande. */
   | { type: 'merge'; player: PlayerId; plots: PlotId[] }
+  /** Règle le prix de vente d'une opération par rapport au marché (remise ou prime). */
+  | { type: 'setPrice'; player: PlayerId; project: string; policy: number }
   | { type: 'launch'; player: PlayerId; plot: PlotId; criteria: Criteria }
   /** Le joueur a fini son tour ; quand tous le sont, le trimestre se résout. */
   | { type: 'ready'; player: PlayerId };

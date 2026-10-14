@@ -38,13 +38,21 @@ describe('quartier à partir du cadastre', () => {
   const d = buildDistrict(src);
   const byId = (id: string) => d.parcels.find((p) => p.id === id);
 
-  it('écarte les miettes, les lots hors rayon et les lots enclavés', () => {
+  it('écarte les miettes et les lots hors rayon, mais garde les lots enclavés (sans façade sur rue) pour les assembler', () => {
     expect(byId('D000')).toBeUndefined();
     expect(byId('E000')).toBeUndefined();
     // C touche A et B sur tout un côté mais aussi la rue sur les trois autres : il reste constructible.
     expect(byId('C000')).toBeDefined();
     const enclosed = buildDistrict({ ...src, cadastre: { ...cadastre, features: [feat('A000', rect(0, 0, 10, 10)), feat('N', rect(0, 10, 10, 10)), feat('S', rect(0, -10, 10, 10)), feat('W', rect(-10, 0, 10, 10)), feat('Z', rect(10, 0, 10, 10))] } });
-    expect(enclosed.parcels.find((p) => p.id === 'A000')).toBeUndefined();
+    expect(enclosed.parcels.find((p) => p.id === 'A000')!.streetEdges).toEqual([]);
+  });
+
+  it('signale les terrains non constructibles seuls : enclavé, trop petit, et laisse les autres', () => {
+    const seeds = districtToSeeds(buildDistrict({ ...src, cadastre: { ...cadastre, features: [feat('A000', rect(0, 0, 10, 10)), feat('N', rect(0, 10, 10, 10)), feat('S', rect(0, -10, 10, 10)), feat('W', rect(-10, 0, 10, 10)), feat('Z', rect(10, 0, 10, 10)), feat('P', rect(60, 0, 3, 30))] } }));
+    const issue = (id: string) => seeds.find((x) => x.id === id)?.issue;
+    expect(issue('A000')).toBe('enclavee');
+    expect(issue('P')).toBe('trop-petite'); // 3 m de large
+    expect(issue('N')).toBeUndefined();
   });
 
   it('reconnaît les façades sur rue : les côtés mitoyens n’en sont pas', () => {
@@ -91,9 +99,12 @@ describe('instantané réel : Montreuil – Mairie (IGN)', () => {
   const real: District = JSON.parse(readFileSync(new URL('../data/districts/montreuil-mairie.json', import.meta.url), 'utf8'));
 
   it('contient plusieurs centaines de parcelles, avec mentions de licence et prix mémorisés', () => {
-    expect(real.parcels.length).toBeGreaterThan(200);
+    expect(real.parcels.length).toBeGreaterThan(300);
     expect(real.credits.join(' ')).toMatch(/Licence Ouverte/);
-    expect(real.parcels.every((p) => p.streetEdges.length > 0 && p.basePrice! >= 20_000)).toBe(true);
+    expect(real.parcels.every((p) => p.basePrice! >= 20_000)).toBe(true);
+    expect(real.parcels.some((p) => p.streetEdges.length === 0)).toBe(true); // enclavées, à assembler
+    const issues = districtToSeeds(real).filter((x) => x.issue);
+    expect(issues.length).toBeGreaterThan(20);
     expect(real.buildings.length).toBeGreaterThan(300);
     expect(real.buildings.every((b) => b.height > 0 && b.ring.length >= 3)).toBe(true);
   });

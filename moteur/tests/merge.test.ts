@@ -106,4 +106,35 @@ describe('action merge', () => {
     s = play(s, { type: 'launch', player: 'a', plot: 'T1+T2', criteria: { ...DEFAULT_CRITERIA, levels: 4 } });
     expect(s.projects[0].sdp).toBeGreaterThan(900);
   });
+
+  it('un terrain trop petit ne se lance pas seul ; assemblé avec un voisin il le devient', () => {
+    const tiny = (x: number): Parcel => rect(x, 0, 4, 12); // 48 m²
+    let s = createGame({
+      players: [{ id: 'a', name: 'Alice' }],
+      plots: [{ id: 'S1', parcel: tiny(0), issue: 'trop-petite' }, { id: 'S2', parcel: tiny(4), issue: 'trop-petite' }, { id: 'S3', parcel: tiny(8), issue: 'trop-petite' }, { id: 'S4', parcel: tiny(12), issue: 'trop-petite' }],
+      config: { market: MARKETS['petite-couronne'], startCash: 5_000_000, eventChance: 0, salesDemand: 1000 },
+    });
+    for (const id of ['S1', 'S2', 'S3', 'S4']) s = play(s, { type: 'buy', player: 'a', plot: id });
+    expect(err(s, { type: 'launch', player: 'a', plot: 'S1', criteria: { ...DEFAULT_CRITERIA, levels: 2 } })).toMatch(/trop petit/);
+    s = play(s, { type: 'merge', player: 'a', plots: ['S1', 'S2', 'S3', 'S4'] });
+    expect(s.plots[0].issue).toBeUndefined(); // 16 × 12 m : constructible
+    s = play(s, { type: 'launch', player: 'a', plot: 'S1+S2+S3+S4', criteria: { ...DEFAULT_CRITERIA, levels: 3 } });
+    expect(s.projects).toHaveLength(1);
+  });
+
+  it('une parcelle enclavée devient constructible une fois assemblée avec une parcelle sur rue', () => {
+    const front = rect(0, 0, 12, 12);
+    const back: Parcel = { ...rect(0, 12, 12, 12), streetEdges: [] };
+    let s = createGame({
+      players: [{ id: 'a', name: 'Alice' }],
+      plots: [{ id: 'F', parcel: front }, { id: 'B', parcel: back, issue: 'enclavee' }],
+      config: { market: MARKETS['petite-couronne'], startCash: 5_000_000, eventChance: 0 },
+    });
+    s = play(play(s, { type: 'buy', player: 'a', plot: 'F' }), { type: 'buy', player: 'a', plot: 'B' });
+    expect(err(s, { type: 'launch', player: 'a', plot: 'B', criteria: { ...DEFAULT_CRITERIA, levels: 2 } })).toMatch(/enclavée/);
+    s = play(s, { type: 'merge', player: 'a', plots: ['F', 'B'] });
+    const m = s.plots[0];
+    expect(m.issue).toBeUndefined();
+    expect(m.parcel.streetEdges.length).toBeGreaterThan(0);
+  });
 });

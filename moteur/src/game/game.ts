@@ -13,7 +13,8 @@ import {
 import { marketAt } from './location';
 import { mergeParcels } from './merge';
 import { nextGaussian, nextRandom } from './rng';
-import type { Action, ActionResult, BotProfileName, GameConfig, GameEvent, GameState, Plot, Player, ProjectPhase, ProjectRun } from './types';
+import { expectedSales, lotPrice, lotsLeft, soldShare } from './sales';
+import type { Action, ActionResult, BotProfileName, GameConfig, GameEvent, GameState, Plot, PlotIssue, Player, ProjectPhase, ProjectRun } from './types';
 
 export const DEFAULT_CONFIG: GameConfig = {
   market: MARKETS['petite-couronne'],
@@ -31,6 +32,11 @@ export const DEFAULT_CONFIG: GameConfig = {
   eventChance: 0.4,
   rateVolatility: 0.004,
   rateReversion: 0.1,
+  salesDemand: 0,
+  presaleThreshold: 0.6,
+  payDuringBuild: 0.95,
+  priceElasticity: 6,
+  demandRateSensitivity: 8,
   minRate: 0.015,
   maxRate: 0.09,
 };
@@ -49,6 +55,8 @@ export interface PlotSeed {
   askingPrice?: number;
   /** Libellé affichable (section, numéro, surface). */
   label?: string;
+  /** Le terrain n'est pas constructible seul. */
+  issue?: PlotIssue;
 }
 
 export interface PlayerSeed {
@@ -66,6 +74,29 @@ export interface NewGame {
 }
 
 const MIN_PLOT_PRICE = 20_000;
+/** Bornes de la politique de prix d'une opération (remise maximale, prime maximale). */
+export const MIN_PRICE_POLICY = -0.2;
+export const MAX_PRICE_POLICY = 0.15;
+
+/** Surface en dessous de laquelle un terrain sans projet réalisable est dit « trop petit » plutôt qu'« inconstructible ». */
+const SMALL_PLOT_AREA = 150;
+
+/** Un terrain est-il constructible seul ? Retourne la raison sinon (façade sur rue absente, trop petit, retraits). */
+export function plotIssue(parcel: Parcel): PlotIssue | undefined {
+  if (parcel.streetEdges.length === 0) return 'enclavee';
+  const ok = [1, 3].some((levels) => {
+    const pr = computeProject(parcel, { ...DEFAULT_CRITERIA, levels });
+    return pr.footprint !== null && pr.checks.every((c) => c.status !== 'error');
+  });
+  if (ok) return undefined;
+  return parcelArea(parcel) < SMALL_PLOT_AREA ? 'trop-petite' : 'inconstructible';
+}
+
+export const ISSUE_MESSAGE: Record<PlotIssue, string> = {
+  enclavee: 'Parcelle enclavée : aucun accès à la rue. À assembler avec une parcelle voisine qui donne sur la rue.',
+  'trop-petite': 'Terrain trop petit pour être construit seul. À assembler avec des parcelles voisines.',
+  inconstructible: 'Rien de constructible sur ce terrain seul (forme, retraits). À assembler avec des parcelles voisines.',
+};
 
 /** Surface d'une parcelle (m²). */
 export function parcelArea(parcel: Parcel): number {
@@ -81,7 +112,8 @@ export function parcelArea(parcel: Parcel): number {
 export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1): number {
   const market = marketAt(config.market, locationFactor);
   let best = 0;
-  let area = 0;
+  let area = parcelArea(parcel);
+  if (parcel.streetEdges.length === 0) return Math.max(Math.round(Math.max(MIN_PLOT_PRICE, 0.6 * area * market.landPerSdp * locationFactor) / 1000) * 1000, MIN_PLOT_PRICE);
   for (let levels = 0; levels <= 5; levels++) for (const attic of [false, true]) {
     const project = computeProject(parcel, { ...DEFAULT_CRITERIA, levels, attic });
     area = project.parcelArea;
@@ -116,6 +148,7 @@ export function createGame(g: NewGame): GameState {
     return {
       id: s.id,
       ...(s.label ? { label: s.label } : {}),
+      ...(s.issue ? { issue: s.issue } : {}),
       parcel: s.parcel,
       owner: null,
       existingSdp: s.existingSdp ?? 0,
@@ -128,16 +161,20 @@ export function createGame(g: NewGame): GameState {
       projectId: null,
     };
   });
-  const asks = plots.map((p) => p.basePrice).sort((a, b) => a - b);
+  // Trésorerie de départ : 2,5 fois le prix médian d'un terrain constructible (les petites parcelles à assembler ne comptent pas).
+  const buildable = plots.filter((p) => !p.issue);
+  const asks = (buildable.length ? buildable : plots).map((p) => p.basePrice).sort((a, b) => a - b);
   const startCash = config.startCash || Math.round((2.5 * (asks[Math.floor(asks.length / 2)] ?? 0)) / 50_000) * 50_000 || 1_000_000;
+  const salesDemand = config.salesDemand || Math.max(6, Math.round(0.03 * plots.length));
   return reprice({
-    config: { ...config, startCash },
+    config: { ...config, startCash, salesDemand },
     round: 0,
     over: false,
     players: g.players.map((p) => ({ id: p.id, name: p.name, bot: p.bot ?? false, ...(p.bot ? { profile: p.profile ?? 'equilibre' } : {}), cash: startCash, ready: false })),
     plots,
     projects: [],
     marketIndex: 1,
+    demandShock: 0,
     landHeat: 1,
     interestRate: config.bilanParams.interestRate,
     rng: (g.seed ?? 1) >>> 0,
@@ -171,13 +208,8 @@ const mapPlot = (s: GameState, id: string, f: (p: Plot) => Plot): GameState => (
   plots: s.plots.map((p) => (p.id === id ? f(p) : p)),
 });
 
-export function projectPhase(p: ProjectRun, round: number): ProjectPhase | 'termine' {
-  const e = round - p.launchedAt;
-  if (e < p.permitRounds) return 'permis';
-  if (e < p.permitRounds + p.buildRounds) return 'chantier';
-  if (e < p.permitRounds + p.buildRounds + p.sellRounds) return 'vente';
-  return 'termine';
-}
+/** Phase d'une opération (l'avancement est stocké : l'attente de préventes et les retards le rendent imprévisible). */
+export const projectPhase = (p: ProjectRun, _round?: number): ProjectPhase => p.phase;
 
 /** Application d'une action d'un joueur. Pure : ne modifie pas l'état reçu. */
 export function applyAction(state: GameState, action: Action): ActionResult {
@@ -219,9 +251,20 @@ export function applyAction(state: GameState, action: Action): ActionResult {
       paid: plots.reduce((t, p) => t + p.paid, 0),
       projectId: null,
     };
+    const issue = plotIssue(merged.parcel);
+    if (issue) fusion.issue = issue;
     let s: GameState = { ...state, plots: [...state.plots.filter((p) => !ids.includes(p.id)), fusion] };
     s = reprice(s);
     return { ok: true, state: withEvent(s, { player: player.id, text: `${player.name} assemble ${ids.join(', ')} (${Math.round(merged.area)} m²)` }) };
+  }
+
+  if (action.type === 'setPrice') {
+    const run = state.projects.find((p) => p.id === action.project);
+    if (!run) return fail('opération inconnue');
+    if (run.owner !== player.id) return fail('cette opération ne vous appartient pas');
+    if (!Number.isFinite(action.policy)) return fail('prix invalide');
+    const policy = Math.round(clamp(action.policy, MIN_PRICE_POLICY, MAX_PRICE_POLICY) * 1000) / 1000;
+    return { ok: true, state: mapProject(state, run.id, (p) => ({ ...p, pricePolicy: policy })) };
   }
 
   const plot = state.plots.find((p) => p.id === action.plot);
@@ -249,6 +292,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
   }
 
   // launch
+  if (plot.issue) return fail(ISSUE_MESSAGE[plot.issue]);
   const project = computeProject(plot.parcel, action.criteria);
   if (project.footprint === null) return fail('rien de constructible avec ces critères');
   const errors = project.checks.filter((c) => c.status === 'error');
@@ -268,8 +312,8 @@ export function applyAction(state: GameState, action: Action): ActionResult {
   const landAndFees = c.land + c.acquisitionFees;
   const equityBuild = buildSpend * (1 - ls);
   const refund = landAndFees * ls;
-  if (player.cash + refund < equityBuild) {
-    return fail(`fonds propres insuffisants : ${eur(equityBuild)} à réserver pour le chantier, ${eur(player.cash + refund)} disponibles après refinancement du terrain`);
+  if (player.cash < equityBuild) {
+    return fail(`fonds propres insuffisants : ${eur(equityBuild)} à réserver pour le chantier, ${eur(player.cash)} disponibles. La banque ne financera le terrain et les travaux qu’une fois ${Math.round(config.presaleThreshold * 100)} % des lots vendus sur plan.`);
   }
 
   const d = buildDuration(project, config.bilanParams);
@@ -288,6 +332,17 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     sdp: project.indicators.sdpTotal,
     height: project.indicators.height,
     marketIndexAtLaunch: state.marketIndex,
+    phase: 'permis',
+    financed: false,
+    landRefund: refund,
+    phaseElapsed: 0,
+    lots: Math.max(1, project.indicators.dwellings + (project.indicators.sdpCommerce > 0 ? 1 : 0) + (project.indicators.sdpOffice > 0 ? 1 : 0)),
+    lotsSold: 0,
+    soldRevenue: 0,
+    paidGross: 0,
+    loanOutstanding: ls * (landAndFees + buildSpend),
+    cashReceived: 0,
+    pricePolicy: 0,
     rateAtLaunch: state.interestRate,
     rateAccum: 0,
     roundsRun: 0,
@@ -297,7 +352,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     loanRepayment: ls * (landAndFees + buildSpend),
     equityInvested: landAndFees * (1 - ls) + equityBuild,
   };
-  let s = mapPlayer(state, player.id, (p) => ({ ...p, cash: p.cash + refund - equityBuild }));
+  let s = mapPlayer(state, player.id, (p) => ({ ...p, cash: p.cash - equityBuild }));
   s = mapPlot(s, plot.id, (p) => ({ ...p, projectId: run.id }));
   s = { ...s, projects: [...s.projects, run], nextProjectId: s.nextProjectId + 1 };
   const total = run.permitRounds + run.buildRounds + run.sellRounds;
@@ -334,7 +389,7 @@ function rollEvent(state: GameState): GameState {
   [u, s] = uniform(s);
   if (u >= s.config.eventChance) return s;
   [u, s] = uniform(s);
-  const live = s.projects.filter((p) => projectPhase(p, s.round) !== 'vente');
+  const live = s.projects.filter((p) => p.phase !== 'livraison');
   const owner = (p: ProjectRun) => s.players.find((x) => x.id === p.owner)!.name;
   const pick = (list: ProjectRun[]): [ProjectRun | null, GameState] => {
     if (!list.length) return [null, s];
@@ -347,13 +402,14 @@ function rollEvent(state: GameState): GameState {
     let g: number;
     [g, s] = uniform(s);
     const factor = g < 0.5 ? 0.92 : 1.07;
-    s = { ...s, marketIndex: clamp(s.marketIndex * factor, 0.6, 1.5) };
+    // Un retournement de marché refroidit aussi les acheteurs ; un regain les ramène.
+    s = { ...s, marketIndex: clamp(s.marketIndex * factor, 0.6, 1.5), demandShock: factor < 1 ? -0.35 : 0.25 };
     return withEvent(s, { text: factor < 1 ? 'Retournement du marché : les prix de vente baissent de 8 %' : 'Regain du marché : les prix de vente montent de 7 %' });
   }
   if (u < 0.45) {
     // Recours de voisins sur un permis ou un projet commençant.
     let p: ProjectRun | null;
-    [p, s] = pick(live.filter((x) => projectPhase(x, s.round) === 'permis'));
+    [p, s] = pick(live.filter((x) => x.phase === 'permis'));
     if (!p) return s;
     const cost = (p.loanRepayment * s.interestRate) / 4;
     s = mapProject(s, p.id, (x) => ({ ...x, permitRounds: x.permitRounds + 1, extraCost: x.extraCost + cost }));
@@ -362,7 +418,7 @@ function rollEvent(state: GameState): GameState {
   if (u < 0.65) {
     // Sol pollué découvert pendant le chantier.
     let p: ProjectRun | null;
-    [p, s] = pick(live.filter((x) => projectPhase(x, s.round) === 'chantier'));
+    [p, s] = pick(live.filter((x) => x.phase === 'chantier'));
     if (!p) return s;
     let v: number;
     [v, s] = uniform(s);
@@ -373,10 +429,10 @@ function rollEvent(state: GameState): GameState {
   if (u < 0.8) {
     // Fouilles archéologiques : seulement si le projet a un sous-sol.
     let p: ProjectRun | null;
-    [p, s] = pick(live.filter((x) => projectPhase(x, s.round) !== 'vente' && x.bilan.costs.works > 0 && x.criteria.parkingStrategy !== 'aucun'));
+    [p, s] = pick(live.filter((x) => (x.phase === 'permis' || x.phase === 'chantier') && x.bilan.costs.works > 0 && x.criteria.parkingStrategy !== 'aucun'));
     if (!p) return s;
     const cost = (p.loanRepayment * s.interestRate) / 2 + p.bilan.costs.works * 0.01;
-    s = mapProject(s, p.id, (x) => ({ ...x, buildRounds: projectPhase(x, s.round) === 'chantier' ? x.buildRounds + 2 : x.buildRounds, permitRounds: projectPhase(x, s.round) === 'permis' ? x.permitRounds + 2 : x.permitRounds, extraCost: x.extraCost + cost }));
+    s = mapProject(s, p.id, (x) => ({ ...x, buildRounds: x.phase === 'chantier' ? x.buildRounds + 2 : x.buildRounds, permitRounds: x.phase === 'permis' ? x.permitRounds + 2 : x.permitRounds, extraCost: x.extraCost + cost }));
     return withEvent(s, { player: p.owner, text: `Fouilles archéologiques sur ${p.id} (${owner(p)}) : deux trimestres de retard` });
   }
   // Décision de la banque centrale.
@@ -387,10 +443,11 @@ function rollEvent(state: GameState): GameState {
   return withEvent(s, { text: `Les taux ${delta > 0 ? 'montent' : 'baissent'} : crédit promoteur à ${(s.interestRate * 100).toFixed(1)} %` });
 }
 
-/** Résout un trimestre : chantiers, ventes, marché, aléas. Appelée quand tous les joueurs sont prêts. */
+/** Résout un trimestre : chantiers, marché, ventes, encaissements, aléas, livraisons. Appelée quand tous les joueurs sont prêts. */
 export function advanceRound(state: GameState): GameState {
   let s = state;
   const { config } = s;
+  const feeRate = config.bilanParams.salesFeeRate + config.bilanParams.overheadRate;
 
   // Portage des terrains qui dorment ; fonds propres versés pour chaque trimestre de chantier écoulé.
   s = {
@@ -401,7 +458,7 @@ export function advanceRound(state: GameState): GameState {
     }),
     projects: s.projects.map((p) => ({
       ...p,
-      escrow: projectPhase(p, s.round) === 'chantier' ? Math.max(0, p.escrow - p.installment) : p.escrow,
+      escrow: p.phase === 'chantier' ? Math.max(0, p.escrow - p.installment) : p.escrow,
       rateAccum: p.rateAccum + s.interestRate,
       roundsRun: p.roundsRun + 1,
     })),
@@ -419,23 +476,79 @@ export function advanceRound(state: GameState): GameState {
     marketIndex: clamp(idx, 0.6, 1.5),
     interestRate: clamp(rate, config.minRate, config.maxRate),
     landHeat: 1 + (s.landHeat - 1) * (1 - config.landHeatDecay),
+    demandShock: s.demandShock * 0.75,
   };
   s = rollEvent(s);
 
-  // Livraisons.
-  for (const p of s.projects.filter((x) => projectPhase(x, s.round) === 'termine')) {
-    const ratio = s.marketIndex / p.marketIndexAtLaunch;
-    const revenue = p.bilan.revenue.total * ratio;
-    const feeRate = config.bilanParams.salesFeeRate + config.bilanParams.overheadRate;
-    // Crédit à taux variable : les intérêts suivent le taux moyen constaté pendant l'opération.
-    const financing = p.bilan.costs.financing * (p.rateAccum / p.roundsRun / p.rateAtLaunch);
-    const gain = revenue * (1 - feeRate) - p.loanRepayment - financing - p.extraCost + p.escrow;
+  // Ventes : la demande du quartier se répartit entre toutes les opérations qui ont des lots à vendre.
+  const expected = expectedSales(s);
+  for (const p of s.projects) {
+    const e = expected.get(p.id) ?? 0;
+    let u: number;
+    [u, s] = uniform(s);
+    const n = Math.min(lotsLeft(p), Math.floor(e) + (u < e - Math.floor(e) ? 1 : 0));
+    if (n > 0) {
+      const price = lotPrice(s, p);
+      s = mapProject(s, p.id, (x) => ({ ...x, lotsSold: x.lotsSold + n, soldRevenue: x.soldRevenue + n * price }));
+    }
+  }
+
+  // Encaissements : appels de fonds au prorata du chantier, solde à la livraison ; ils remboursent d'abord la banque.
+  s = { ...s, projects: s.projects.map((p) => ({ ...p })) };
+  for (const p of s.projects) {
+    const finishing = p.phase === 'chantier' && p.phaseElapsed + 1 >= p.buildRounds;
+    const pct = p.phase === 'livraison' || finishing ? 1 : p.phase === 'chantier' ? config.payDuringBuild * ((p.phaseElapsed + 1) / p.buildRounds) : 0;
+    const gross = Math.max(0, pct * p.soldRevenue - p.paidGross);
+    if (gross <= 0) continue;
+    const net = gross * (1 - feeRate);
+    const repay = Math.min(p.loanOutstanding, net);
+    p.paidGross += gross;
+    p.loanOutstanding -= repay;
+    p.cashReceived += net - repay;
+    s = mapPlayer(s, p.owner, (x) => ({ ...x, cash: x.cash + net - repay }));
+  }
+
+  // Avancement : permis → (attente des préventes) → chantier → livraison ; clôture quand tout est vendu.
+  const closing: ProjectRun[] = [];
+  const released: ProjectRun[] = [];
+  s = {
+    ...s,
+    projects: s.projects.map((p) => {
+      const q = { ...p, phaseElapsed: p.phaseElapsed + 1 };
+      const ready = soldShare(q) >= config.presaleThreshold;
+      if (q.phase === 'permis' && q.phaseElapsed >= q.permitRounds) {
+        if (!ready) return { ...q, phase: 'preventes', phaseElapsed: 0 } as ProjectRun;
+        released.push(q);
+        return { ...q, phase: 'chantier', phaseElapsed: 0, financed: true } as ProjectRun;
+      }
+      if (q.phase === 'preventes' && ready) {
+        released.push(q);
+        return { ...q, phase: 'chantier', phaseElapsed: 0, financed: true } as ProjectRun;
+      }
+      if (q.phase === 'chantier' && q.phaseElapsed >= q.buildRounds) return { ...q, phase: 'livraison', phaseElapsed: 0 } as ProjectRun;
+      if (q.phase === 'livraison' && q.phaseElapsed >= 1 && lotsLeft(q) === 0) closing.push(q);
+      return q;
+    }),
+  };
+
+  // Le seuil de préventes est atteint : la banque débloque le crédit et refinance le terrain, le chantier peut démarrer.
+  for (const p of released) {
+    s = mapPlayer(s, p.owner, (x) => ({ ...x, cash: x.cash + p.landRefund }));
+    s = withEvent(s, { player: p.owner, text: `La banque débloque le crédit de ${p.id} : ${Math.round(soldShare(p) * 100)} % des lots vendus sur plan, ${eur(p.landRefund)} de terrain refinancés, chantier lancé` });
+  }
+
+  for (const p of closing) {
+    // Crédit à taux variable : les intérêts suivent le taux moyen constaté et la durée réelle (attente, stock invendu).
+    const planned = p.permitRounds + p.buildRounds + p.sellRounds;
+    const financing = p.bilan.costs.financing * (p.rateAccum / p.roundsRun / p.rateAtLaunch) * (p.roundsRun / planned);
+    const due = p.loanOutstanding + financing + p.extraCost - p.escrow;
     const owner = s.players.find((x) => x.id === p.owner)!;
-    s = mapPlayer(s, p.owner, (x) => ({ ...x, cash: x.cash + gain }));
+    const net = p.cashReceived - due;
+    s = mapPlayer(s, p.owner, (x) => ({ ...x, cash: Math.max(0, x.cash - due) }));
     const base = Math.max(MIN_PLOT_PRICE, Math.round((p.sdp * config.market.landPerSdp * 1.2) / 1000) * 1000);
     s = mapPlot(s, p.plotId, (x) => ({ ...x, owner: null, paid: 0, projectId: null, existingSdp: p.sdp, existingHeight: p.height, basePrice: base }));
     s = { ...s, projects: s.projects.filter((x) => x.id !== p.id) };
-    s = withEvent(s, { player: p.owner, text: `${owner.name} livre ${p.id} : ventes ${eur(revenue)}, encaissement net ${eur(gain)}` });
+    s = withEvent(s, { player: p.owner, text: `${owner.name} solde ${p.id} : ${p.lots} lots vendus ${eur(p.soldRevenue)}, résultat net ${eur(net)} en ${p.roundsRun} trimestres` });
   }
 
   s = reprice(s);
@@ -450,7 +563,8 @@ export function netWorth(state: GameState, playerId: string): number {
   for (const pl of state.plots) {
     if (pl.owner === playerId && !pl.projectId) w += pl.askingPrice * (1 - state.config.plotSpread);
   }
-  for (const pr of state.projects) if (pr.owner === playerId) w += pr.equityInvested;
+  // Un projet vaut les fonds propres investis, moins ce que les ventes ont déjà fait revenir en trésorerie.
+  for (const pr of state.projects) if (pr.owner === playerId) w += pr.equityInvested - pr.cashReceived + (pr.financed ? 0 : pr.landRefund);
   return Math.round(w);
 }
 

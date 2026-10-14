@@ -3,19 +3,17 @@ import {
   LocalProjection,
   bbox,
   cleanRing,
-  computeProject,
   distToSegment,
   intersection,
   multiArea,
   ringArea,
   toMulti,
-  DEFAULT_CRITERIA,
   type ContextBuilding,
   type LonLat,
   type MarketId,
   type Ring,
 } from '../engine';
-import { DEFAULT_CONFIG, defaultAskingPrice, type PlotSeed } from './game';
+import { DEFAULT_CONFIG, defaultAskingPrice, plotIssue, type PlotSeed } from './game';
 import { locationFactors, type Poi } from './location';
 import { MARKETS } from '../engine';
 
@@ -90,7 +88,7 @@ export interface DistrictSource {
   fetchedAt: string;
 }
 
-export const MIN_PARCEL_AREA = 60;
+export const MIN_PARCEL_AREA = 20;
 export const MAX_PARCEL_AREA = 3000;
 /** Deux arêtes à moins de cette distance (m) sont considérées comme mitoyennes. */
 const SHARED_TOLERANCE = 0.6;
@@ -118,7 +116,7 @@ const outerOf = (g: any): number[][] | null => {
 /**
  * Transforme les parcelles cadastrales et le bâti IGN en parcelles de jeu : contour simplifié, façades sur rue
  * (arêtes sans parcelle voisine) et surface bâtie existante. Les parcelles trop petites, trop grandes ou enclavées
- * (aucune façade sur rue) sont écartées. Seules celles dont le centre est dans le rayon sont conservées ; les autres
+ * (aucune façade sur rue) sont conservées avec une liste de façades vide. Seules celles dont le centre est dans le rayon sont conservées ; les autres
  * ne servent qu'à reconnaître les voisines. Pure et déterministe.
  */
 export function buildDistrict(src: DistrictSource): District {
@@ -176,8 +174,6 @@ export function buildDistrict(src: DistrictSource): District {
       const shared = neighbours.some((n) => n.ring.some((q, m) => distToSegment(mid, q, n.ring[(m + 1) % n.ring.length]) < SHARED_TOLERANCE));
       if (!shared) streetEdges.push(k);
     });
-    if (streetEdges.length === 0) return;
-
     let sdp = 0;
     let tallest = 0;
     const pMulti = toMulti(it.ring);
@@ -226,18 +222,15 @@ export function buildDistrict(src: DistrictSource): District {
 }
 
 /**
- * Parcelles du quartier pour une partie. On écarte celles où rien n'est constructible (même un R+0) :
- * personne ne doit pouvoir acheter un terrain mort.
+ * Parcelles du quartier pour une partie. Celles qui ne sont pas constructibles seules (trop petites, enclavées)
+ * restent affichées et achetables, marquées d'un `issue` : il faut les assembler avec des voisines.
  */
 export function districtToSeeds(d: District): PlotSeed[] {
   const seeds: PlotSeed[] = [];
   for (const p of d.parcels) {
     const parcel = { ring: p.ring, streetEdges: p.streetEdges };
-    const ok = [1, 3].some((levels) => {
-      const pr = computeProject(parcel, { ...DEFAULT_CRITERIA, levels });
-      return pr.footprint !== null && pr.checks.every((c) => c.status !== 'error');
-    });
-    if (ok) seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, locationFactor: p.locationFactor, label: p.label, ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
+    const issue = plotIssue(parcel);
+    seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, locationFactor: p.locationFactor, label: p.label, ...(issue ? { issue } : {}), ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
   }
   return seeds;
 }

@@ -11,7 +11,7 @@ const newGame = (over: Parameters<typeof createGame>[0]['config'] = {}) =>
   createGame({
     players: [{ id: 'a', name: 'Alice' }, { id: 'b', name: 'Bob', bot: true }],
     plots: [{ id: 'T1', parcel: lot(0) }, { id: 'T2', parcel: lot(20) }, { id: 'T3', parcel: lot(40), existingSdp: 200 }],
-    config: { marketVolatility: 0, eventChance: 0, holdingCostRate: 0, rateVolatility: 0, startCash: 3_000_000, ...over },
+    config: { marketVolatility: 0, eventChance: 0, holdingCostRate: 0, rateVolatility: 0, startCash: 3_000_000, salesDemand: 10_000, ...over },
     seed: 7,
   });
 const play = (s: GameState, a: Action): GameState => {

@@ -11,17 +11,25 @@ import {
   type ParkingStrategy,
 } from '../../moteur/src/engine';
 import {
+  ISSUE_MESSAGE,
+  MAX_PRICE_POLICY,
+  MIN_PRICE_POLICY,
   applyAction,
   createGame,
   currentMarket,
   currentParams,
   LOCATION_RULES,
   districtToSeeds,
+  expectedSales,
+  lotsLeft,
+  lotPrice,
+  marketDemand,
+  soldShare,
+  unitsOnOffer,
   locationParts,
   mergeParcels,
   netWorth,
   playBots,
-  projectPhase,
   ranking,
   type Action,
   type District,
@@ -32,7 +40,7 @@ import districtData from '../../moteur/data/districts/montreuil-mairie.json';
 
 const district = districtData as unknown as District;
 const ME = 'moi';
-const SAVE_KEY = 'urbasim-save-v2';
+const SAVE_KEY = 'urbasim-save-v3';
 const COLORS: Record<string, string> = { moi: '#1a9850', prudent: '#3b6fd4', equilibre: '#8e54c9', agressif: '#d6336c' };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -62,7 +70,7 @@ function load(): GameState {
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) {
       const s = JSON.parse(raw) as GameState;
-      if (s?.players?.some((p) => p.id === ME) && Array.isArray(s.plots)) return s;
+      if (s?.players?.some((p) => p.id === ME) && Array.isArray(s.plots) && typeof s.demandShock === 'number' && s.config?.salesDemand > 0) return s;
     }
   } catch {
     /* sauvegarde absente ou illisible : nouvelle partie */
@@ -75,6 +83,8 @@ let selected = new Set<string>();
 let multi = false;
 let tab: 'terrain' | 'operations' | 'journal' | 'classement' = 'terrain';
 let view: 'hauteur' | 'prix' | 'lieu' = 'hauteur';
+/** Terrains libres mis en avant sur la carte : tous, seulement ceux à ma portée, ou ceux à assembler. */
+let plotFilter: 'tous' | 'abordables' | 'assembler' = 'tous';
 let form: { levels: number; attic: boolean; parking: ParkingStrategy } = { levels: 3, attic: false, parking: 'auto' };
 
 function save() {
@@ -108,17 +118,52 @@ const plotById = (id: string) => state.plots.find((p) => p.id === id);
 const quarterLabel = (round: number) => `T${(round % 4) + 1} ${2027 + Math.floor(round / 4)}`;
 const criteria = (): Criteria => ({ ...DEFAULT_CRITERIA, levels: form.levels, attic: form.attic, parkingStrategy: form.parking });
 
-function endTurn() {
-  if (state.over) return;
+/** Passe un trimestre sans rien afficher ; retourne les nouvelles du journal qui concernent le joueur. */
+function advanceOne(): { mine: string[]; phases: string } {
   const before = state.log.length;
-  if (!me().ready && !act({ type: 'ready', player: ME })) return;
+  const phasesBefore = myPhases();
+  if (!me().ready && !act({ type: 'ready', player: ME })) return { mine: [], phases: phasesBefore };
   state = playBots(state);
   save();
-  const news = state.log.slice(before).filter((e) => e.player !== ME);
+  const mine = state.log.slice(before).filter((e) => e.player === ME).map((e) => e.text);
+  return { mine, phases: phasesBefore };
+}
+
+const myPhases = () => state.projects.filter((p) => p.owner === ME).map((p) => `${p.id}:${p.phase}`).join(',');
+
+function afterAdvance(message: string) {
   selected = new Set([...selected].filter((id) => plotById(id)));
   if (state.over) tab = 'classement';
-  toast(state.over ? 'Partie terminée !' : `${quarterLabel(state.round)} — ${news.length} événement${news.length > 1 ? 's' : ''}`);
+  toast(state.over ? 'Partie terminée !' : message);
   renderAll();
+}
+
+function endTurn() {
+  if (state.over) return;
+  const { mine } = advanceOne();
+  afterAdvance(`${quarterLabel(state.round)}${mine.length ? ` — ${mine.length} nouvelle${mine.length > 1 ? 's' : ''} pour vous` : ''}`);
+}
+
+/** Avance jusqu'à ce qu'il se passe quelque chose pour vous (étape d'une opération, aléa), au plus 8 trimestres. */
+function fastForward() {
+  if (state.over) return;
+  const hasStake = state.projects.some((p) => p.owner === ME);
+  const limit = hasStake ? 8 : 4;
+  let n = 0;
+  let why = '';
+  while (!state.over && n < limit) {
+    const { mine, phases } = advanceOne();
+    n++;
+    if (mine.length) {
+      why = mine[mine.length - 1];
+      break;
+    }
+    if (myPhases() !== phases) {
+      why = 'une de vos opérations passe à l’étape suivante';
+      break;
+    }
+  }
+  afterAdvance(`${n} trimestre${n > 1 ? 's' : ''} → ${quarterLabel(state.round)}${why ? ` : ${why}` : ''}`);
 }
 
 // ---------------------------------------------------------------- carte
@@ -153,6 +198,10 @@ function ownerColor(p: Plot): string | null {
   return p.owner ? COLORS[p.owner] ?? '#888' : null;
 }
 
+/** Coût d'acquisition d'un terrain libre (prix affiché et frais de notaire). */
+const buyCost = (p: Plot) => p.askingPrice * (1 + state.config.bilanParams.acquisitionFeeRate);
+const affordable = (p: Plot) => buyCost(p) <= me().cash;
+
 function plotStyle(p: Plot): L.PathOptions {
   const sel = selected.has(p.id);
   const col = ownerColor(p);
@@ -162,14 +211,22 @@ function plotStyle(p: Plot): L.PathOptions {
   const t = Math.min(1, Math.max(0, (ppm - lo) / Math.max(1, hi - lo)));
   const free = `hsl(${40 - 30 * t} 80% ${78 - 28 * t}%)`;
   const lieu = view === 'lieu';
-  return {
-    color: sel ? '#000' : col ?? (view === 'hauteur' ? '#2b6cb0' : '#7a6b4f'),
-    weight: sel ? 3 : p.projectId ? 2.5 : view === 'hauteur' ? 1.5 : 1,
-    fillColor: col ?? (lieu ? lieuColor(p.locationFactor) : free),
+  const freePlot = !p.owner;
+  const small = !!p.issue;
+  // Terrains libres hors de portée (trop chers pour moi) ou écartés par le filtre : estompés.
+  const dim = freePlot && (plotFilter === 'abordables' ? !affordable(p) : plotFilter === 'assembler' ? !small : false);
+  const faded = freePlot && !affordable(p) && !small;
+  const base: L.PathOptions = {
+    color: sel ? '#000' : small && freePlot ? '#7b3fa0' : col ?? (view === 'hauteur' ? '#2b6cb0' : '#7a6b4f'),
+    weight: sel ? 3 : p.projectId ? 2.5 : small ? 1.8 : view === 'hauteur' ? 1.5 : 1,
+    fillColor: col ?? (small ? '#cdb6e6' : lieu ? lieuColor(p.locationFactor) : free),
     // Vue « hauteur » : les parcelles libres restent transparentes pour laisser voir le bâti.
-    fillOpacity: col ? (p.projectId ? 0.7 : view === 'hauteur' ? 0.35 : 0.55) : view === 'hauteur' ? 0 : lieu ? 0.8 : 0.45,
-    dashArray: p.projectId ? '4 3' : undefined,
+    fillOpacity: col ? (p.projectId ? 0.7 : view === 'hauteur' ? 0.35 : 0.55) : small ? 0.5 : view === 'hauteur' ? 0 : lieu ? 0.8 : 0.45,
+    dashArray: p.projectId ? '4 3' : small ? '2 4' : undefined,
   };
+  if (dim) return { ...base, opacity: 0.2, fillOpacity: (base.fillOpacity ?? 0) * 0.2 };
+  if (faded) return { ...base, opacity: 0.55, fillOpacity: (base.fillOpacity ?? 0) * 0.55, dashArray: '1 5' };
+  return base;
 }
 
 /** Classes de hauteur du bâti existant (m) : borne haute, couleur, libellé en niveaux. */
@@ -306,10 +363,13 @@ function renderTop() {
     <div class="stat"><small>Patrimoine</small><b>${eurFull(w)}</b></div>
     <div class="stat"><small>Prix de vente (indice)</small><b class="${state.marketIndex >= 1 ? 'good' : 'bad'}">${(state.marketIndex * 100).toFixed(0)}</b></div>
     <div class="stat"><small>Crédit promoteur</small><b>${pct(state.interestRate)}</b></div>
+    <div class="stat" title="Logements que les ménages achètent par trimestre dans le quartier, et logements actuellement en vente (tous promoteurs)"><small>Demande · en vente</small><b>${marketDemand(state).toFixed(0)} · ${unitsOnOffer(state)} <span class="muted">logts</span></b></div>
     <span class="spacer"></span>
     <button id="end" class="primary" ${state.over ? 'disabled' : ''}>${me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
+    <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">Avancer ▶▶</button>
     <button id="new">Nouvelle partie</button>`;
   $('end').onclick = endTurn;
+  $('ff').onclick = fastForward;
   const nb = $('new');
   nb.onclick = () => {
     // Confirmation dans la page : les boîtes de dialogue du navigateur sont bloquées dans certains environnements.
@@ -348,12 +408,13 @@ function renderSide() {
 
 function legend(): string {
   const heights = view === 'hauteur' ? `<div class="legend muted" style="margin:6px 0">teinte plus claire = hauteur estimée (non renseignée dans la donnée)</div>` : '';
-  return `<label class="f" style="margin-top:14px">Vue de la carte<select id="view"><option value="hauteur" ${view === 'hauteur' ? 'selected' : ''}>Hauteur du bâti existant</option><option value="lieu" ${view === 'lieu' ? 'selected' : ''}>Valeur du lieu</option><option value="prix" ${view === 'prix' ? 'selected' : ''}>Prix des terrains</option></select></label>${heights}<p class="legend">
+  return `<label class="f" style="margin-top:14px">Terrains libres<select id="pfilter"><option value="tous" ${plotFilter === 'tous' ? 'selected' : ''}>tous</option><option value="abordables" ${plotFilter === 'abordables' ? 'selected' : ''}>à ma portée</option><option value="assembler" ${plotFilter === 'assembler' ? 'selected' : ''}>à assembler</option></select></label>
+    <label class="f">Vue de la carte<select id="view"><option value="hauteur" ${view === 'hauteur' ? 'selected' : ''}>Hauteur du bâti existant</option><option value="lieu" ${view === 'lieu' ? 'selected' : ''}>Valeur du lieu</option><option value="prix" ${view === 'prix' ? 'selected' : ''}>Prix des terrains</option></select></label>${heights}<p class="legend">
     <label><input type="checkbox" id="multi" ${multi ? 'checked' : ''}/> sélection multiple</label>
     <br><span><i class="swatch" style="background:${COLORS.moi}"></i>vous</span>${state.players
       .filter((p) => p.bot)
       .map((p) => `<span><i class="swatch" style="background:${COLORS[p.id]}"></i>${esc(p.name)}</span>`)
-      .join('')}<br>${view === 'prix' ? '<span>terrains libres : plus foncé = plus cher au m²</span> ' : '<span>terrains libres : contour bleu</span> '}<span>pointillés = opération en cours</span></p>`;
+      .join('')}<br>${view === 'prix' ? '<span>terrains libres : plus foncé = plus cher au m²</span> ' : '<span>terrains libres : contour bleu</span> '}<span>pointillés épais = opération en cours</span><br><span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>trop petit ou enclavé : à assembler</span> <span>contour pointillé fin = hors de portée</span></p>`;
 }
 
 function renderSelection(): string {
@@ -404,16 +465,28 @@ function renderSingle(p: Plot): string {
     drawOverlay(null);
     return html + legend();
   }
+  const issueBox = p.issue
+    ? `<div class="card" style="border-color:#7b3fa0"><b style="color:#7b3fa0">Non constructible seul</b><div>${esc(ISSUE_MESSAGE[p.issue])}</div><div class="muted">Sélectionnez les parcelles voisines (Maj+clic ou « sélection multiple »), achetez-les, puis « Assembler ».</div></div>`
+    : '';
   if (!p.owner) {
-    html += `<div class="row"><button id="buy" class="primary">Acheter · ${eurFull(p.askingPrice + fee)}</button></div>
-      <p class="muted">dont ${eurFull(fee)} de frais de notaire. Essayez un projet sur ce terrain avant d’acheter :</p>`;
+    const missing = buyCost(p) - me().cash;
+    html += `${issueBox}<div class="row"><button id="buy" class="primary" ${missing > 0 ? 'disabled' : ''}>Acheter · ${eurFull(buyCost(p))}</button></div>
+      <p class="muted">${missing > 0 ? `<span class="bad">Il vous manque ${eurFull(missing)}.</span> ` : ''}dont ${eurFull(fee)} de frais de notaire.${p.issue ? '' : ' Essayez un projet sur ce terrain avant d’acheter :'}</p>`;
+    if (p.issue) {
+      drawOverlay(null);
+      return html + legend();
+    }
     return html + projectForm(p, false) + legend();
   }
   if (!mine) {
     drawOverlay(null);
     return html + legend();
   }
-  html += `<div class="row"><button id="sell" class="danger">Revendre · ${eurFull(p.askingPrice * (1 - state.config.plotSpread))}</button></div>`;
+  html += `${issueBox}<div class="row"><button id="sell" class="danger">Revendre · ${eurFull(p.askingPrice * (1 - state.config.plotSpread))}</button></div>`;
+  if (p.issue) {
+    drawOverlay(null);
+    return html + legend();
+  }
   return html + projectForm(p, true) + legend();
 }
 
@@ -437,7 +510,11 @@ function projectForm(p: Plot, owned: boolean): string {
   if (!proj.footprint) return html + `<p class="bad">Rien de constructible avec ces critères.</p>`;
 
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : p.askingPrice;
-  const b = computeBilan({ project: proj, market: currentMarket(state), landPrice, existingSdp: p.existingSdp, params: currentParams(state) });
+  const b = computeBilan({ project: proj, market: currentMarket(state, p), landPrice, existingSdp: p.existingSdp, params: currentParams(state) });
+  const c0 = b.costs;
+  const equityBuild = (c0.demolition + c0.works + c0.fixed + c0.design + c0.insurance + c0.contingency + c0.taxes) * (1 - state.config.bilanParams.loanShare);
+  const cashNeeded = (owned ? 0 : buyCost(p)) + equityBuild;
+  const short = cashNeeded - me().cash;
   const i = proj.indicators;
   const ok = errors.length === 0;
   html += `<table>
@@ -451,24 +528,43 @@ function projectForm(p: Plot, owned: boolean): string {
       <tr><td>Autres frais et crédit</td><td>${eur(b.costs.total - b.costs.land - b.costs.acquisitionFees - b.costs.works - b.costs.demolition - b.costs.fixed)}</td></tr>
       <tr class="total"><td>Marge</td><td class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)} (${pct(b.marginRate)})</td></tr>
       <tr><td>Durée</td><td>${b.quarters} trimestres</td></tr>
+      <tr><td>Fonds propres à avancer ${owned ? '' : '(achat compris)'} <span class="muted" title="Le terrain est payé comptant. La banque ne finance le terrain (80 %) et les travaux qu'une fois ${Math.round(state.config.presaleThreshold * 100)} % des logements vendus sur plan.">ⓘ</span></td><td class="${short > 0 ? 'bad' : ''}">${eur(cashNeeded)}</td></tr>
       <tr><td>Prix de terrain max (marge ${pct(state.config.bilanParams.targetMargin)})</td><td>${eur(b.maxLandPrice)}</td></tr>
     </table>`;
   html += proj.checks.filter((c) => c.status === 'error' || c.status === 'warn').map((c) => `<div class="check ${c.status === 'error' ? 'bad' : 'warn'}">${esc(c.label)} : ${esc(c.detail)}</div>`).join('');
-  if (owned) html += `<div class="row"><button id="launch" class="primary" ${ok ? '' : 'disabled'}>Lancer l’opération</button></div>`;
+  if (short > 0) html += `<div class="check bad">Trésorerie insuffisante : il vous manque ${eurFull(short)} pour ${owned ? 'lancer' : 'acheter et lancer'} ce projet.</div>`;
+  if (owned) html += `<div class="row"><button id="launch" class="primary" ${ok && short <= 0 ? '' : 'disabled'}>Lancer l’opération</button></div>`;
   return html;
 }
+
+const PHASE_LABEL: Record<string, string> = {
+  permis: 'Permis de construire · commercialisation sur plan',
+  preventes: 'En attente de préventes : la banque ne débloque pas le crédit',
+  chantier: 'Chantier · appels de fonds des acquéreurs',
+  livraison: 'Livraison et dernières ventes',
+};
 
 function operationCard(runId: string): string {
   const r = state.projects.find((x) => x.id === runId);
   if (!r) return '';
-  const phase = projectPhase(r, state.round);
-  const total = r.permitRounds + r.buildRounds + r.sellRounds;
-  const elapsed = state.round - r.launchedAt;
+  const mineOp = r.owner === ME;
   const owner = state.players.find((p) => p.id === r.owner)!.name;
-  const labels: Record<string, string> = { permis: 'Permis de construire', chantier: 'Chantier', vente: 'Commercialisation', termine: 'Livrée' };
-  return `<div class="card"><b>${esc(r.id)}</b> · ${esc(owner)} · ${labels[phase]}
-    <div class="muted">${Math.round(r.sdp)} m² SDP · trimestre ${Math.min(elapsed + 1, total)}/${total}</div>
-    ${r.owner === ME ? `<div>Marge attendue ${eur(r.bilan.margin)} (${pct(r.bilan.marginRate)})${r.extraCost ? ` · surcoûts ${eur(r.extraCost)}` : ''}</div>` : ''}</div>`;
+  const left = lotsLeft(r);
+  const sales = expectedSales(state).get(r.id) ?? 0;
+  const threshold = Math.round(state.config.presaleThreshold * 100);
+  const share = Math.round(soldShare(r) * 100);
+  const bar = `<div style="position:relative;height:8px;background:var(--line);border-radius:4px;margin:6px 0"><div style="height:8px;width:${share}%;background:${share >= threshold ? 'var(--good)' : 'var(--accent)'};border-radius:4px"></div><div title="seuil de préventes" style="position:absolute;left:${threshold}%;top:-3px;width:2px;height:14px;background:var(--ink)"></div></div>`;
+  const stage = r.phase === 'permis' ? `${r.phaseElapsed}/${r.permitRounds}` : r.phase === 'chantier' ? `${r.phaseElapsed}/${r.buildRounds}` : r.phase === 'livraison' ? 'derniers lots' : 'attente';
+  let html = `<div class="card"><b>${esc(r.id)}</b> · ${esc(owner)} · ${PHASE_LABEL[r.phase]}
+    <div class="muted">${Math.round(r.sdp)} m² SDP · étape ${stage} · ${r.roundsRun} trimestre${r.roundsRun > 1 ? 's' : ''} écoulé${r.roundsRun > 1 ? 's' : ''}</div>
+    ${bar}<div>${r.lotsSold}/${r.lots} lots vendus (${share} %) · ${left ? `environ ${sales.toFixed(1).replace('.', ',')} vente${sales >= 1.5 ? 's' : ''} par trimestre` : 'tout est vendu'}</div>`;
+  if (!r.financed) html += `<div class="muted">Crédit bancaire débloqué à ${threshold} % de lots vendus${share >= threshold ? '' : ` : encore ${Math.max(1, Math.ceil(r.lots * state.config.presaleThreshold) - r.lotsSold)} lot(s) à vendre`}.</div>`;
+  if (mineOp) {
+    html += `<div>Marge attendue ${eur(r.bilan.margin)} (${pct(r.bilan.marginRate)})${r.extraCost ? ` · surcoûts ${eur(r.extraCost)}` : ''}</div>`;
+    if (left > 0)
+      html += `<label class="f" title="Une remise vend plus vite ; une prime ralentit les ventes">Prix de vente <span><input type="range" data-price="${esc(r.id)}" min="${MIN_PRICE_POLICY * 100}" max="${MAX_PRICE_POLICY * 100}" step="1" value="${Math.round(r.pricePolicy * 100)}"> <b>${r.pricePolicy > 0 ? '+' : ''}${Math.round(r.pricePolicy * 100)} %</b> <span class="muted">(≈ ${eur(lotPrice(state, r))}/lot)</span></span></label>`;
+  }
+  return html + '</div>';
 }
 
 function renderOperations(): string {
@@ -522,6 +618,13 @@ function bindSelection() {
     }
   });
   on('clear', () => ((selected = new Set()), renderAll()));
+  side.querySelectorAll<HTMLInputElement>('[data-price]').forEach((el) => {
+    el.onchange = () => {
+      if (act({ type: 'setPrice', player: ME, project: el.dataset.price!, policy: +el.value / 100 })) renderAll();
+    };
+  });
+  const pf = side.querySelector<HTMLSelectElement>('#pfilter');
+  if (pf) pf.onchange = () => ((plotFilter = pf.value as typeof plotFilter), renderAll());
   const viewSel = side.querySelector<HTMLSelectElement>('#view');
   if (viewSel) viewSel.onchange = () => ((view = viewSel.value as typeof view), applyView(), renderAll());
   const multiBox = side.querySelector<HTMLInputElement>('#multi');

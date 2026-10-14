@@ -176,6 +176,28 @@ collectivité jouent le rôle des enchères du Monopoly.
   participations. À affiner : valeur forfaitaire au m² × (taux communal + départemental [+ régional en Île-de-France]),
   forfait par place de stationnement, redevance d'archéologie préventive, PUP, participation à l'assainissement ;
   à paramétrer par commune/quartier (dans `Market` ou le fichier du quartier). Taux exacts à vérifier.
+- Fait : **marché de l'immobilier et cycle d'une opération** (`moteur/src/game/sales.ts`, `game.ts`). Les logements se
+  vendent par lots, trimestre après trimestre : demande du quartier (3 % du nombre de parcelles par trimestre, au moins
+  6 ; réduite par la hausse des taux et par les chocs de demande des retournements de marché), répartie entre toutes les
+  opérations selon leurs lots restants, leur avancement (sur plan < chantier < livré) et leur prix (élasticité). Chaque
+  opération a une **politique de prix** (−20 % à +15 % par rapport au marché, action `setPrice`). Phases : permis →
+  (attente de préventes) → chantier → livraison et dernières ventes → clôture quand tout est vendu. **Seuil de préventes
+  de 60 %** (`presaleThreshold`) : tant qu'il n'est pas atteint, la banque ne débloque pas le crédit (refinancement de
+  80 % du terrain + financement des travaux) et le chantier ne démarre pas ; le terrain est payé comptant et les fonds
+  propres du chantier (20 %) sont mis sous séquestre au lancement. Appels de fonds des acquéreurs pendant le chantier
+  (95 % au prorata de l'avancement, solde à la livraison), qui remboursent d'abord la banque ; intérêts proportionnels à
+  la durée réelle (donc les invendus et l'attente coûtent). Durées raccourcies : permis 6 mois, chantier 6 mois + 1 mois
+  par niveau (+2 par sous-sol) ; une opération R+3 dure ~7 trimestres au lieu de 9. Les bots règlent leurs prix selon le
+  rythme des ventes et évitent de saturer le marché.
+- Fait : **terrains non constructibles seuls** (`Plot.issue` : trop petite, enclavée, inconstructible) : affichés (violet
+  pointillé), achetables (prix plancher), mais le lancement d'une opération est refusé avec l'explication ; l'assemblage
+  avec des voisines les rend constructibles (une enclavée gagne l'accès à la rue). Quartier : 345 parcelles dont 95 à
+  assembler. L'interface grise les terrains hors de portée, indique « il vous manque X € » et propose un filtre.
+- Interface : bouton « Avancer ▶▶ » (jusqu'à la prochaine étape d'une opération ou un aléa, 8 trimestres au plus), cartes
+  d'opération avec barre de préventes et curseur de prix, indicateur de demande du quartier.
+- Équilibrage actuel (4 parties de 40 trimestres sur Montreuil, 3 bots) : patrimoine final / départ ≈ 1,3–1,7 (prudent,
+  équilibré) et 2,9–4,2 (agressif) : le profil agressif domine encore. Les bots n'attendent presque jamais les préventes
+  (peu de concurrence) : la tension viendra surtout des humains, des retournements de marché et des hausses de taux.
 - À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, appels d'offres, programmes (TVA 5,5 %,
   ZAC), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 
@@ -200,6 +222,12 @@ Le moteur est déjà adapté : état pur, sérialisable, déterministe, aléa da
   est identique (détecte la triche d'un pair). Plus robuste, plus complexe (ordre des actions, reconnexion).
 - **Asynchrone** (un trimestre par jour) : état échangé par fichier/lien ou stockage partagé ; pas de temps réel.
 Limite : le P2P pur n'empêche pas un hôte malhonnête ; acceptable entre amis, à reconsidérer pour un jeu public.
+
+- **Identité du promoteur** (idée notée) : au début de la partie, on choisit le nom de sa société de promotion et son
+  identité visuelle (couleur, logo/monogramme, slogan). À défaut, noms tirés au hasard parmi des parodies légèrement
+  modifiées de promoteurs réels, y compris pour les concurrents ordinateur (aujourd'hui « Prudent », « Équilibré »,
+  « Agressif »). Les parodies doivent rester manifestement fictives (jeux de mots, pas de nom réel reconnaissable
+  ni de logo copié) ; la couleur choisie remplace `COLORS` dans `jeu/src/main.ts`.
 
 ## 6. Pour démarrer la nouvelle session
 Donnez-lui ce fichier et dites par exemple : « Reprends le moteur de `./moteur`, crée la structure du jeu, et
