@@ -1,5 +1,5 @@
 import { type ContextBuilding, type LonLat, type MarketId, buildingsCredit } from '../engine';
-import { buildDistrict, type District } from '../game/district';
+import { buildDistrict, type District, type DistrictRoad } from '../game/district';
 import type { Poi, PoiKind } from '../game/location';
 import { fetchNearbyBuildings, fetchWfsPage } from './services';
 
@@ -46,6 +46,7 @@ export async function fetchDistrict(opts: { name: string; center: LonLat; radius
   const cadastre = await fetchCadastreBox(center, radius + MARGIN);
   const b = await fetchNearbyBuildings(center.lon, center.lat, radius + MARGIN);
   const pois = await fetchPois(center, radius);
+  const roads = await fetchRoads(center, radius);
   const fetchedAt = new Date().toISOString().slice(0, 10);
   const buildings: ContextBuilding[] = b.buildings;
   return buildDistrict({
@@ -53,6 +54,7 @@ export async function fetchDistrict(opts: { name: string; center: LonLat; radius
     cadastre,
     buildings,
     pois,
+    roads,
     credits: ['Parcelles : IGN / DGFiP, cadastre Etalab (Licence Ouverte 2.0)', buildingsCredit(buildings, fetchedAt), 'Équipements : IGN, BD TOPO® (Licence Ouverte 2.0)'],
     fetchedAt,
   });
@@ -119,4 +121,37 @@ export async function fetchPois(center: LonLat, radius: number): Promise<Poi[]> 
   };
   const [transport, interest] = await Promise.all([get('equipement_de_transport', TRANSPORT), get('zone_d_activite_ou_d_interet', INTEREST)]);
   return [...transport, ...interest];
+}
+
+/** Voies carrossables autour du quartier (BD TOPO, tronçons de route) : sentiers et escaliers écartés. */
+export async function fetchRoads(center: LonLat, radius: number): Promise<DistrictRoad[]> {
+  const r = radius + 60;
+  const dLat = r / 110574;
+  const dLon = r / (111320 * Math.cos((center.lat * Math.PI) / 180));
+  const bbox = `${center.lon - dLon},${center.lat - dLat},${center.lon + dLon},${center.lat + dLat},urn:ogc:def:crs:OGC:1.3:CRS84`;
+  const out: DistrictRoad[] = [];
+  for (let page = 0; page < 4; page++) {
+    const url = `${WFS}?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=BDTOPO_V3:troncon_de_route&OUTPUTFORMAT=application/json&SORTBY=cleabs&COUNT=1000&STARTINDEX=${page * 1000}&PROPERTYNAME=geometrie,nature,importance&BBOX=${encodeURIComponent(bbox)}`;
+    let json: any = null;
+    for (let attempt = 0; attempt < 4 && !json; attempt++) {
+      try {
+        json = await fetchWfsPage(url);
+      } catch {
+        await new Promise((res) => setTimeout(res, 1500 * (attempt + 1)));
+      }
+    }
+    if (!json) throw new Error('routes indisponibles');
+    const feats: any[] = json.features ?? [];
+    for (const f of feats) {
+      const nature = f.properties?.nature;
+      if (nature === 'Sentier' || nature === 'Escalier') continue;
+      const g = f.geometry;
+      const lines: number[][][] = g?.type === 'LineString' ? [g.coordinates] : g?.type === 'MultiLineString' ? g.coordinates : [];
+      for (const l of lines) {
+        out.push({ importance: Number(f.properties?.importance) || 5, line: l.map((q) => [Math.round(q[0] * 1e5) / 1e5, Math.round(q[1] * 1e5) / 1e5] as [number, number]) });
+      }
+    }
+    if (feats.length < 1000) break;
+  }
+  return out;
 }

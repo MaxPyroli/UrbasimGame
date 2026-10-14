@@ -124,7 +124,19 @@ function endTurn() {
 // ---------------------------------------------------------------- carte
 
 const map = L.map('map', { zoomControl: true, preferCanvas: false });
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, maxNativeZoom: 19, attribution: '© contributeurs OpenStreetMap' }).addTo(map);
+/** Sans fond de plan (page hébergée où les images externes sont bloquées) : on dessine les voies du quartier. */
+const NO_TILES = import.meta.env.VITE_NO_TILES === '1';
+if (!NO_TILES) {
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, maxNativeZoom: 19, attribution: '© contributeurs OpenStreetMap' }).addTo(map);
+} else {
+  map.createPane('routes');
+  map.getPane('routes')!.style.zIndex = '300';
+  map.getPane('routes')!.style.pointerEvents = 'none';
+  const widths = [0, 8, 7, 5, 3.5, 2.5, 1.5];
+  for (const r of [...(district.roads ?? [])].sort((a, b) => b.importance - a.importance)) {
+    L.polyline(r.line.map(([lon, lat]) => [lat, lon] as [number, number]), { pane: 'routes', interactive: false, className: 'road', weight: widths[r.importance] ?? 2, lineCap: 'round' }).addTo(map);
+  }
+}
 const layers = new Map<string, L.Polygon>();
 let overlay: L.LayerGroup = L.layerGroup().addTo(map);
 
@@ -298,14 +310,23 @@ function renderTop() {
     <button id="end" class="primary" ${state.over ? 'disabled' : ''}>${me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
     <button id="new">Nouvelle partie</button>`;
   $('end').onclick = endTurn;
-  $('new').onclick = () => {
-    if (confirm('Abandonner cette partie et en commencer une nouvelle ?')) {
-      state = newGame();
-      selected.clear();
-      tab = 'terrain';
-      save();
-      renderAll();
+  const nb = $('new');
+  nb.onclick = () => {
+    // Confirmation dans la page : les boîtes de dialogue du navigateur sont bloquées dans certains environnements.
+    if (nb.dataset.armed !== '1') {
+      nb.dataset.armed = '1';
+      nb.textContent = 'Confirmer l’abandon ?';
+      setTimeout(() => {
+        nb.dataset.armed = '0';
+        nb.textContent = 'Nouvelle partie';
+      }, 4000);
+      return;
     }
+    state = newGame();
+    selected.clear();
+    tab = 'terrain';
+    save();
+    renderAll();
   };
 }
 
@@ -530,7 +551,7 @@ function renderAll() {
   renderSide();
 }
 
-$('credits').textContent = district.credits.join(' · ') + ' · Fond de carte : © contributeurs OpenStreetMap · Prix et coûts : ordres de grandeur, pas une expertise.';
+$('credits').textContent = district.credits.join(' · ') + (NO_TILES ? ' · Voies : IGN, BD TOPO® (Licence Ouverte 2.0)' : ' · Fond de carte : © contributeurs OpenStreetMap') + ' · Prix et coûts : ordres de grandeur, pas une expertise.';
 mapLegend.addTo(map);
 fitDistrict();
 applyView();

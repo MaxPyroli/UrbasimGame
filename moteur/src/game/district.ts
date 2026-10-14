@@ -49,6 +49,14 @@ export interface DistrictBuilding {
   estimated: boolean;
 }
 
+/** Tronçon de route pour le fond de carte hors ligne (BD TOPO). */
+export interface DistrictRoad {
+  /** Points [lon, lat], 5 décimales. */
+  line: [number, number][];
+  /** Importance IGN : 1 (axe majeur) à 6 (desserte locale). */
+  importance: number;
+}
+
 /** Un quartier jouable : instantané de données ouvertes, utilisable hors ligne. */
 export interface District {
   name: string;
@@ -60,6 +68,8 @@ export interface District {
   buildings: DistrictBuilding[];
   /** Équipements qui valorisent les terrains alentour (y compris juste hors du quartier). */
   pois: Poi[];
+  /** Voies autour du quartier, pour dessiner la carte sans fond de plan (facultatif dans les anciens instantanés). */
+  roads?: DistrictRoad[];
   /** Mentions de licence à afficher (IGN, Licence Ouverte 2.0). */
   credits: string[];
   /** Date de l'instantané (AAAA-MM-JJ). */
@@ -75,6 +85,7 @@ export interface DistrictSource {
   cadastre: unknown;
   buildings: ContextBuilding[];
   pois: Poi[];
+  roads?: DistrictRoad[];
   credits: string[];
   fetchedAt: string;
 }
@@ -211,7 +222,7 @@ export function buildDistrict(src: DistrictSource): District {
     if (Math.hypot(cx, cy) > src.radius + 15) continue;
     buildings.push({ ring: b.outer.map((q) => [Math.round(q.lon * 1e6) / 1e6, Math.round(q.lat * 1e6) / 1e6]), height: Math.round(b.height * 10) / 10, estimated: b.estimated });
   }
-  return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, buildings, pois: src.pois, credits: src.credits, fetchedAt: src.fetchedAt };
+  return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, buildings, pois: src.pois, ...(src.roads ? { roads: src.roads } : {}), credits: src.credits, fetchedAt: src.fetchedAt };
 }
 
 /**
