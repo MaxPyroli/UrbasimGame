@@ -229,8 +229,19 @@ collectivité jouent le rôle des enchères du Monopoly.
   terrain : titre + pastille d'état, 4 faits (surface, prix, zone, bâti), action d'achat/vente, puis le projet (niveaux, attique,
   « Meilleur projet »), trois indicateurs (marge, fonds propres, durée) ; tout le reste est replié (Options, Détail du bilan,
   Règles d'urbanisme, Situation). Cartes d'opération plus courtes ; badge du nombre d'opérations sur l'onglet.
-- À faire (idées d'affichage) : mode d'emploi au premier lancement, aide contextuelle sur les termes (préventes, SDP,
-  pleine terre), choix du nom et de l'identité du promoteur.
+- Fait : **identité du promoteur, mode d'emploi, fin de partie**. `moteur/src/game/identity.ts` : palette de 8 couleurs, 24
+  noms parodiques manifestement fictifs avec slogan (testés : aucun ne reprend un nom réel), monogramme, nettoyage du nom
+  saisi, tirage au hasard reproductible, identités des trois concurrents toutes distinctes. Interface : fenêtre de création
+  de société à la première visite et à « Nouvelle partie » (nom, slogan, couleur, « au hasard », aperçu) ; « Ma société »
+  dans le menu pour la modifier en cours de partie ; mode d'emploi en 8 étapes (but, achat, PLU, assemblage, projet, ventes et
+  financement, temps, lexique) proposé après la création puis relançable depuis le menu ; liste « premiers pas » qui se
+  coche seule ; couleurs et noms de chaque société partout (carte, classement, barre du haut). Écran de **fin de partie** :
+  verdict selon le multiple du patrimoine, classement, bilan des opérations soldées (`Player.stats`), rejouer ou changer de
+  société ; bouton « Résultats » pour le rouvrir.
+- **Problème identifié (retour de test)** : la partie manque d'**enjeux**. Un joueur qui ne fait rien termine à ×1,00 sans
+  conséquence, il n'y a ni faillite ni objectif ni choix risqué, et les concurrents n'interagissent pas directement avec
+  lui. Pistes : faillite réelle et dette qui court, objectif et niveaux de difficulté, enchères entre promoteurs sur les
+  bons terrains, scénarios (boom, crise, remontée des taux), appels d'offres de la commune, réputation.
 - À faire ensuite : valeur selon le lieu (gares, centre), PLU de jeu par zone, appels d'offres, programmes (TVA 5,5 %,
   ZAC), multijoueur pair-à-pair ; côté interface : critères avancés (retraits, mix de typologies), vue 3D, mobile.
 

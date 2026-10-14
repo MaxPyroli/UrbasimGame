@@ -69,6 +69,8 @@ export interface PlayerSeed {
   name: string;
   bot?: boolean;
   profile?: BotProfileName;
+  color?: string;
+  slogan?: string;
 }
 
 export interface NewGame {
@@ -201,7 +203,7 @@ export function createGame(g: NewGame): GameState {
     config: { ...config, startCash, salesDemand },
     round: 0,
     over: false,
-    players: g.players.map((p) => ({ id: p.id, name: p.name, bot: p.bot ?? false, ...(p.bot ? { profile: p.profile ?? 'equilibre' } : {}), cash: startCash, ready: false })),
+    players: g.players.map((p) => ({ id: p.id, name: p.name, bot: p.bot ?? false, ...(p.bot ? { profile: p.profile ?? 'equilibre' } : {}), ...(p.color ? { color: p.color } : {}), ...(p.slogan ? { slogan: p.slogan } : {}), cash: startCash, ready: false })),
     plots,
     projects: [],
     marketIndex: 1,
@@ -578,7 +580,14 @@ export function advanceRound(state: GameState): GameState {
     const due = p.loanOutstanding + financing + p.extraCost - p.escrow;
     const owner = s.players.find((x) => x.id === p.owner)!;
     const net = p.cashReceived - due;
-    s = mapPlayer(s, p.owner, (x) => ({ ...x, cash: Math.max(0, x.cash - due) }));
+    s = mapPlayer(s, p.owner, (x) => {
+      const st = x.stats ?? { closed: 0, lots: 0, netTotal: 0, bestNet: 0, worstNet: 0 };
+      return {
+        ...x,
+        cash: Math.max(0, x.cash - due),
+        stats: { closed: st.closed + 1, lots: st.lots + p.lots, netTotal: st.netTotal + net, bestNet: st.closed ? Math.max(st.bestNet, net) : net, worstNet: st.closed ? Math.min(st.worstNet, net) : net },
+      };
+    });
     const base = Math.max(MIN_PLOT_PRICE, Math.round((p.sdp * config.market.landPerSdp * 1.2) / 1000) * 1000);
     s = mapPlot(s, p.plotId, (x) => ({ ...x, owner: null, paid: 0, projectId: null, existingSdp: p.sdp, existingHeight: p.height, basePrice: base }));
     s = { ...s, projects: s.projects.filter((x) => x.id !== p.id) };

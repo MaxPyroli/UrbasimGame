@@ -12,6 +12,13 @@ import {
 } from '../../moteur/src/engine';
 import {
   ISSUE_MESSAGE,
+  PALETTE,
+  botIdentities,
+  monogram,
+  randomIdentity,
+  sanitizeName,
+  sanitizeSlogan,
+  type Identity,
   ZONE_RULES,
   allowedLevels,
   criteriaFor,
@@ -45,31 +52,31 @@ import districtData from '../../moteur/data/districts/montreuil-mairie.json';
 const district = districtData as unknown as District;
 const ME = 'moi';
 const SAVE_KEY = 'urbasim-save-v4';
-const COLORS: Record<string, string> = { moi: '#1a9850', prudent: '#3b6fd4', equilibre: '#8e54c9', agressif: '#d6336c' };
+const FALLBACK_COLORS: Record<string, string> = { moi: PALETTE[0], prudent: PALETTE[1], equilibre: PALETTE[2], agressif: PALETTE[3] };
+const PROFILE_LABEL: Record<string, string> = { prudent: 'prudent', equilibre: 'équilibré', agressif: 'agressif' };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const eur = (n: number) => (Math.abs(n) >= 1e6 ? `${(n / 1e6).toFixed(2).replace('.', ',')} M€` : `${Math.round(n / 1000).toLocaleString('fr-FR')} k€`);
 const eurFull = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} €`;
 const pct = (x: number) => `${(x * 100).toFixed(1).replace('.', ',')} %`;
+const TUTO_KEY = 'urbasim-tuto-v1';
 
 // ---------------------------------------------------------------- état
 
-function newGame(seed = Date.now() % 100000): GameState {
+function newGame(identity: Identity, seed = Date.now() % 100000): GameState {
+  const bots = botIdentities(seed, identity);
+  const bot = (id: 'prudent' | 'equilibre' | 'agressif', i: number) => ({ id, name: bots[i].name, bot: true as const, profile: id, color: bots[i].color, slogan: bots[i].slogan });
   return createGame({
-    players: [
-      { id: ME, name: 'Vous' },
-      { id: 'prudent', name: 'Prudent', bot: true, profile: 'prudent' },
-      { id: 'equilibre', name: 'Équilibré', bot: true, profile: 'equilibre' },
-      { id: 'agressif', name: 'Agressif', bot: true, profile: 'agressif' },
-    ],
+    players: [{ id: ME, name: identity.name, color: identity.color, slogan: identity.slogan }, bot('prudent', 0), bot('equilibre', 1), bot('agressif', 2)],
     plots: districtToSeeds(district),
     config: { market: MARKETS[district.market] },
     seed,
   });
 }
 
-function load(): GameState {
+/** Partie sauvegardée, ou null (première visite ou sauvegarde périmée). */
+function load(): GameState | null {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) {
@@ -79,10 +86,14 @@ function load(): GameState {
   } catch {
     /* sauvegarde absente ou illisible : nouvelle partie */
   }
-  return newGame();
+  return null;
 }
 
-let state: GameState = load();
+const saved = load();
+/** Sans sauvegarde, une partie provisoire s'affiche derrière la fenêtre de création de société. */
+let state: GameState = saved ?? newGame(randomIdentity(Date.now() % 100000), 1);
+const colorOf = (id: string) => state.players.find((p) => p.id === id)?.color ?? FALLBACK_COLORS[id] ?? '#888';
+const shortName = (n: string) => (n.length > 16 ? `${n.slice(0, 15)}…` : n);
 let selected = new Set<string>();
 let multi = false;
 let tab: 'terrain' | 'operations' | 'journal' | 'classement' = 'terrain';
@@ -138,8 +149,9 @@ const myPhases = () => state.projects.filter((p) => p.owner === ME).map((p) => `
 function afterAdvance(message: string) {
   selected = new Set([...selected].filter((id) => plotById(id)));
   if (state.over) tab = 'classement';
-  toast(state.over ? 'Partie terminée !' : message);
+  else toast(message);
   renderAll();
+  if (state.over) openEndScreen();
 }
 
 function endTurn() {
@@ -197,9 +209,9 @@ function fitDistrict() {
 function ownerColor(p: Plot): string | null {
   if (p.projectId) {
     const run = state.projects.find((r) => r.id === p.projectId);
-    return run ? COLORS[run.owner] ?? '#888' : '#888';
+    return run ? colorOf(run.owner) : '#888';
   }
-  return p.owner ? COLORS[p.owner] ?? '#888' : null;
+  return p.owner ? colorOf(p.owner) : null;
 }
 
 /** Coût d'acquisition d'un terrain libre (prix affiché et frais de notaire). */
@@ -314,7 +326,7 @@ function updateMapLegend() {
     el.innerHTML = `<b>Prix des terrains libres</b><div>plus foncé = plus cher au m²</div>`;
   }
   // Repères communs à toutes les vues : propriétaires et symboles.
-  const owners = [`<span><i class="swatch" style="background:${COLORS.moi}"></i>vous</span>`, ...state.players.filter((p) => p.bot).map((p) => `<span><i class="swatch" style="background:${COLORS[p.id]}"></i>${esc(p.name)}</span>`)].join(' ');
+  const owners = [`<span><i class="swatch" style="background:${colorOf(ME)}"></i>vous</span>`, ...state.players.filter((p) => p.bot).map((p) => `<span><i class="swatch" style="background:${colorOf(p.id)}"></i>${esc(shortName(p.name))}</span>`)].join(' ');
   el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span>pointillé épais : opération</span></div>`;
   // Repliable (fermée par défaut sur petit écran) : le titre devient la ligne cliquable.
   const title = el.querySelector('b');
@@ -402,12 +414,251 @@ function drawOverlay(project: ReturnType<typeof computeProject> | null) {
   }
 }
 
+// ---------------------------------------------------------------- fenêtres : société et mode d'emploi
+
+let modalDismissable = true;
+function openModal(html: string, mount: (root: HTMLElement) => void, dismissable = true) {
+  const m = $('modal');
+  modalDismissable = dismissable;
+  m.innerHTML = `<div class="sheet">${html}</div>`;
+  m.hidden = false;
+  mount(m);
+  const first = m.querySelector<HTMLElement>('input, button.primary');
+  first?.focus();
+}
+function closeModal() {
+  $('modal').hidden = true;
+  $('modal').innerHTML = '';
+}
+const closeMenu = () => document.querySelector('.menu')?.removeAttribute('open');
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('modal').hidden && modalDismissable) closeModal();
+});
+$('modal').addEventListener('mousedown', (e) => {
+  if (e.target === $('modal') && modalDismissable) closeModal();
+});
+
+const mono = (name: string, color: string, small = false) => `<span class="mono${small ? ' sm' : ''}" style="background:${color}">${esc(monogram(name))}</span>`;
+
+/** Création de la société (nouvelle partie) ou modification de son identité en cours de partie. */
+function openIdentity(mode: 'new' | 'edit') {
+  const current: Identity =
+    mode === 'edit' ? { name: me().name, slogan: me().slogan ?? '', color: me().color ?? PALETTE[0] } : randomIdentity(Date.now() % 100000);
+  let color = current.color;
+  const dismissable = mode === 'edit' || saved !== null || !!localStorage_get(SAVE_KEY);
+  openModal(
+    `<h2 class="mh">${mode === 'edit' ? 'Ma société' : 'Votre société de promotion'}</h2>
+     <p class="muted">${mode === 'edit' ? 'Le nom et la couleur apparaissent sur la carte et dans le classement.' : 'Choisissez un nom et une couleur : ils apparaissent sur la carte et dans le classement. Vous pouvez tout changer plus tard.'}</p>
+     <div class="preview"><span id="pv-mono"></span><div><b id="pv-name"></b><div id="pv-slogan" class="muted"></div></div></div>
+     <label class="f col">Nom de la société<input id="co-name" maxlength="28" autocomplete="off" value="${esc(current.name)}"></label>
+     <label class="f col">Slogan (facultatif)<input id="co-slogan" maxlength="60" autocomplete="off" value="${esc(current.slogan)}"></label>
+     <div class="f col"><span>Couleur</span><div class="swatches" role="radiogroup" aria-label="Couleur">${PALETTE.map((c) => `<button type="button" class="sw" role="radio" data-color="${c}" aria-checked="${c === color}" style="background:${c}" title="${c}"></button>`).join('')}</div></div>
+     <div class="row" style="margin-top:14px"><button id="co-random" type="button" title="Un nom de société parodique tiré au hasard">Au hasard</button><span class="spacer"></span>${dismissable ? '<button id="co-cancel" type="button">Annuler</button>' : ''}<button id="co-go" type="button" class="primary">${mode === 'edit' ? 'Enregistrer' : 'Commencer'}</button></div>`,
+    (root) => {
+      const q = <T extends HTMLElement>(id: string) => root.querySelector<T>(`#${id}`)!;
+      const name = q<HTMLInputElement>('co-name');
+      const slogan = q<HTMLInputElement>('co-slogan');
+      const preview = () => {
+        const n = sanitizeName(name.value, 'Ma Promotion');
+        q('pv-mono').innerHTML = mono(n, color);
+        q('pv-name').textContent = n;
+        q('pv-slogan').textContent = sanitizeSlogan(slogan.value);
+        root.querySelectorAll<HTMLElement>('.sw').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.color === color)));
+      };
+      name.oninput = slogan.oninput = preview;
+      root.querySelectorAll<HTMLButtonElement>('.sw').forEach((b) => (b.onclick = () => ((color = b.dataset.color!), preview())));
+      let k = 0;
+      q('co-random').onclick = () => {
+        const r = randomIdentity((Date.now() + 977 * ++k) % 1000003);
+        name.value = r.name;
+        slogan.value = r.slogan;
+        color = r.color;
+        preview();
+      };
+      const cancel = root.querySelector<HTMLButtonElement>('#co-cancel');
+      if (cancel) cancel.onclick = closeModal;
+      const go = () => {
+        const id: Identity = { name: sanitizeName(name.value), slogan: sanitizeSlogan(slogan.value), color };
+        if (mode === 'edit') {
+          state = { ...state, players: state.players.map((p) => (p.id === ME ? { ...p, name: id.name, slogan: id.slogan, color: id.color } : p)) };
+          save();
+          closeModal();
+          renderAll();
+          return;
+        }
+        state = newGame(id);
+        selected.clear();
+        tab = 'terrain';
+        save();
+        closeModal();
+        renderAll();
+        if (!localStorage_get(TUTO_KEY)) openTutorial();
+      };
+      q('co-go').onclick = go;
+      name.onkeydown = (e) => e.key === 'Enter' && go();
+      preview();
+    },
+    dismissable,
+  );
+}
+
+function localStorage_get(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+const TUTORIAL: { title: string; body: string }[] = [
+  {
+    title: 'Devenez le promoteur du quartier',
+    body: `<p>Vous achetez des terrains, vous y construisez des immeubles et vous vendez les logements. Vous jouez <b>40 trimestres</b> (10 ans) contre trois concurrents dirigés par l’ordinateur.</p>
+      <p>La partie se gagne au <b>patrimoine</b> : votre trésorerie, vos terrains et l’argent engagé dans vos chantiers.</p>
+      <p class="muted">La carte est un vrai quartier de Montreuil : parcelles du cadastre, bâtiments existants et zonage d’urbanisme réels. Les prix et les coûts sont des ordres de grandeur.</p>`,
+  },
+  {
+    title: 'Acheter un terrain',
+    body: `<p>Cliquez sur une parcelle : vous voyez son <b>prix</b>, sa <b>zone</b> d’urbanisme et le bâti existant (à démolir avant de construire).</p>
+      <p>Avant d’acheter, essayez un projet dessus : le bilan s’affiche tout de suite. Le terrain se paie <b>comptant</b>, frais de notaire compris.</p>
+      <p class="muted">Les terrains grisés sont hors de portée ; le filtre « Terrains libres » sur la carte garde ceux que vous pouvez acheter.</p>`,
+  },
+  {
+    title: 'Les règles d’urbanisme',
+    body: `<p>Chaque zone fixe des limites : <b>hauteur maximale</b> (R+x : rez-de-chaussée plus x étages), part du terrain qu’on peut bâtir (<b>emprise</b>), part qui reste en <b>pleine terre</b>, retraits et usage (logements ou bureaux).</p>
+      <p>En centre-ville on construit haut (R+6) ; en zone de préservation, petit (R+2) ; en zone naturelle ou d’équipement, pas du tout. Un terrain plus constructible coûte plus cher.</p>
+      <p class="muted">Menu « Carte » sur la carte → « Règles d’urbanisme » pour voir les zones.</p>`,
+  },
+  {
+    title: 'Assembler des parcelles',
+    body: `<p>Les parcelles <b>violettes en pointillés</b> sont trop petites ou enclavées pour être construites seules. Achetez-en plusieurs <b>qui se touchent</b>, sélectionnez-les avec <b>Maj+clic</b> (ou « sélection multiple »), puis cliquez sur <b>Assembler</b>.</p>
+      <p>Le panneau vous dit en direct si l’assemblage est possible et, sinon, pourquoi. Un grand terrain permet un immeuble plus gros, donc de meilleures marges.</p>`,
+  },
+  {
+    title: 'Lancer un projet',
+    body: `<p>Choisissez le nombre de niveaux ; <b>« Meilleur projet »</b> teste les options autorisées et prend la plus rentable. Trois chiffres comptent :</p>
+      <ul><li><b>Marge</b> : ce que vous gagnez une fois tout vendu.</li><li><b>Fonds propres</b> : l’argent à sortir de votre poche.</li><li><b>Durée</b> en trimestres.</li></ul>
+      <p class="muted">Petit projet = frais fixes (études, permis, raccordements, chantier) qui pèsent lourd : mieux vaut assembler.</p>`,
+  },
+  {
+    title: 'Vendre les logements, financer le chantier',
+    body: `<p>Dès le lancement, les logements se <b>vendent sur plan</b> au fil des trimestres, selon la demande du quartier (indiquée en haut). Les concurrents se partagent les mêmes acheteurs.</p>
+      <p>Quand <b>60 % des logements</b> sont vendus (les « préventes »), la <b>banque débloque le crédit</b> et le chantier démarre. Les acquéreurs paient ensuite au fur et à mesure.</p>
+      <p>Réglez le <b>prix de vente</b> de chaque opération : une remise vend plus vite, une prime ralentit. Les invendus coûtent des intérêts.</p>`,
+  },
+  {
+    title: 'Faire passer le temps',
+    body: `<p><b>Fin du trimestre</b> fait jouer les concurrents et passe au suivant. <b>▶▶</b> avance jusqu’à la prochaine étape d’une de vos opérations, ou jusqu’à un imprévu.</p>
+      <p>Des aléas surviennent : recours de voisins, sol pollué, fouilles, hausse des taux, retournement du marché. Le <b>Journal</b> les raconte ; le <b>Classement</b> montre où vous en êtes.</p>`,
+  },
+  {
+    title: 'Lexique',
+    body: `<dl class="lex">
+      <dt>R+x</dt><dd>Rez-de-chaussée plus x étages.</dd>
+      <dt>SDP / SHAB</dt><dd>Surface de plancher construite / surface habitable vendue.</dd>
+      <dt>Emprise</dt><dd>Part du terrain occupée par le bâtiment.</dd>
+      <dt>Pleine terre</dt><dd>Part du terrain laissée en sol naturel, non bâti.</dd>
+      <dt>Préventes</dt><dd>Logements vendus sur plan, avant la construction.</dd>
+      <dt>Fonds propres</dt><dd>Argent que vous mettez vous-même ; la banque prête le reste.</dd>
+      <dt>Charge foncière</dt><dd>Ce que le projet peut payer pour le terrain.</dd>
+    </dl>`,
+  },
+];
+
+function openTutorial(step = 0) {
+  const last = TUTORIAL.length - 1;
+  const t = TUTORIAL[step];
+  openModal(
+    `<div class="muted" style="font-size:12px">${step + 1} / ${TUTORIAL.length}</div>
+     <h2 class="mh">${t.title}</h2>
+     <div class="tuto">${t.body}</div>
+     <div class="dots">${TUTORIAL.map((_, i) => `<i class="${i === step ? 'on' : ''}"></i>`).join('')}</div>
+     <div class="row" style="margin-top:14px"><button id="tu-skip" type="button">${step === last ? 'Fermer' : 'Passer'}</button><span class="spacer"></span>${step > 0 ? '<button id="tu-prev" type="button">Précédent</button>' : ''}<button id="tu-next" type="button" class="primary">${step === last ? 'C’est parti' : 'Suivant'}</button></div>`,
+    (root) => {
+      const done = () => {
+        try {
+          localStorage.setItem(TUTO_KEY, '1');
+        } catch {
+          /* stockage indisponible : le mode d'emploi se proposera de nouveau */
+        }
+        closeModal();
+      };
+      root.querySelector<HTMLButtonElement>('#tu-skip')!.onclick = done;
+      root.querySelector<HTMLButtonElement>('#tu-next')!.onclick = () => (step === last ? done() : openTutorial(step + 1));
+      const prev = root.querySelector<HTMLButtonElement>('#tu-prev');
+      if (prev) prev.onclick = () => openTutorial(step - 1);
+    },
+  );
+}
+
+/** Liste « premiers pas » : se coche toute seule d'après ce qui est arrivé dans la partie. */
+function firstSteps(): string {
+  const did = (re: RegExp) => state.log.some((e) => e.player === ME && re.test(e.text));
+  const steps: [boolean, string][] = [
+    [did(/achète/), 'Acheter un terrain'],
+    [did(/lance/), 'Lancer une opération'],
+    [state.round > 0, 'Terminer un trimestre'],
+    [did(/solde|livre/), 'Boucler une opération et encaisser le résultat'],
+  ];
+  if (steps.every(([ok]) => ok)) return '';
+  return `<div class="notice" style="--nc:var(--accent);margin-top:14px"><b>Premiers pas</b><ol class="steps">${steps.map(([ok, t]) => `<li class="${ok ? 'ok' : ''}">${ok ? '✓ ' : ''}${t}</li>`).join('')}</ol><button id="howto2" type="button">Voir le mode d’emploi</button></div>`;
+}
+
+
+/** Écran de fin de partie : verdict, classement, bilan des opérations, rejouer. */
+function openEndScreen() {
+  const r = ranking(state);
+  const mine = r.findIndex((x) => x.player === ME);
+  const best = r[0];
+  const mult = r[mine].netWorth / state.config.startCash;
+  const m = (x: number) => x.toFixed(2).replace('.', ',');
+  const verdict =
+    mult >= 3 ? 'Magnat du quartier' : mult >= 2 ? 'Promoteur confirmé' : mult >= 1.2 ? 'Promoteur honorable' : mult >= 1 ? 'Le quartier n’a pas fait fortune' : 'Une décennie difficile';
+  const headline = mine === 0 ? `Vous êtes le promoteur n°1 du quartier.` : `${esc(best.name)} remporte la partie. Vous terminez ${mine + 1}${mine === 1 ? 'e' : 'e'} sur ${r.length}.`;
+  const st = me().stats;
+  const open = state.projects.filter((p) => p.owner === ME).length;
+  const rows = r
+    .map((x, k) => `<tr class="${x.player === ME ? 'me' : ''}"><td>${k + 1}.</td><td>${mono(x.name, colorOf(x.player), true)} ${esc(x.name)}${x.player === ME ? '' : ` <span class="muted">${PROFILE_LABEL[x.player] ?? ''}</span>`}</td><td class="num">${eur(x.netWorth)}</td><td class="num muted">×${m(x.netWorth / state.config.startCash)}</td></tr>`)
+    .join('');
+  const stat = (k: string, v: string) => `<div class="fact"><small>${k}</small><b>${v}</b></div>`;
+  openModal(
+    `<div class="muted" style="font-size:12px">Fin de partie · 40 trimestres</div>
+     <h2 class="mh">${verdict}</h2>
+     <p>${headline}</p>
+     <table class="rank">${rows}</table>
+     <p class="muted" style="font-size:12px">Patrimoine = trésorerie + terrains + fonds propres engagés. Départ : ${eurFull(state.config.startCash)}.</p>
+     <h2 class="mh" style="font-size:15px;margin-top:14px">Votre décennie</h2>
+     <div class="facts">
+       ${stat('Opérations soldées', String(st?.closed ?? 0))}
+       ${stat('Lots vendus', String(st?.lots ?? 0))}
+       ${stat('Résultat des opérations', st ? eur(st.netTotal) : '—')}
+       ${stat('Meilleure opération', st ? eur(st.bestNet) : '—')}
+     </div>
+     ${open ? `<p class="muted" style="font-size:12px">${open} opération${open > 1 ? 's' : ''} non soldée${open > 1 ? 's' : ''} : valorisée${open > 1 ? 's' : ''} au prix de revient.</p>` : ''}
+     <div class="row" style="margin-top:14px"><button id="en-map" type="button">Voir la carte</button><span class="spacer"></span><button id="en-other" type="button">Changer de société</button><button id="en-again" type="button" class="primary">Rejouer</button></div>`,
+    (root) => {
+      root.querySelector<HTMLButtonElement>('#en-map')!.onclick = closeModal;
+      root.querySelector<HTMLButtonElement>('#en-other')!.onclick = () => (closeModal(), openIdentity('new'));
+      root.querySelector<HTMLButtonElement>('#en-again')!.onclick = () => {
+        state = newGame({ name: me().name, slogan: me().slogan ?? '', color: me().color ?? PALETTE[0] });
+        selected.clear();
+        tab = 'terrain';
+        save();
+        closeModal();
+        renderAll();
+        toast('Nouvelle partie : mêmes couleurs, nouveaux concurrents');
+      };
+    },
+  );
+}
+
 // ---------------------------------------------------------------- panneaux
 
 function renderTop() {
   const w = netWorth(state, ME);
   $('top').innerHTML = `
     <h1>Urbasim</h1>
+    <div class="company" title="${esc(me().slogan ?? '')}"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><span class="cname">${esc(me().name)}</span></div>
     <div class="stat"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b></div>
     <div class="stat"><small>Trésorerie</small><b>${eur(me().cash)}</b></div>
     <div class="stat" title="Trésorerie + terrains (au prix de reprise) + fonds propres engagés dans les opérations"><small>Patrimoine</small><b>${eur(w)}</b></div>
@@ -415,11 +666,13 @@ function renderTop() {
       <small>Marché</small><b><span class="${state.marketIndex >= 1 ? 'good' : 'bad'}">prix ${(state.marketIndex * 100).toFixed(0)}</span> · ${pct(state.interestRate)} · ${marketDemand(state).toFixed(0)}<span class="muted">/trim.</span> <span class="muted">(${unitsOnOffer(state)} en vente)</span></b>
     </div>
     <span class="spacer"></span>
-    <button id="end" class="primary" ${state.over ? 'disabled' : ''}>${me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
+    <button id="end" class="primary">${state.over ? 'Résultats' : me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
     <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">▶▶</button>
-    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><button id="new">Nouvelle partie</button></div></details>`;
-  $('end').onclick = endTurn;
+    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="howto">Mode d’emploi</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
+  $('end').onclick = () => (state.over ? openEndScreen() : endTurn());
   $('ff').onclick = fastForward;
+  $('howto').onclick = () => (closeMenu(), openTutorial());
+  $('company').onclick = () => (closeMenu(), openIdentity('edit'));
   const nb = $('new');
   nb.onclick = () => {
     // Confirmation dans la page : les boîtes de dialogue du navigateur sont bloquées dans certains environnements.
@@ -432,11 +685,8 @@ function renderTop() {
       }, 4000);
       return;
     }
-    state = newGame();
-    selected.clear();
-    tab = 'terrain';
-    save();
-    renderAll();
+    closeMenu();
+    openIdentity('new');
   };
 }
 
@@ -469,7 +719,7 @@ function renderSelection(): string {
     return `<div class="empty"><b>Choisissez un terrain</b>
       <p class="muted">Cliquez sur une parcelle de la carte pour voir son prix, les règles d’urbanisme et ce qu’on peut y construire.</p>
       <p class="muted">Pour assembler plusieurs parcelles voisines : achetez-les, sélectionnez-les avec Maj+clic, puis « Assembler ».</p>
-      <p class="muted">Les parcelles violettes en pointillés sont trop petites ou enclavées pour être construites seules.</p></div>`;
+      <p class="muted">Les parcelles violettes en pointillés sont trop petites ou enclavées pour être construites seules.</p>${firstSteps()}</div>`;
   }
   const plots = ids.map((id) => plotById(id)!);
   if (plots.length > 1) return renderMulti(plots);
@@ -512,9 +762,9 @@ function renderMulti(plots: Plot[]): string {
 }
 
 function statusPill(p: Plot): string {
-  if (p.projectId) return pill('opération en cours', COLORS[p.owner ?? ''] ?? '#888');
-  if (p.owner === ME) return pill('à vous', COLORS.moi);
-  if (p.owner) return pill(esc(state.players.find((x) => x.id === p.owner)!.name), COLORS[p.owner] ?? '#888');
+  if (p.projectId) return pill('opération en cours', colorOf(p.owner ?? ''));
+  if (p.owner === ME) return pill('à vous', colorOf(ME));
+  if (p.owner) return pill(esc(state.players.find((x) => x.id === p.owner)!.name), colorOf(p.owner));
   if (p.issue === 'zone') return pill('inconstructible', '#777');
   if (p.issue) return pill('à assembler', '#7b3fa0');
   return pill('libre', '#2b6cb0');
@@ -709,7 +959,7 @@ function renderRanking(): string {
   drawOverlay(null);
   const r = ranking(state);
   return `<h2>${state.over ? 'Classement final' : 'Classement'}</h2>
-    <table>${r.map((x, k) => `<tr><td>${k + 1}. <i class="swatch" style="background:${COLORS[x.player]}"></i>${esc(x.name)}</td><td>${eurFull(x.netWorth)} <span class="muted">(×${(x.netWorth / state.config.startCash).toFixed(2).replace('.', ',')})</span></td></tr>`).join('')}</table>
+    <table>${r.map((x, k) => `<tr><td>${k + 1}. <span class="mono sm" style="background:${colorOf(x.player)}">${esc(monogram(x.name))}</span> ${esc(x.name)}${x.player === ME ? '' : ` <span class="muted">${PROFILE_LABEL[x.player] ?? ''}</span>`}</td><td>${eurFull(x.netWorth)} <span class="muted">(×${(x.netWorth / state.config.startCash).toFixed(2).replace('.', ',')})</span></td></tr>`).join('')}</table>
     <p class="muted">Patrimoine = trésorerie + terrains (au prix de reprise) + fonds propres engagés. Départ : ${eurFull(state.config.startCash)}.</p>`;
 }
 
@@ -741,6 +991,8 @@ function bindSelection() {
     }
   });
   on('clear', () => ((selected = new Set()), renderAll()));
+  const how2 = side.querySelector<HTMLButtonElement>('#howto2');
+  if (how2) how2.onclick = () => openTutorial();
   side.querySelectorAll<HTMLInputElement>('[data-price]').forEach((el) => {
     const id = el.dataset.price!;
     // En temps réel : le pourcentage, le prix du lot et le rythme de vente attendu suivent le curseur pendant qu'on le déplace.
@@ -811,11 +1063,18 @@ fitDistrict();
 applyView();
 (document.getElementById('view') as HTMLSelectElement).value = view;
 renderAll();
+if (!saved) openIdentity('new');
+else if (state.over) openEndScreen();
+else if (!localStorage_get(TUTO_KEY) && state.round === 0 && !state.log.length) openTutorial();
 
 // Outils de test automatisé (serveur de développement uniquement).
 if (import.meta.env.DEV) {
   (window as any).__urbasim = {
     state: () => state,
+    toEnd: () => {
+      while (!state.over) advanceOne();
+      afterAdvance('');
+    },
     select: (ids: string[]) => ((selected = new Set(ids)), (tab = 'terrain'), renderAll()),
     /** Premières paires de parcelles libres, petites et assemblables. */
     mergeablePairs: (max = 5) => {

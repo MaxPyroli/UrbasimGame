@@ -78,12 +78,29 @@ export interface Plot {
 
 export type BotProfileName = 'prudent' | 'equilibre' | 'agressif';
 
+/** Bilan des opérations soldées d'un joueur. */
+export interface PlayerStats {
+  /** Opérations menées jusqu'à la dernière vente. */
+  closed: number;
+  /** Lots (logements, commerces, bureaux) vendus. */
+  lots: number;
+  /** Résultat net cumulé, meilleur et pire résultat d'une opération (€). */
+  netTotal: number;
+  bestNet: number;
+  worstNet: number;
+}
+
 export interface Player {
   id: PlayerId;
   name: string;
   bot: boolean;
   /** Tempérament du joueur ordinateur (ignoré pour un humain). */
   profile?: BotProfileName;
+  /** Identité visuelle : couleur sur la carte et slogan (facultatifs). */
+  color?: string;
+  slogan?: string;
+  /** Bilan des opérations soldées (pour l'écran de fin de partie). */
+  stats?: PlayerStats;
   cash: number;
   ready: boolean;
 }

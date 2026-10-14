@@ -176,4 +176,17 @@ describe('marché de l’immobilier : les logements se vendent au fil des trimes
     const many = createGame({ players: [{ id: 'a', name: 'A' }], plots: Array.from({ length: 400 }, (_, i) => ({ id: `T${i}`, parcel: lot(i * 30), askingPrice: 100_000 })), config: { askMargin: 0.07 } });
     expect(many.config.salesDemand).toBe(12);
   });
+
+  it('le bilan des opérations soldées est tenu à jour pour l’écran de fin de partie', () => {
+    let s = launch(newGame({ salesDemand: 10_000 }), 'a', 'T1');
+    expect(s.players[0].stats).toBeUndefined();
+    while (s.projects.length) s = both(s);
+    const st = s.players[0].stats!;
+    expect(st.closed).toBe(1);
+    expect(st.lots).toBeGreaterThan(5);
+    expect(st.netTotal).toBeCloseTo(st.bestNet, 6);
+    expect(st.bestNet).toBe(st.worstNet);
+    expect(Number.isFinite(st.netTotal)).toBe(true);
+    expect(JSON.parse(JSON.stringify(s)).players[0].stats).toEqual(st); // sérialisable
+  });
 });
