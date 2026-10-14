@@ -35,6 +35,8 @@ export interface GameConfig {
 export interface Plot {
   id: PlotId;
   label?: string;
+  /** Parcelles cadastrales d'origine quand ce terrain est un assemblage. */
+  parts?: PlotId[];
   parcel: Parcel;
   owner: PlayerId | null;
   /** SDP du bâti existant (m²) : démoli au lancement d'une opération. */
@@ -117,6 +119,8 @@ export interface GameState {
 export type Action =
   | { type: 'buy'; player: PlayerId; plot: PlotId }
   | { type: 'sellPlot'; player: PlayerId; plot: PlotId }
+  /** Assemble plusieurs parcelles mitoyennes que le joueur possède en une seule, plus grande. */
+  | { type: 'merge'; player: PlayerId; plots: PlotId[] }
   | { type: 'launch'; player: PlayerId; plot: PlotId; criteria: Criteria }
   /** Le joueur a fini son tour ; quand tous le sont, le trimestre se résout. */
   | { type: 'ready'; player: PlayerId };

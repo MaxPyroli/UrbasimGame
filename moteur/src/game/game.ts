@@ -8,6 +8,7 @@ import {
   type Market,
   type Parcel,
 } from '../engine';
+import { mergeParcels } from './merge';
 import { nextGaussian, nextRandom } from './rng';
 import type { Action, ActionResult, BotProfileName, GameConfig, GameEvent, GameState, Plot, Player, ProjectPhase, ProjectRun } from './types';
 
@@ -178,6 +179,34 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     return { ok: true, state: s };
   }
   if (player.ready) return fail('tour terminé : attendez le prochain trimestre');
+
+  if (action.type === 'merge') {
+    const ids = [...new Set(action.plots)].sort();
+    if (ids.length < 2) return fail('il faut au moins deux parcelles');
+    const list = ids.map((id) => state.plots.find((p) => p.id === id));
+    if (list.some((p) => !p)) return fail('terrain inconnu');
+    const plots = list as Plot[];
+    if (plots.some((p) => p.owner !== player.id)) return fail('vous devez posséder toutes les parcelles à assembler');
+    if (plots.some((p) => p.projectId)) return fail('une opération est en cours sur l’une des parcelles');
+    const merged = mergeParcels(plots.map((p) => p.parcel));
+    if (!merged.ok) return fail(merged.error);
+    const id = ids.join('+');
+    const fusion: Plot = {
+      id,
+      label: `Assemblage ${ids.length} parcelles · ${Math.round(merged.area)} m²`,
+      parts: ids.flatMap((i) => state.plots.find((p) => p.id === i)!.parts ?? [i]),
+      parcel: merged.parcel,
+      owner: player.id,
+      existingSdp: plots.reduce((t, p) => t + p.existingSdp, 0),
+      askingPrice: 0,
+      basePrice: plots.reduce((t, p) => t + p.basePrice, 0),
+      paid: plots.reduce((t, p) => t + p.paid, 0),
+      projectId: null,
+    };
+    let s: GameState = { ...state, plots: [...state.plots.filter((p) => !ids.includes(p.id)), fusion] };
+    s = reprice(s);
+    return { ok: true, state: withEvent(s, { player: player.id, text: `${player.name} assemble ${ids.join(', ')} (${Math.round(merged.area)} m²)` }) };
+  }
 
   const plot = state.plots.find((p) => p.id === action.plot);
   if (!plot) return fail('terrain inconnu');
