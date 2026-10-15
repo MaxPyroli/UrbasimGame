@@ -7,6 +7,16 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.9.2',
+    title: 'Deux bâtiments sur un terrain',
+    notes: [
+      'Si le PLU de la zone l’autorise, un second bâtiment peut être construit au fond du terrain, derrière celui sur rue (case « deuxième bâtiment au fond » du projet)',
+      'Il faut un terrain assez profond : un recul entre les bâtiments est exigé, et le fond est desservi par une allée ou, à défaut, un porche percé dans le bâtiment sur rue',
+      'Le « Meilleur projet » essaie désormais aussi un bâtiment arrière ; les deux bâtiments sont dessinés sur la carte',
+      'L’emprise et la densité du terrain sont partagées entre les deux bâtiments',
+    ],
+  },
+  {
     version: '0.9.1',
     title: 'Projets sur plusieurs terrains',
     notes: [
@@ -14,7 +24,8 @@ export const CHANGELOG: Release[] = [
       'Plan d’acquisition : statut de chaque parcelle, prix prévu, chance d’acceptation, concurrents, parcelles bloquées, total à bloquer et prix maximal pour la marge visée',
       'Niveau d’offre standard ou sûr, voisines à ajouter en un clic, simulation du projet sur l’ensemble',
     ],
-  },  {
+  },
+  {
     version: '0.9',
     title: 'ZAC, densité, simulation',
     notes: [

@@ -23,6 +23,9 @@ export interface ZoneRule {
   /** Retraits imposés (m) : en fond de parcelle et sur les côtés. */
   setbackFond: number;
   setbackLateral: number;
+  /** Nombre maximal de bâtiments sur un même terrain, et distance minimale entre eux (m) : 2 permet un bâtiment arrière. */
+  maxBuildings: 1 | 2;
+  buildingGap: number;
   /** Implantation : « rue » = le bâtiment doit s'aligner sur la rue (front bâti continu), « libre » = au choix du promoteur (rue ou fond de parcelle). */
   alignment: 'rue' | 'libre';
   /** Destination : logements ou bureaux et activités. */
@@ -32,13 +35,13 @@ export interface ZoneRule {
 }
 
 export const ZONE_RULES: Record<ZoneFamily, ZoneRule> = {
-  centre: { family: 'centre', alignment: 'rue', label: 'Centralité', summary: 'Centre-ville dense : on peut construire haut, jusqu’en limite de parcelle, mais le bâtiment doit s’aligner sur la rue.', buildable: true, maxLevels: 6, maxCoverage: 0.8, minOpenGround: 0.1, setbackFond: 0, setbackLateral: 0, use: 'logement', color: '#d95f02' },
-  renouvellement: { family: 'renouvellement', alignment: 'libre', label: 'Renouvellement urbain', summary: 'Secteur à densifier : la hauteur la plus généreuse du quartier.', buildable: true, maxLevels: 7, maxCoverage: 0.7, minOpenGround: 0.15, setbackFond: 3, setbackLateral: 0, use: 'logement', color: '#c2185b' },
-  mixte: { family: 'mixte', alignment: 'libre', label: 'Zone mixte', summary: 'Habitat et activités mêlés : immeubles moyens.', buildable: true, maxLevels: 4, maxCoverage: 0.6, minOpenGround: 0.2, setbackFond: 4, setbackLateral: 0, use: 'logement', color: '#e6ab02' },
-  preservation: { family: 'preservation', alignment: 'libre', label: 'Préservation', summary: 'Tissu ancien à préserver : petit gabarit, jardins protégés.', buildable: true, maxLevels: 2, maxCoverage: 0.45, minOpenGround: 0.35, setbackFond: 5, setbackLateral: 3, use: 'logement', color: '#7570b3' },
-  activites: { family: 'activites', alignment: 'libre', label: 'Activités économiques', summary: 'Zone d’activités : bureaux et locaux d’activité, pas de logements.', buildable: true, maxLevels: 3, maxCoverage: 0.65, minOpenGround: 0.15, setbackFond: 4, setbackLateral: 0, use: 'bureaux', color: '#1b9e77' },
-  equipement: { family: 'equipement', alignment: 'libre', label: 'Équipement public', summary: 'Réservé aux équipements publics (écoles, services) : inconstructible pour un promoteur.', buildable: false, maxLevels: 0, maxCoverage: 0, minOpenGround: 1, setbackFond: 0, setbackLateral: 0, use: 'logement', color: '#6c8ebf' },
-  nature: { family: 'nature', alignment: 'libre', label: 'Zone naturelle', summary: 'Parc, cimetière ou espace naturel : inconstructible.', buildable: false, maxLevels: 0, maxCoverage: 0, minOpenGround: 1, setbackFond: 0, setbackLateral: 0, use: 'logement', color: '#66a61e' },
+  centre: { family: 'centre', maxBuildings: 2, buildingGap: 8, alignment: 'rue', label: 'Centralité', summary: 'Centre-ville dense : on peut construire haut, jusqu’en limite de parcelle, mais le bâtiment doit s’aligner sur la rue.', buildable: true, maxLevels: 6, maxCoverage: 0.8, minOpenGround: 0.1, setbackFond: 0, setbackLateral: 0, use: 'logement', color: '#d95f02' },
+  renouvellement: { family: 'renouvellement', maxBuildings: 2, buildingGap: 6, alignment: 'libre', label: 'Renouvellement urbain', summary: 'Secteur à densifier : la hauteur la plus généreuse du quartier.', buildable: true, maxLevels: 7, maxCoverage: 0.7, minOpenGround: 0.15, setbackFond: 3, setbackLateral: 0, use: 'logement', color: '#c2185b' },
+  mixte: { family: 'mixte', maxBuildings: 2, buildingGap: 6, alignment: 'libre', label: 'Zone mixte', summary: 'Habitat et activités mêlés : immeubles moyens.', buildable: true, maxLevels: 4, maxCoverage: 0.6, minOpenGround: 0.2, setbackFond: 4, setbackLateral: 0, use: 'logement', color: '#e6ab02' },
+  preservation: { family: 'preservation', maxBuildings: 1, buildingGap: 8, alignment: 'libre', label: 'Préservation', summary: 'Tissu ancien à préserver : petit gabarit, jardins protégés.', buildable: true, maxLevels: 2, maxCoverage: 0.45, minOpenGround: 0.35, setbackFond: 5, setbackLateral: 3, use: 'logement', color: '#7570b3' },
+  activites: { family: 'activites', maxBuildings: 2, buildingGap: 6, alignment: 'libre', label: 'Activités économiques', summary: 'Zone d’activités : bureaux et locaux d’activité, pas de logements.', buildable: true, maxLevels: 3, maxCoverage: 0.65, minOpenGround: 0.15, setbackFond: 4, setbackLateral: 0, use: 'bureaux', color: '#1b9e77' },
+  equipement: { family: 'equipement', maxBuildings: 1, buildingGap: 0, alignment: 'libre', label: 'Équipement public', summary: 'Réservé aux équipements publics (écoles, services) : inconstructible pour un promoteur.', buildable: false, maxLevels: 0, maxCoverage: 0, minOpenGround: 1, setbackFond: 0, setbackLateral: 0, use: 'logement', color: '#6c8ebf' },
+  nature: { family: 'nature', maxBuildings: 1, buildingGap: 0, alignment: 'libre', label: 'Zone naturelle', summary: 'Parc, cimetière ou espace naturel : inconstructible.', buildable: false, maxLevels: 0, maxCoverage: 0, minOpenGround: 1, setbackFond: 0, setbackLateral: 0, use: 'logement', color: '#66a61e' },
 };
 
 /** Famille de zone à partir des champs du Géoportail de l'Urbanisme (`typezone`, `libelle`, `libelong`). */
@@ -74,6 +77,8 @@ export function combineRules(families: ZoneFamily[]): ZoneRule {
     setbackFond: Math.max(...rules.map((r) => r.setbackFond)),
     setbackLateral: Math.max(...rules.map((r) => r.setbackLateral)),
     alignment: rules.some((r) => r.alignment === 'rue') ? 'rue' : 'libre',
+    maxBuildings: rules.some((r) => r.maxBuildings === 1) ? 1 : 2,
+    buildingGap: Math.max(...rules.map((r) => r.buildingGap)),
     use: rules.some((r) => r.use === 'bureaux') ? 'bureaux' : 'logement',
   };
 }
@@ -114,6 +119,10 @@ export function applyRule(base: Criteria, rule: ZoneRule): Criteria {
     setbackLateral: rule.setbackLateral,
     // Alignement obligatoire sur rue : le bâtiment longe la rue, pas de bâtiment en fond de parcelle.
     placement: rule.alignment === 'rue' ? 'rue' : base.placement,
+    // Deuxième bâtiment : seulement si la zone l'autorise ; le bâtiment arrière est plus bas que celui sur rue.
+    secondBuilding: base.secondBuilding && rule.maxBuildings >= 2,
+    buildingGap: Math.max(base.buildingGap, rule.buildingGap),
+    secondLevels: Math.max(0, Math.min(base.secondLevels, rule.maxLevels - 1)),
     upperUse: rule.use,
     groundFloorUse: rule.use === 'bureaux' ? 'commerce' : base.groundFloorUse,
   };

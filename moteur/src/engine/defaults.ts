@@ -48,6 +48,9 @@ export const DEFAULT_CRITERIA: Criteria = {
   maxFAR: null,
   footprintShape: 'adapte',
   placement: 'auto',
+  secondBuilding: false,
+  secondLevels: 2,
+  buildingGap: 6,
 
   groundFloorUse: 'logement',
   upperUse: 'logement',

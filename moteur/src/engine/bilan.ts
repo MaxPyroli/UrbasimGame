@@ -224,7 +224,8 @@ export function suggestLandPrice(project: Project, market: Market): number {
 }
 
 export function buildDuration(project: Project, p: BilanParams): { permit: number; build: number; sellOut: number; total: number } {
-  const above = Math.max(0, project.levels.filter((l) => l.kind !== 'attique' && l.use !== 'parking').length);
+  // Les deux bâtiments se construisent en parallèle : la durée suit le plus haut (celui sur rue).
+  const above = Math.max(0, project.levels.filter((l) => (l.building ?? 1) === 1 && l.kind !== 'attique' && l.use !== 'parking').length);
   const build = Math.ceil(p.buildBaseMonths + p.buildMonthsPerLevel * above + p.buildMonthsPerBasement * project.parking.basementLevels);
   return { permit: p.permitMonths, build, sellOut: p.sellOutMonths, total: p.permitMonths + build + p.sellOutMonths };
 }

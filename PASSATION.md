@@ -412,6 +412,19 @@ collectivité jouent le rôle des enchères du Monopoly.
     sélection multiple).
   - Messages : fenêtres d'alerte « offre groupée remportée / annulée » ; onglet Marché : « offre groupée » et « Retirer le groupe ».
 
+- Fait : **deux bâtiments sur un même terrain** (version 0.9.2), si le PLU l'autorise.
+  - Moteur : `moteur/src/engine/rear.ts` (`buildRear`). Critères `secondBuilding` (faux par défaut), `secondLevels` (2), `buildingGap` (6 m).
+    Le bâtiment arrière occupe la zone constructible située derrière le bâtiment sur rue, après un recul `max(buildingGap, hauteur avant / 2)`,
+    avec une emprise placée « au fond » et moins de niveaux que l'avant (jamais plus). Accès : **allée** de 3,5 m si la parcelle laisse une bande
+    libre à côté du bâtiment avant, sinon **porche** (surface retranchée du RDC avant). Le CES et la densité (COS) sont partagés ; si le total
+    dépasse, le second bâtiment est abandonné avec la raison dans les contrôles (`rear`). Stationnement, logements, surfaces et durée de chantier
+    (calculée sur le bâtiment avant) intègrent les deux bâtiments ; `Indicators.buildings`, `Project.rearFootprint/rearAccess`, `LevelPlan.building`.
+  - PLU (`game/plu.ts`) : `ZoneRule.maxBuildings` et `buildingGap` (1 bâtiment en préservation, équipement, nature ; 2 ailleurs ; recul 6 à 8 m).
+  - Interface : case « deuxième bâtiment au fond » + niveaux R+ de l'arrière dans le projet (grisée avec explication si le PLU l'interdit),
+    « Meilleur projet » essaie aussi un bâtiment arrière, les deux emprises sont dessinées (aperçu et bâtiments construits, `footprintOf` renvoie
+    une liste d'anneaux). Les bots ne l'utilisent pas encore (piste). Tests : `moteur/tests/rear.test.ts`.
+  - Pas de nouveau `reprice` nécessaire : l'option est désactivée par défaut, les prix et délaissés ne changent pas.
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,

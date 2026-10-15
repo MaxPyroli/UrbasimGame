@@ -161,7 +161,7 @@ const SEEN_KEY = 'urbasim-seen-v1';
 let seenLog = Math.max(0, Math.round(+(localStorage_get(SEEN_KEY) ?? 0)) || 0);
 type NotifFilter = 'tout' | 'alea' | 'commune' | 'operation' | 'terrain';
 let notifFilter: NotifFilter = 'tout';
-let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number; placement: Placement; shape: FootprintShape } = { levels: 3, attic: false, parking: 'auto', depth: 12, placement: 'auto', shape: 'adapte' };
+let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number; placement: Placement; shape: FootprintShape; second: boolean; secondLevels: number } = { levels: 3, attic: false, parking: 'auto', depth: 12, placement: 'auto', shape: 'adapte', second: false, secondLevels: 2 };
 
 function save() {
   try {
@@ -192,7 +192,7 @@ function act(a: Action): boolean {
 const me = () => state.players.find((p) => p.id === ME)!;
 const plotById = (id: string) => state.plots.find((p) => p.id === id);
 const quarterLabel = (round: number) => `T${(round % 4) + 1} ${2027 + Math.floor(round / 4)}`;
-const criteria = (): Criteria => ({ ...DEFAULT_CRITERIA, levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth, placement: form.placement, footprintShape: form.shape });
+const criteria = (): Criteria => ({ ...DEFAULT_CRITERIA, levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth, placement: form.placement, footprintShape: form.shape, secondBuilding: form.second, secondLevels: form.secondLevels });
 
 /** Passe un trimestre sans rien afficher ; retourne les nouvelles du journal qui concernent le joueur. */
 function advanceOne(): { mine: string[]; phases: string } {
@@ -528,21 +528,22 @@ function hatchFill(color: string): string {
   }
   return `url(#${id})`;
 }
-const footprintCache = new Map<string, [number, number][] | null>();
+const footprintCache = new Map<string, [number, number][][] | null>();
 let hiddenKey = '';
 
 /** Emprise d'un projet sur la carte ([lat, lon]), mémorisée : le calcul géométrique est coûteux. */
-function footprintOf(p: Plot, criteria: Criteria, key: string): [number, number][] | null {
-  let ring = footprintCache.get(key);
-  if (ring === undefined) {
+function footprintOf(p: Plot, criteria: Criteria, key: string): [number, number][][] | null {
+  let rings = footprintCache.get(key);
+  if (rings === undefined) {
     const project = computeProject(p.parcel, criteria);
     if (project.footprint) {
       const proj = new LocalProjection(project.origin.lon, project.origin.lat);
-      ring = project.footprint.map((v) => proj.toLonLat(v)).map((q) => [q.lat, q.lon] as [number, number]);
-    } else ring = null;
-    footprintCache.set(key, ring);
+      const geo = (r: [number, number][]) => r.map((v) => proj.toLonLat(v)).map((q) => [q.lat, q.lon] as [number, number]);
+      rings = [geo(project.footprint), ...(project.rearFootprint ? [geo(project.rearFootprint)] : [])];
+    } else rings = null;
+    footprintCache.set(key, rings);
   }
-  return ring;
+  return rings;
 }
 
 const PHASE_STYLE: Record<string, { opacity: number; dash?: string }> = {
@@ -588,12 +589,10 @@ function drawBuildings() {
   for (const p of developed) {
     const run = p.projectId ? state.projects.find((r) => r.id === p.projectId) : undefined;
     if (run) {
-      const ring = footprintOf(p, run.criteria, `${p.id}|${run.id}`);
-      if (ring) add(ring, run.owner, run.height, run.phase);
+      for (const ring of footprintOf(p, run.criteria, `${p.id}|${run.id}`) ?? []) add(ring, run.owner, run.height, run.phase);
     } else {
       for (const b of p.built ?? []) {
-        const ring = footprintOf(p, b.criteria, `${p.id}|${b.runId}`);
-        if (ring) add(ring, b.owner, b.height, 'livraison');
+        for (const ring of footprintOf(p, b.criteria, `${p.id}|${b.runId}`) ?? []) add(ring, b.owner, b.height, 'livraison');
       }
     }
   }
@@ -718,6 +717,10 @@ function drawOverlay(project: ReturnType<typeof computeProject> | null) {
   const proj = new LocalProjection(project.origin.lon, project.origin.lat);
   const ring = project.footprint.map((v) => proj.toLonLat(v)).map((q) => [q.lat, q.lon] as [number, number]);
   L.polygon(ring, { color: '#d9480f', weight: 2, fillColor: '#f08c00', fillOpacity: 0.75, interactive: false }).addTo(overlay);
+  if (project.rearFootprint) {
+    const rear = project.rearFootprint.map((v) => proj.toLonLat(v)).map((q) => [q.lat, q.lon] as [number, number]);
+    L.polygon(rear, { color: '#d9480f', weight: 2, dashArray: '5 3', fillColor: '#f6b04d', fillOpacity: 0.7, interactive: false }).addTo(overlay);
+  }
   if (project.parkingAccess) {
     /* l'accès du parking est détaillé dans le moteur ; la carte ne montre que l'emprise du bâtiment */
   }
@@ -841,6 +844,7 @@ const TUTORIAL: { title: string; body: string }[] = [
       <p><b>Terrains en vente</b> (contour doré, onglet « Marché ») : les offres restent ouvertes deux trimestres, sous pli fermé. <b>Le plus offrant l’emporte</b> et les autres sont remboursés.</p>
       <p><b>Autres terrains</b> : vous pouvez prospecter le propriétaire. Il répond à la fin du trimestre, n’accepte que s’il est satisfait du prix, et les frais de prospection sont perdus. Si deux promoteurs se positionnent, le plus offrant gagne.</p>
       <p>Sélectionnez plusieurs terrains pour déposer <b>des offres groupées</b>. Méfiez-vous des terrains dont le <b>prix grimpe</b> plus vite que le marché : leur propriétaire <b>spécule</b>, ne les mettra pas en vente et refusera une offre ordinaire.</p>
+      <p>Quand le PLU le permet et que le terrain est profond, vous pouvez cocher <b>« deuxième bâtiment au fond »</b> : un second immeuble, plus bas, derrière celui sur rue, desservi par une allée ou un porche.</p>
       <p class="muted">Votre offre bloque l’argent (prix et frais de notaire) jusqu’au verdict. Les concurrents enchérissent aussi.</p>`,
   },
   {
@@ -1949,6 +1953,8 @@ interface BestPlan {
   maxLand: number;
   dwellings: number;
   sdp: number;
+  /** Niveaux (R+x) du bâtiment arrière si le meilleur projet en comporte un. */
+  secondLevels?: number;
 }
 function bestForm(p: Plot, owned: boolean): BestPlan | null {
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : landDraft(p);
@@ -1961,6 +1967,16 @@ function bestForm(p: Plot, owned: boolean): BestPlan | null {
       if (!proj.footprint || proj.checks.some((c) => c.status === 'error')) continue;
       const b = planBilan(p, proj, landPrice, owned);
       if (!best || b.margin > best.margin) best = { levels, attic, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal };
+    }
+  }
+  // Un bâtiment arrière peut améliorer le meilleur projet quand le PLU l'autorise et que le terrain est assez profond.
+  const rule = ruleOf(p);
+  if (best && (!rule || rule.maxBuildings >= 2)) {
+    for (const secondLevels of [1, 2, 3]) {
+      const proj = computeProject(p.parcel, plotCriteria(p, { ...criteria(), levels: best.levels, attic: best.attic, parkingStrategy: 'auto', secondBuilding: true, secondLevels }, owned));
+      if (!proj.rearFootprint || proj.checks.some((c) => c.status === 'error')) continue;
+      const b = planBilan(p, proj, landPrice, owned);
+      if (b.margin > best.margin) best = { levels: best.levels, attic: best.attic, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal, secondLevels };
     }
   }
   return best;
@@ -2017,7 +2033,7 @@ function plotBrief(p: Plot, owned: boolean): string {
   if (!p.issue && !p.projectId && !p.municipal) {
     const b = bestBrief(p, owned);
     best = b
-      ? `<div class="brief ${b.margin >= 0 ? 'ok' : 'ko'}"><b>Meilleur projet</b> : R+${b.levels}${b.attic ? ' + attique' : ''}, ${b.dwellings} logements · marge <b class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)}</b> (${pct(b.marginRate)} du CA) · le terrain pourrait valoir jusqu’à ${eur(b.maxLand)}${price}</div>`
+      ? `<div class="brief ${b.margin >= 0 ? 'ok' : 'ko'}"><b>Meilleur projet</b> : R+${b.levels}${b.attic ? ' + attique' : ''}${b.secondLevels !== undefined ? ` + bâtiment arrière R+${b.secondLevels}` : ''}, ${b.dwellings} logements · marge <b class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)}</b> (${pct(b.marginRate)} du CA) · le terrain pourrait valoir jusqu’à ${eur(b.maxLand)}${price}</div>`
       : `<div class="brief ko"><b>Aucun projet rentable</b> avec les réglages actuels sur ce terrain seul.${price}</div>`;
   } else if (price) best = `<div class="brief"><span class="muted">Prix :</span>${price}</div>`;
   return `${rules ? `<div class="rules">${rules}</div>` : ''}${best}`;
@@ -2062,12 +2078,17 @@ function projectForm(p: Plot, owned: boolean): string {
     ${rule?.alignment === 'rue' ? '<div class="muted" style="font-size:12px">Le PLU de cette zone impose l’alignement sur la rue.</div>' : ''}
     <label class="f" title="Forme adaptée : suit le terrain (L sur un angle) ; rectangle : volume simple, plus lisible">Forme du bâtiment<select id="f-shape">${[['adapte', 'adaptée au terrain'], ['rectangle', 'rectangle simple']].map(([v, l]) => `<option value="${v}" ${form.shape === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" title="Au-delà de 14 m de profondeur, l'éclairement naturel devient difficile">Profondeur max du bâtiment<select id="f-depth">${[10, 12, 15, 18, 22].map((d) => `<option value="${d}" ${form.depth === d ? 'selected' : ''}>${d} m</option>`).join('')}</select></label>`;
+  const canSecond = !rule || rule.maxBuildings >= 2;
+  const secondControl = canSecond
+    ? `<div class="row" style="align-items:center;margin-top:0"><label class="f" style="margin:0" title="Un second bâtiment au fond du terrain, derrière celui sur rue : possible si le terrain est assez profond, avec une allée ou un porche d'accès"><input type="checkbox" id="f-second" ${form.second ? 'checked' : ''}/> deuxième bâtiment au fond</label>${form.second ? `<label class="f" style="margin:0">R+<select id="f-second-levels">${Array.from({ length: Math.max(1, Math.min(4, (rule ? rule.maxLevels : 5) - 1)) + 1 }, (_, i) => `<option ${i === form.secondLevels ? 'selected' : ''}>${i}</option>`).join('')}</select></label>` : ''}</div>`
+    : '<div class="muted" style="font-size:12px">Le PLU de cette zone n’autorise qu’un seul bâtiment par terrain.</div>';
   let html = `<h2>Projet</h2>
     <div class="row" style="align-items:center">
       <label class="f" style="margin:0">Niveaux R+<select id="f-levels">${Array.from({ length: maxLv + 1 }, (_, i) => `<option ${i === form.levels ? 'selected' : ''}>${i}</option>`).join('')}</select></label>
       <label class="f" style="margin:0" title="L'attique compte comme un niveau dans la hauteur maximale de la zone">attique <input type="checkbox" id="f-attic" ${form.attic ? 'checked' : ''} ${(rule || ob) && totalCap - 1 < form.levels ? 'disabled' : ''}/></label>
       <button id="best" title="Teste les niveaux autorisés par le PLU, avec ou sans attique, et choisit le plus rentable sans erreur">Meilleur projet</button>
     </div>
+    ${secondControl}
     ${fold('Options', options)}`;
   if (!proj.footprint) return html + `<p class="bad">Rien de constructible avec ces critères.</p>`;
 
@@ -2290,8 +2311,10 @@ function bindSelection() {
       if (!found) return toast('Aucun projet réalisable sur ce terrain avec ces réglages : essayez un autre mode de stationnement ou assemblez-le.', true);
       form.levels = found.levels;
       form.attic = found.attic;
+      form.second = found.secondLevels !== undefined;
+      if (found.secondLevels !== undefined) form.secondLevels = found.secondLevels;
       form.parking = 'auto';
-      toast(`Meilleur projet : R+${found.levels}${found.attic ? ' avec attique' : ''}, ${eur(found.margin)} de marge`);
+      toast(`Meilleur projet : R+${found.levels}${found.attic ? ' avec attique' : ''}${found.secondLevels !== undefined ? ` + bâtiment arrière R+${found.secondLevels}` : ''}, ${eur(found.margin)} de marge`);
       renderAll();
     };
   const pf = side.querySelector<HTMLSelectElement>('#pfilter');
@@ -2304,6 +2327,10 @@ function bindSelection() {
   if (lv) lv.onchange = () => ((form.levels = +lv.value), renderAll());
   const at = side.querySelector<HTMLInputElement>('#f-attic');
   if (at) at.onchange = () => ((form.attic = at.checked), renderAll());
+  const sec = side.querySelector<HTMLInputElement>('#f-second');
+  if (sec) sec.onchange = () => ((form.second = sec.checked), renderAll());
+  const secLv = side.querySelector<HTMLSelectElement>('#f-second-levels');
+  if (secLv) secLv.onchange = () => ((form.secondLevels = +secLv.value), renderAll());
   const plc = side.querySelector<HTMLSelectElement>('#f-placement');
   if (plc) plc.onchange = () => ((form.placement = plc.value as Placement), renderAll());
   const shp = side.querySelector<HTMLSelectElement>('#f-shape');
