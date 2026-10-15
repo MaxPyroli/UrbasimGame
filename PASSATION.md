@@ -380,7 +380,14 @@ collectivité jouent le rôle des enchères du Monopoly.
     dans `lotPrice`). Interface : périmètre en pointillés et pastilles d'équipements sur la carte (prévu / en travaux / livré), fiche
     de ZAC dans l'onglet Commune (lots, équipements, avancement), fiche d'équipement, suivi dans les notifications, fenêtres d'alerte.
     Les sauvegardes d'avant les ZAC ne se rechargent pas.
-  - Équilibrage à revérifier après ces changements de règles (voir la simulation ci-dessous si présente).
+  - Simulation d'équilibrage après ces changements (4 parties, Montreuil, normal, un humain inactif et 3 bots) : le joueur inactif finit
+    vers ×0,8 de sa mise, les bots de ×0,6 à ×1,6 (un cas à ×3,3), aucune faillite ; la ZAC voit 3 à 4 lots lancés sur 4 et tous ses
+    équipements livrés ; 7 à 10 appels d'offres attribués sur ~27, 1 à 3 terrains repris par la commune. À surveiller : les règles plus
+    permissives en tissu dense et la hausse de prix des ZAC rendent les bons parcours plus rentables (cas à ×3,3), le niveau
+    « difficile » n'a pas été resimulé.
+  - Performance : les concurrents calculent plus qu'avant (appels d'offres, projets de ZAC) ; leurs projets sont mémorisés par terrain
+    et critères (`projectOf`), la prospection n'étudie qu'environ 15 % des terrains par trimestre ; première fin de trimestre de
+    l'ordre de 3 à 5 s, indiquée par « Les concurrents jouent… ».
 
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
