@@ -12,7 +12,7 @@ import {
   type Parcel,
 } from '../engine';
 import { marketAt } from './location';
-import { applyRule, combineRules, type ZoneRule } from './plu';
+import { adaptToDensity, applyRule, combineRules, type ZoneRule } from './plu';
 import { mergeParcels } from './merge';
 import { charge, credit, eur, mapPlayer, mapPlot, mapProject, withEvent } from './ledger';
 import { committedCash, dropOffers, listPlots, listingCount, placeOffer, resolveMarket, withdrawOffer } from './market';
@@ -20,7 +20,7 @@ import { dropTenderBids, committedTenderCash, enforceObligations, openTender, pi
 import { SOCIAL_PRICE_RATIO } from '../engine';
 import { nextGaussian, nextRandom } from './rng';
 import { expectedSales, lotPrice, lotsLeft, soldShare } from './sales';
-import type { Action, ActionResult, BotProfileName, GameConfig, GameState, Plot, PlotIssue, Quality, TenderSpec, ProjectPhase, ProjectRun, ZoneFamily } from './types';
+import type { Action, ActionResult, BotProfileName, GameConfig, Density, GameState, Plot, PlotIssue, Quality, TenderSpec, ProjectPhase, ProjectRun, ZoneFamily } from './types';
 
 export const DEFAULT_CONFIG: GameConfig = {
   market: MARKETS['petite-couronne'],
@@ -82,6 +82,8 @@ export interface PlotSeed {
   /** Zone(s) du PLU qui touchent le terrain ; absent = aucune contrainte de zone. */
   zones?: ZoneFamily[];
   zoneCode?: string;
+  /** Densité du bâti environnant. */
+  density?: Density;
 }
 
 export interface PlayerSeed {
@@ -106,10 +108,10 @@ export const MIN_PRICE_POLICY = -0.2;
 export const MAX_PRICE_POLICY = 0.15;
 
 /** Règle du PLU qui s'applique à un terrain ; null quand le terrain n'a pas de zone (aucune contrainte). */
-export const ruleOf = (plot: Pick<Plot, 'zones'>): ZoneRule | null => (plot.zones.length ? combineRules(plot.zones) : null);
+export const ruleOf = (plot: Pick<Plot, 'zones'> & { density?: Density }): ZoneRule | null => (plot.zones.length ? adaptToDensity(combineRules(plot.zones), plot.density) : null);
 
 /** Critères avec les contraintes du PLU de la zone. */
-export const criteriaFor = (plot: Pick<Plot, 'zones'>, base: Criteria, bonusLevels = 0): Criteria => {
+export const criteriaFor = (plot: Pick<Plot, 'zones'> & { density?: Density }, base: Criteria, bonusLevels = 0): Criteria => {
   const rule = ruleOf(plot);
   return rule ? applyRule(base, bonusLevels ? { ...rule, maxLevels: rule.maxLevels + bonusLevels } : rule) : base;
 };
@@ -136,6 +138,7 @@ export const ISSUE_MESSAGE: Record<PlotIssue, string> = {
   enclavee: 'Parcelle enclavée : aucun accès à la rue. À assembler avec une parcelle voisine qui donne sur la rue.',
   'trop-petite': 'Terrain trop petit pour y construire seul de façon rentable. À assembler avec des parcelles voisines.',
   zone: 'Zone inconstructible pour un promoteur (équipement public ou espace naturel).',
+  delaisse: 'Délaissé : un petit bout de terrain qui n’apporte presque rien, même assemblé avec ses voisins (surface trop faible, forme ou position ingrate). Il reste achetable pour presque rien, par exemple pour compléter l’accès ou la surface d’un voisin.',
   inconstructible: 'Forme ou taille inadaptée : aucun projet rentable sur ce terrain seul, même offert. À assembler avec des parcelles voisines.',
 };
 
@@ -229,6 +232,7 @@ export function createGame(g: NewGame): GameState {
       ...(s.issue ? { issue: s.issue } : {}),
       zones: s.zones ?? [],
       ...(s.zoneCode ? { zoneCode: s.zoneCode } : {}),
+      ...(s.density ? { density: s.density } : {}),
       parcel: s.parcel,
       owner: null,
       existingSdp: s.existingSdp ?? 0,
@@ -327,6 +331,8 @@ export function applyAction(state: GameState, action: Action): ActionResult {
       existingSdp: plots.reduce((t, p) => t + p.existingSdp, 0),
       existingHeight: Math.max(...plots.map((p) => p.existingHeight)),
       zones: [...new Set(plots.flatMap((p) => p.zones))],
+      // L'assemblage prend la densité de sa plus grande parcelle.
+      ...(plots.slice().sort((a, b) => b.area - a.area)[0].density ? { density: plots.slice().sort((a, b) => b.area - a.area)[0].density } : {}),
       ...(plots.slice().sort((a, b) => b.area - a.area)[0].zoneCode ? { zoneCode: plots.slice().sort((a, b) => b.area - a.area)[0].zoneCode } : {}),
       locationFactor: plots.reduce((t, p) => t + p.locationFactor * p.area, 0) / plots.reduce((t, p) => t + p.area, 0),
       area: merged.area,

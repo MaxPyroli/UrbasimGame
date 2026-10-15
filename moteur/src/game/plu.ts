@@ -1,5 +1,5 @@
 import type { Criteria } from '../engine';
-import type { ZoneFamily } from './types';
+import type { Density, ZoneFamily } from './types';
 
 /**
  * PLU simplifié du jeu. Le vrai règlement (plusieurs dizaines de pages par zone, dont la hauteur sur un plan à part)
@@ -75,6 +75,23 @@ export function combineRules(families: ZoneFamily[]): ZoneRule {
   };
 }
 
+/**
+ * Les règles d'une zone s'adaptent au tissu bâti autour du terrain : dans un tissu dense (ultra-centre), les bâtiments sont
+ * mitoyens, donc pas de retrait latéral, un retrait de fond réduit et plus d'emprise ; en tissu diffus, la règle de la zone
+ * s'applique telle quelle.
+ */
+export function adaptToDensity(rule: ZoneRule, density: Density | undefined): ZoneRule {
+  if (!rule.buildable || density !== 'dense') return rule;
+  return {
+    ...rule,
+    setbackLateral: 0,
+    setbackFond: Math.min(rule.setbackFond, 2),
+    maxCoverage: Math.min(0.85, rule.maxCoverage + 0.15),
+    minOpenGround: Math.max(0.1, rule.minOpenGround - 0.1),
+    summary: `${rule.summary} Tissu dense : bâtiments mitoyens, construction en limite séparative.`,
+  };
+}
+
 /** Hauteur (m) correspondant à R+x : rez-de-chaussée puis étages courants (valeurs par défaut du moteur). */
 export const heightOfLevels = (levels: number, c: Pick<Criteria, 'groundFloorHeight' | 'floorHeight'>) => c.groundFloorHeight + c.floorHeight * levels;
 
@@ -88,8 +105,9 @@ export function applyRule(base: Criteria, rule: ZoneRule): Criteria {
     maxHeight: heightOfLevels(rule.maxLevels, base) + 0.05,
     maxCoverage: rule.maxCoverage,
     minOpenGround: rule.minOpenGround,
-    setbackFond: Math.max(base.setbackFond, rule.setbackFond),
-    setbackLateral: Math.max(base.setbackLateral, rule.setbackLateral),
+    // La règle de la zone fait foi : ses retraits remplacent ceux par défaut du moteur.
+    setbackFond: rule.setbackFond,
+    setbackLateral: rule.setbackLateral,
     upperUse: rule.use,
     groundFloorUse: rule.use === 'bureaux' ? 'commerce' : base.groundFloorUse,
   };

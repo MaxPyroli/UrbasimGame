@@ -76,11 +76,14 @@ export interface GameConfig {
   maxRate: number;
 }
 
+/** Densité du tissu bâti autour d'un terrain : adapte les retraits et l'emprise de la zone (voir `adaptToDensity`). */
+export type Density = 'dense' | 'moyenne' | 'diffuse';
+
 /** Famille de zone du PLU simplifié (voir `plu.ts`). */
 export type ZoneFamily = 'centre' | 'renouvellement' | 'mixte' | 'preservation' | 'activites' | 'equipement' | 'nature';
 
 /** Pourquoi un terrain ne peut pas être construit seul : à combiner avec des parcelles voisines. */
-export type PlotIssue = 'trop-petite' | 'enclavee' | 'inconstructible' | 'zone';
+export type PlotIssue = 'trop-petite' | 'enclavee' | 'inconstructible' | 'zone' | 'delaisse';
 
 /** Bâtiment livré sur un terrain par une opération : reste sur la carte (et sera démoli par la prochaine opération). */
 export interface BuiltBuilding {
@@ -103,6 +106,8 @@ export interface Plot {
   /** Familles de zones du PLU qui touchent ce terrain (plusieurs après un assemblage à cheval) et code de la zone principale. */
   zones: ZoneFamily[];
   zoneCode?: string;
+  /** Densité du bâti environnant (absent = moyenne) : en tissu dense, on construit en limite et avec peu de retrait. */
+  density?: Density;
   /** Terrain de la commune : il ne se vend que par appel d'offres (ni enchères ni prospection). */
   municipal?: boolean;
   /** Engagements pris auprès de la commune en remportant un appel d'offres. */

@@ -6,7 +6,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "district": "rolldown scripts/fetch-district.ts -f esm -p node -o .build/fetch-district.mjs && node .build/fetch-district.mjs"
+    "district": "rolldown scripts/fetch-district.ts -f esm -p node -o .build/fetch-district.mjs && node .build/fetch-district.mjs",
+    "reprice": "rolldown scripts/reprice-district.ts -f esm -p node -o .build/reprice-district.mjs && node .build/reprice-district.mjs"
   },
   "dependencies": {
     "polygon-clipping": "^0.15.7"

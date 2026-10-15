@@ -13,9 +13,10 @@ import {
   type MarketId,
   type Ring,
 } from '../engine';
-import { DEFAULT_CONFIG, defaultAskingPrice, plotIssue, type PlotSeed } from './game';
-import { ZONE_RULES } from './plu';
-import type { PlotIssue, ZoneFamily } from './types';
+import { DEFAULT_CONFIG, appraise, defaultAskingPrice, plotIssue, ruleOf, type PlotSeed } from './game';
+import { mergeParcels } from './merge';
+import { ZONE_RULES, adaptToDensity } from './plu';
+import type { Density, PlotIssue, ZoneFamily } from './types';
 import { locationFactors, type Poi } from './location';
 import { MARKETS } from '../engine';
 
@@ -36,6 +37,8 @@ export interface DistrictParcel {
   /** Famille et code de la zone du PLU au centre de la parcelle (absent si le zonage n'est pas connu). */
   zone?: ZoneFamily;
   zoneCode?: string;
+  /** Densité du bâti dans les 70 m alentour (voir `withDensity`). */
+  density?: Density;
   /** Coefficient de situation sur les prix de vente (1 = parcelle médiane du quartier) : transports, centre, équipements. */
   locationFactor: number;
   /** Résultat de l'analyse : `null` = constructible seul, sinon la raison. Absent tant que le quartier n'a pas été analysé (`withBasePrices`). */
@@ -260,6 +263,45 @@ export function buildDistrict(src: DistrictSource): District {
   return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, buildings, pois: src.pois, ...(src.roads ? { roads: src.roads } : {}), ...(src.zones ? { zones: src.zones } : {}), credits: src.credits, fetchedAt: src.fetchedAt };
 }
 
+/** Rayon (m) sur lequel on mesure la densité du bâti autour d'une parcelle, et seuils de part d'emprise bâtie. */
+const DENSITY_RADIUS = 70;
+const DENSE_COVER = 0.35;
+const DIFFUSE_COVER = 0.26;
+
+/** Règle du PLU d'une parcelle du quartier, adaptée à la densité de son environnement. */
+const parcelRule = (p: DistrictParcel) => (p.zone ? adaptToDensity(ZONE_RULES[p.zone], p.density) : null);
+
+/**
+ * Densité du tissu bâti autour de chaque parcelle : part de la surface (rayon de 70 m) couverte par des bâtiments. Les
+ * îlots continus du centre-ville sont « denses » (bâtiments mitoyens, construction en limite), les quartiers aérés
+ * « diffus ». Déterministe, calculé à partir des bâtiments de l'instantané.
+ */
+export function withDensity(d: District): District {
+  const kx = 111320 * Math.cos((d.center.lat * Math.PI) / 180);
+  const ky = 110540;
+  const local = (lon: number, lat: number): [number, number] => [(lon - d.center.lon) * kx, (lat - d.center.lat) * ky];
+  const blds = d.buildings.map((b) => {
+    const pts = b.ring.map(([lon, lat]) => local(lon, lat));
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const q = pts[(i + 1) % pts.length];
+      a += p[0] * q[1] - q[0] * p[1];
+    }
+    return { x: pts.reduce((t, p) => t + p[0], 0) / pts.length, y: pts.reduce((t, p) => t + p[1], 0) / pts.length, area: Math.abs(a) / 2 };
+  });
+  return {
+    ...d,
+    parcels: d.parcels.map((p) => {
+      const [cx, cy] = [p.ring.reduce((t, q) => t + local(q.lon, q.lat)[0], 0) / p.ring.length, p.ring.reduce((t, q) => t + local(q.lon, q.lat)[1], 0) / p.ring.length];
+      const built = blds.filter((b) => Math.hypot(b.x - cx, b.y - cy) <= DENSITY_RADIUS).reduce((t, b) => t + b.area, 0);
+      const cover = built / (Math.PI * DENSITY_RADIUS * DENSITY_RADIUS);
+      const density: Density = cover >= DENSE_COVER ? 'dense' : cover < DIFFUSE_COVER ? 'diffuse' : 'moyenne';
+      return { ...p, density };
+    }),
+  };
+}
+
 /**
  * Parcelles du quartier pour une partie. Celles qui ne sont pas constructibles seules (trop petites, enclavées)
  * restent affichées et achetables, marquées d'un `issue` : il faut les assembler avec des voisines.
@@ -269,14 +311,53 @@ export function districtToSeeds(d: District): PlotSeed[] {
   for (const p of d.parcels) {
     const parcel = { ring: p.ring, streetEdges: p.streetEdges };
     // Analyse mémorisée dans l'instantané (longue à calculer) ; sinon, contrôle géométrique rapide.
-    const issue = p.issue !== undefined ? p.issue ?? undefined : plotIssue(parcel, undefined, 1, p.zone ? ZONE_RULES[p.zone] : null);
-    seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, locationFactor: p.locationFactor, label: p.label, ...(issue ? { issue } : {}), ...(p.zone ? { zones: [p.zone], ...(p.zoneCode ? { zoneCode: p.zoneCode } : {}) } : {}), ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
+    const issue = p.issue !== undefined ? p.issue ?? undefined : plotIssue(parcel, undefined, 1, parcelRule(p));
+    seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, locationFactor: p.locationFactor, label: p.label, ...(issue ? { issue } : {}), ...(p.zone ? { zones: [p.zone], ...(p.zoneCode ? { zoneCode: p.zoneCode } : {}) } : {}), ...(p.density ? { density: p.density } : {}), ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
   }
   return seeds;
 }
 
-/** Analyse chaque parcelle une fois pour toutes : prix de référence et constructibilité seule (long : ~10 s) ; mémorisés dans l'instantané (configuration par défaut du marché du quartier). */
-export function withBasePrices(d: District): District {
+/**
+ * Repère les « délaissés » : parcelles non constructibles seules qui n'apportent presque rien même assemblées (aucun voisin
+ * avec qui les assembler, ou un gain de valeur inférieur à leur propre prix plancher). Elles restent dans le jeu, mais ne sont
+ * ni mises en vente ni convoitées par les concurrents. Calcul long, mémorisé dans l'instantané.
+ */
+export function withWasteland(d: District): District {
   const config = { ...DEFAULT_CONFIG, market: MARKETS[d.market] };
-  return { ...d, parcels: d.parcels.map((p) => ({ ...p, basePrice: defaultAskingPrice(p.id, { ring: p.ring, streetEdges: p.streetEdges }, p.existingSdp, config, p.locationFactor, p.zone ? ZONE_RULES[p.zone] : null), issue: plotIssue({ ring: p.ring, streetEdges: p.streetEdges }, config, p.locationFactor, p.zone ? ZONE_RULES[p.zone] : null) ?? null })) };
+  const kx = 111320 * Math.cos((d.center.lat * Math.PI) / 180);
+  const ky = 110540;
+  const info = d.parcels.map((p) => {
+    const parcel = { ring: p.ring, streetEdges: p.streetEdges };
+    const cx = p.ring.reduce((t, q) => t + q.lon, 0) / p.ring.length;
+    const cy = p.ring.reduce((t, q) => t + q.lat, 0) / p.ring.length;
+    return { p, parcel, cx, cy, rule: parcelRule(p) };
+  });
+  const alone = info.map((a) => (a.p.issue ? 0 : appraise(a.parcel, a.p.existingSdp, config, a.p.locationFactor, a.rule).best));
+  const useless = new Set<string>();
+  info.forEach((a, i) => {
+    if (!a.p.issue || a.p.issue === 'zone') return;
+    let gain = 0;
+    let neighbours = 0;
+    for (let j = 0; j < info.length; j++) {
+      const b = info[j];
+      if (j === i || Math.hypot((a.cx - b.cx) * kx, (a.cy - b.cy) * ky) > 90) continue;
+      const m = mergeParcels([a.parcel, b.parcel]);
+      if (!m.ok) continue;
+      neighbours++;
+      const zones = [...new Set([...(a.p.zone ? [a.p.zone] : []), ...(b.p.zone ? [b.p.zone] : [])])];
+      const rule = ruleOf({ zones, density: b.p.density });
+      if (plotIssue(m.parcel, config, b.p.locationFactor, rule)) continue;
+      gain = Math.max(gain, appraise(m.parcel, a.p.existingSdp + b.p.existingSdp, config, b.p.locationFactor, rule).best - alone[j]);
+    }
+    const floor = 0.6 * a.p.area * config.market.landPerSdp * a.p.locationFactor;
+    if (neighbours === 0 || gain < floor) useless.add(a.p.id);
+  });
+  return { ...d, parcels: d.parcels.map((p) => (useless.has(p.id) ? { ...p, issue: 'delaisse' as const } : p)) };
+}
+
+/** Analyse chaque parcelle une fois pour toutes : prix de référence et constructibilité seule (long : ~10 s) ; mémorisés dans l'instantané (configuration par défaut du marché du quartier). */
+export function withBasePrices(source: District): District {
+  const d = withDensity(source);
+  const config = { ...DEFAULT_CONFIG, market: MARKETS[d.market] };
+  return withWasteland({ ...d, parcels: d.parcels.map((p) => ({ ...p, basePrice: defaultAskingPrice(p.id, { ring: p.ring, streetEdges: p.streetEdges }, p.existingSdp, config, p.locationFactor, parcelRule(p)), issue: plotIssue({ ring: p.ring, streetEdges: p.streetEdges }, config, p.locationFactor, parcelRule(p)) ?? null })) });
 }

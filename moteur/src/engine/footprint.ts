@@ -196,6 +196,71 @@ function largestRectangle(comp: PolygonRings, opts: FootprintOptions): { ring: R
   return { ring: rectRing(x0, y0, x1, y1), limitedBy };
 }
 
+/** Douglas–Peucker sur un contour fermé : on garde les sommets qui s'écartent de plus de `eps` mètres. */
+function simplifyRing(ring: Ring, eps: number): Ring {
+  if (ring.length <= 4) return ring;
+  // on coupe le contour en deux au sommet le plus éloigné du premier, puis on simplifie chaque moitié
+  let far = 0;
+  for (let i = 1; i < ring.length; i++) if (distTo(ring[i], ring[0]) > distTo(ring[far], ring[0])) far = i;
+  const half = (pts: Vec2[]): Vec2[] => {
+    if (pts.length <= 2) return pts;
+    const a = pts[0];
+    const b = pts[pts.length - 1];
+    let idx = 0;
+    let dmax = 0;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const d = distToSeg(pts[i], a, b);
+      if (d > dmax) {
+        dmax = d;
+        idx = i;
+      }
+    }
+    if (dmax <= eps) return [a, b];
+    return [...half(pts.slice(0, idx + 1)).slice(0, -1), ...half(pts.slice(idx))];
+  };
+  const first = half(ring.slice(0, far + 1));
+  const second = half([...ring.slice(far), ring[0]]);
+  return [...first.slice(0, -1), ...second.slice(0, -1)];
+}
+const distTo = (p: Vec2, q: Vec2) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+function distToSeg(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-12) return distTo(p, a);
+  const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2));
+  return distTo(p, [a[0] + t * dx, a[1] + t * dy]);
+}
+/** Compacité d'un contour (1 = cercle, 0,785 = carré, petit = forme en lanière ou en peigne). */
+function compactness(r: Ring): number {
+  let per = 0;
+  for (let i = 0; i < r.length; i++) per += distTo(r[i], r[(i + 1) % r.length]);
+  return per > 0 ? (4 * Math.PI * ringArea(r)) / (per * per) : 0;
+}
+/** Une emprise est trop tarabiscotée pour un vrai bâtiment : beaucoup de côtés, ou forme en lanière. */
+const isComplex = (r: Ring) => r.length > 8 || (r.length > 6 && compactness(r) < 0.4) || compactness(r) < 0.25;
+
+/**
+ * Rend l'emprise plus réaliste : un bâtiment a peu de côtés et des angles francs. Une emprise tarabiscotée est d'abord
+ * simplifiée (décrochements de moins d'un mètre effacés, recoupée dans l'enveloppe) ; si elle reste complexe, on lui
+ * préfère le plus grand rectangle de l'enveloppe quand il garde au moins 70 % de la surface.
+ */
+function regularize(res: { ring: Ring; limitedBy: string[] }, comp: PolygonRings, opts: FootprintOptions): { ring: Ring; limitedBy: string[] } {
+  if (!isComplex(res.ring)) return res;
+  const area = ringArea(res.ring);
+  let simp: Ring | null = null;
+  const poly = largestPolygon(intersection([comp], toMulti(simplifyRing(res.ring, 1))));
+  if (poly) {
+    const r = cleanRing(poly[0], 0.3);
+    if (r.length >= 3 && (opts.areaCap === null || ringArea(r) <= opts.areaCap + 0.5)) simp = r;
+  }
+  if (simp && !isComplex(simp) && ringArea(simp) >= 0.85 * area) return { ...res, ring: simp };
+  const rect = largestRectangle(comp, opts);
+  if (rect && ringArea(rect.ring) >= 0.7 * area) return { ring: rect.ring, limitedBy: [...new Set([...res.limitedBy, ...rect.limitedBy])] };
+  if (simp && ringArea(simp) >= 0.8 * area && simp.length < res.ring.length) return { ...res, ring: simp };
+  return res;
+}
+
 interface Candidate {
   ring: Ring;
   limitedBy: string[];
@@ -207,8 +272,9 @@ function bestIn(env: MultiPolygon, opts: FootprintOptions, fronts: StreetFront[]
   let best: Candidate | null = null;
   for (const comp of env) {
     if (polygonArea(comp) < MIN_AREA) continue;
-    const res = opts.shape === 'rectangle' ? largestRectangle(comp, opts) : adaptedFootprint(comp, opts, fronts);
-    if (!res) continue;
+    const raw = opts.shape === 'rectangle' ? largestRectangle(comp, opts) : adaptedFootprint(comp, opts, fronts);
+    if (!raw) continue;
+    const res = opts.shape === 'rectangle' ? raw : regularize(raw, comp, opts);
     const area = ringArea(res.ring);
     if (!best || area > best.area) best = { ...res, area };
   }

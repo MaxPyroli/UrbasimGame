@@ -115,7 +115,7 @@ export function resolveMarket(state: GameState): GameState {
 /** Met en vente `count` terrains libres tirés au hasard (dans l'état : rejouable). */
 export function listPlots(state: GameState, count: number): GameState {
   let s = state;
-  const pool = s.plots.filter((p) => p.owner === null && !p.municipal && !p.listing && !p.projectId && p.issue !== 'zone' && offersOn(s, p.id).length === 0);
+  const pool = s.plots.filter((p) => p.owner === null && !p.municipal && !p.listing && !p.projectId && p.issue !== 'zone' && p.issue !== 'delaisse' && offersOn(s, p.id).length === 0);
   const picked: string[] = [];
   const n = Math.min(count, pool.length);
   for (let k = 0; k < n; k++) {

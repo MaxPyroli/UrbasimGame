@@ -341,6 +341,21 @@ collectivité jouent le rôle des enchères du Monopoly.
   indicateurs en bandeau défilant), outils de carte repliables (« Carte et filtres »), correction d'un débordement horizontal
   de la page sur petit écran (fenêtres de création de société décalées).
 
+- Fait (notes « finitions ») : **règles d'urbanisme selon la densité** (`Density`, `adaptToDensity` dans `moteur/src/game/plu.ts`,
+  `withDensity` dans `district.ts`) : la densité du bâti dans les 70 m autour de chaque parcelle (≥ 35 % de surface bâtie = dense,
+  < 26 % = diffus) adapte la règle de la zone : en tissu dense, pas de retrait latéral, retrait de fond ≤ 2 m, plus d'emprise
+  (+15 pts, 85 % max), moins de pleine terre. Les retraits de la zone font désormais foi (ils remplaçaient seulement le maximum avec
+  les 4 m de fond par défaut du moteur). À Montreuil : 129 parcelles denses, 147 moyennes, 70 diffuses ; 213 parcelles
+  constructibles seules au lieu de 198.
+  **Emprises plus réalistes** (`regularize` dans `moteur/src/engine/footprint.ts`) : une emprise de plus de 8 côtés ou en lanière
+  est simplifiée (décrochements de moins d'1 m effacés, recoupée dans l'enveloppe), sinon remplacée par le plus grand rectangle
+  si elle garde 70 % de la surface ; les L des terrains d'angle sont conservés. Emprises « bizarres » : 53/212 → 16/212.
+  **Délaissés** (`withWasteland`, `PlotIssue 'delaisse'`) : 27 parcelles non constructibles dont l'assemblage n'apporte presque
+  rien (aucun voisin, ou gain de valeur inférieur à leur prix plancher) sont marquées « délaissé » : grisées, achetables pour
+  presque rien, ni mises en vente ni convoitées par les bots. Les 96 autres parcelles « à assembler » restent utiles.
+  L'instantané se recalcule sans réseau par `npm run reprice -- montreuil-mairie` (environ 6 minutes) ; à relancer quand les
+  règles ou la géométrie changent.
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,

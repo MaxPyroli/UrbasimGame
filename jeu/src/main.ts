@@ -290,9 +290,10 @@ function plotStyle(p: Plot): L.PathOptions {
   const free = `hsl(${40 - 30 * t} 80% ${78 - 28 * t}%)`;
   const lieu = view === 'lieu';
   const freePlot = !p.owner;
-  const small = !!p.issue;
+  const waste = p.issue === 'delaisse';
+  const small = !!p.issue && !waste;
   // Terrains libres hors de portée (trop chers pour moi) ou écartés par le filtre : estompés.
-  const zoneBlocked = p.issue === 'zone';
+  const zoneBlocked = p.issue === 'zone' || waste;
   const listed = freePlot && isListed(p);
   const dim = freePlot && (plotFilter === 'abordables' ? !affordable(p) : plotFilter === 'assembler' ? !small : plotFilter === 'vente' ? !listed : false);
   const faded = freePlot && !affordable(p) && !small;
@@ -300,10 +301,10 @@ function plotStyle(p: Plot): L.PathOptions {
     color: sel ? '#000' : listed ? '#c98200' : zoneBlocked && freePlot ? '#777' : small && freePlot ? '#7b3fa0' : col ?? (view === 'hauteur' ? '#2b6cb0' : '#7a6b4f'),
     weight: sel ? 3 : p.projectId ? 2.5 : listed ? 2.5 : small ? 1.2 : view === 'hauteur' ? 1.2 : 1,
     opacity: small && freePlot ? 0.75 : 1,
-    fillColor: col ?? (listed && view !== 'prix' && view !== 'lieu' ? '#f6d27a' : zoneBlocked ? '#bdbdbd' : small ? '#cdb6e6' : lieu ? lieuColor(p.locationFactor) : free),
+    fillColor: col ?? (listed && view !== 'prix' && view !== 'lieu' ? '#f6d27a' : zoneBlocked ? (waste ? '#d9d3c7' : '#bdbdbd') : small ? '#cdb6e6' : lieu ? lieuColor(p.locationFactor) : free),
     // Vue « hauteur » : les parcelles libres restent transparentes pour laisser voir le bâti.
     fillOpacity: col ? (p.projectId ? 0.16 : view === 'hauteur' || view === 'zonage' ? 0.35 : 0.55) : listed ? 0.45 : zoneBlocked ? 0.35 : small ? 0.5 : view === 'hauteur' || view === 'zonage' ? 0 : lieu ? 0.8 : 0.45,
-    dashArray: p.projectId ? '4 3' : small ? '2 4' : undefined,
+    dashArray: p.projectId ? '4 3' : small ? '2 4' : waste && freePlot ? '1 4' : undefined,
   };
   if (dim) return { ...base, opacity: 0.2, fillOpacity: (base.fillOpacity ?? 0) * 0.2 };
   if (faded) return { ...base, opacity: 0.55, fillOpacity: (base.fillOpacity ?? 0) * 0.55, dashArray: '1 5' };
@@ -534,7 +535,7 @@ function updateMapLegend() {
   }
   // Repères communs à toutes les vues : propriétaires et symboles.
   const owners = [`<span><i class="swatch" style="background:${colorOf(ME)}"></i>vous</span>`, ...state.players.filter((p) => p.bot).map((p) => `<span><i class="swatch" style="background:${colorOf(p.id)}"></i>${esc(shortName(p.name))}</span>`)].join(' ');
-  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#f6d27a;border:2px solid #c98200"></i>en vente</span> <span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span><i class="swatch" style="background:#7fd1d3;border:1px dashed #0f8b8d"></i>terrain communal</span> <span><i class="swatch" style="background:#fff;border:2.5px solid #1f6feb"></i>bâtiment construit (contour = promoteur ; hachuré = en chantier ; pointillé = en préparation)</span> <span>pastilles : équipements (survol = nom)</span></div>`;
+  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#f6d27a;border:2px solid #c98200"></i>en vente</span> <span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span><i class="swatch" style="background:#7fd1d3;border:1px dashed #0f8b8d"></i>terrain communal</span> <span><i class="swatch" style="background:#d9d3c7;border:1px dotted #8a8478"></i>délaissé</span> <span><i class="swatch" style="background:#fff;border:2.5px solid #1f6feb"></i>bâtiment construit (contour = promoteur ; hachuré = en chantier ; pointillé = en préparation)</span> <span>pastilles : équipements (survol = nom)</span></div>`;
   // Repliable (fermée par défaut sur petit écran) : le titre devient la ligne cliquable.
   const title = el.querySelector('b');
   const heading = title ? title.outerHTML : '<b>Légende</b>';
@@ -1155,6 +1156,7 @@ function statusPill(p: Plot): string {
   if (p.owner) return pill(esc(state.players.find((x) => x.id === p.owner)!.name), colorOf(p.owner));
   if (p.municipal) return pill('terrain communal', '#0f8b8d');
   if (p.issue === 'zone') return pill('inconstructible', '#777');
+  if (p.issue === 'delaisse') return pill('délaissé', '#8a8478');
   if (p.issue) return pill('à assembler', '#7b3fa0');
   return pill('libre', '#2b6cb0');
 }
@@ -1185,7 +1187,9 @@ function renderSingle(p: Plot): string {
   }
   const issueBox = p.issue === 'zone'
     ? `<div class="notice" style="--nc:#777"><b>Inconstructible</b> ${esc(ISSUE_MESSAGE.zone)}</div>`
-    : p.issue
+    : p.issue === 'delaisse'
+      ? `<div class="notice" style="--nc:#8a8478"><b>Délaissé</b> ${esc(ISSUE_MESSAGE.delaisse)}</div>`
+      : p.issue
       ? `<div class="notice" style="--nc:#7b3fa0"><b>À assembler</b> ${esc(ISSUE_MESSAGE[p.issue])}<br><span class="muted">Sélectionnez les voisines (Maj+clic), achetez-les, puis « Assembler ».</span></div>`
       : '';
   if (!p.owner && state.config.landMarket === 'auction') {
@@ -1611,9 +1615,10 @@ function zoneCard(p: Plot): string {
   if (!rule) return '';
   const several = p.zones.length > 1 ? '<div class="muted" style="font-size:12px">Terrain à cheval sur plusieurs zones : la règle la plus stricte s’applique.</div>' : '';
   const code = p.zoneCode ? `<span class="muted">${esc(p.zoneCode)}</span> · ` : '';
+  const dens = p.density === 'dense' ? ' · tissu dense' : p.density === 'diffuse' ? ' · tissu aéré' : '';
   if (!rule.buildable) return `<div><b>${code}${esc(rule.label)}</b>${several}<div class="muted">${esc(rule.summary)}</div></div>`;
   const chip = (t: string) => `<span class="chip">${t}</span>`;
-  return `<div><b>${code}${esc(rule.label)}</b>${several}
+  return `<div><b>${code}${esc(rule.label)}${dens}</b>${several}
     <div class="muted" style="font-size:12px">${esc(rule.summary)}</div>
     <div style="margin-top:4px">${chip(`Hauteur max <b>R+${rule.maxLevels}</b>`)}${chip(`Emprise <b>${Math.round(rule.maxCoverage * 100)} %</b>`)}${chip(`Pleine terre <b>${Math.round(rule.minOpenGround * 100)} %</b>`)}${rule.setbackFond || rule.setbackLateral ? chip(`Retraits <b>${rule.setbackFond ? `fond ${rule.setbackFond} m` : ''}${rule.setbackFond && rule.setbackLateral ? ', ' : ''}${rule.setbackLateral ? `côtés ${rule.setbackLateral} m` : ''}</b>`) : chip('Construction en limite possible')}${chip(rule.use === 'bureaux' ? '<b>Bureaux</b> uniquement' : 'Logements, commerces')}</div>
     <div class="muted" style="font-size:11px;margin-top:4px">Règles simplifiées inspirées du type de zone, pas le règlement réel.</div></div>`;

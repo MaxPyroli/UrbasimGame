@@ -1,6 +1,6 @@
 import { eur, mapPlayer, mapPlot, withEvent } from './ledger';
 import type { MarketResult } from './market';
-import { combineRules } from './plu';
+import { adaptToDensity, combineRules } from './plu';
 import { nextRandom } from './rng';
 import type { GameState, Plot, Programme, ProgrammeKind, Quality, Tender, TenderBid, TenderSpec, TenderTerms } from './types';
 
@@ -173,7 +173,7 @@ export function openTender(state: GameState, worth: (s: GameState, plot: Plot, s
   let i: number;
   [i, s] = draw(s, pool.length);
   const plot = pool[i];
-  const rule = plot.zones.length ? combineRules(plot.zones) : null;
+  const rule = plot.zones.length ? adaptToDensity(combineRules(plot.zones), plot.density) : null;
   let preset: number;
   let social: number;
   let lv: number;
