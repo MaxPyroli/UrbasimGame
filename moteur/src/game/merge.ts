@@ -99,7 +99,13 @@ export function mergeParcels(parcels: Parcel[]): MergeResult {
   if (seen.size !== parcels.length) return { ok: false, error: 'ces parcelles ne se touchent pas : il faut au moins 1,5 m de limite commune (un simple coin ne suffit pas)' };
 
   const grown = rings.map((r) => toMulti(offsetRing(r, CLOSE)));
-  const merged = union(grown[0], ...grown.slice(1));
+  let merged: ReturnType<typeof union>;
+  try {
+    merged = union(grown[0], ...grown.slice(1));
+  } catch {
+    // contours trop irréguliers pour la bibliothèque de découpage
+    return { ok: false, error: 'assemblage impossible : les contours sont trop irréguliers' };
+  }
   const poly = largestPolygon(merged);
   if (!poly || merged.length !== 1) return { ok: false, error: 'assemblage impossible : le contour obtenu n’est pas d’un seul tenant (parcelles séparées par un jour trop large)' };
   if (poly.length > 1) {

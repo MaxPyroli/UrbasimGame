@@ -135,3 +135,29 @@ describe('marché d’un quartier', () => {
     expect(promoterCriteria(MARKETS['paris']).mix).toEqual(DEFAULT_CRITERIA.mix);
   });
 });
+
+import { MIN_NEW_PRICE, deriveMarketAdjust, newBuildPremium } from '../src/app/dvf';
+
+describe('marché local dérivé des ventes', () => {
+  const stats = (pricePerM2: number, sales: number) => marketStats(Array.from({ length: sales }, () => sale(3, 62, pricePerM2)), 'test');
+  it('la prime du neuf est plus forte dans les villes bon marché', () => {
+    expect(newBuildPremium(6300)).toBeCloseTo(1.15, 2);
+    expect(newBuildPremium(3600)).toBeGreaterThan(1.25);
+    expect(newBuildPremium(1500)).toBeGreaterThan(1.55);
+    expect(newBuildPremium(1500)).toBeGreaterThan(newBuildPremium(3600));
+  });
+  it('prix, foncier et coûts suivent le niveau local, les coûts beaucoup moins', () => {
+    const base = MARKETS['grande-ville'];
+    const cheap = deriveMarketAdjust(base, stats(1500, 400));
+    const dear = deriveMarketAdjust(base, stats(8000, 400));
+    expect(cheap.housingPerShab!).toBeGreaterThanOrEqual(MIN_NEW_PRICE);
+    expect(dear.housingPerShab!).toBeGreaterThan(cheap.housingPerShab! * 2.5);
+    expect(dear.landPerSdp!).toBeGreaterThan(cheap.landPerSdp! * 4);
+    expect(dear.buildHousingPerSdp! / cheap.buildHousingPerSdp!).toBeLessThan(1.8);
+  });
+  it('avec très peu de ventes, le niveau reste proche du marché de référence', () => {
+    const base = MARKETS['ville-moyenne'];
+    const few = deriveMarketAdjust(base, stats(700, 3));
+    expect(few.housingPerShab!).toBeGreaterThan(base.housingPerShab * 0.7);
+  });
+});

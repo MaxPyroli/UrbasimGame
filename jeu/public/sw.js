@@ -1,6 +1,7 @@
 // Service worker d'Urbasim : le jeu s'installe et se rouvre même sans réseau.
 //  - page (navigation) : réseau d'abord, donc toujours la dernière version en ligne ; cache en secours hors ligne ;
 //  - fichiers du jeu (noms avec empreinte, donc immuables) : cache d'abord ;
+//  - cartes des villes (data/districts) : ignorées ici, le jeu les télécharge et les garde dans son propre cache ;
 //  - fonds de carte : cache en secours, rafraîchi en arrière-plan (les zones déjà vues restent disponibles hors ligne).
 const VERSION = 'urbasim-v1';
 const APP = `${VERSION}-app`;
@@ -32,7 +33,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => !k.startsWith(VERSION)).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => !k.startsWith(VERSION) && !k.startsWith('urbasim-maps')).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
@@ -47,6 +48,9 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+
+  // Les cartes (gros fichiers) sont gardées par le jeu lui-même (cache « urbasim-maps »), pas ici : on les laisse passer.
+  if (url.pathname.includes('/data/districts/')) return;
 
   if (req.mode === 'navigate') {
     event.respondWith(

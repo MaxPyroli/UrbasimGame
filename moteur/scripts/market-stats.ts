@@ -1,10 +1,13 @@
 // Ajoute à un instantané les statistiques de marché tirées des ventes réelles (DVF) de sa commune.
-// Usage : npm run market -- <id> <code_insee> ["<nom de la commune>"]   (puis `npm run reprice -- <id>` : les prix en dépendent)
+// Usage : npm run market -- <id> <code_insee> ["<nom de la commune>"] [--adjust]   (--adjust : prix du marché adaptés aux ventes locales ; code 75111 pour Paris 11e)   (puis `npm run reprice -- <id>` : les prix en dépendent)
 import { readFileSync, writeFileSync } from 'node:fs';
-import { fetchMarketStats, marketMix } from '../src/app/dvf';
+import { deriveMarketAdjust, fetchMarketStats, marketMix } from '../src/app/dvf';
+import { MARKETS } from '../src/engine';
 import type { District } from '../src/game/district';
 
-const [id, insee, nameArg] = process.argv.slice(2);
+const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const adjust = process.argv.includes('--adjust');
+const [id, insee, nameArg] = args;
 if (!id || !insee) {
   console.error('usage : npm run market -- <id> <code_insee> ["<nom>"]');
   process.exit(1);
@@ -20,6 +23,6 @@ if (!stats) {
   process.exit(1);
 }
 const { demandMix, typologyRatio } = marketMix(stats);
-writeFileSync(file, JSON.stringify({ ...d, marketStats: stats, demandMix, typologyRatio }));
+writeFileSync(file, JSON.stringify({ ...d, marketStats: stats, demandMix, typologyRatio, ...(adjust ? { marketAdjust: deriveMarketAdjust(MARKETS[d.market], stats) } : {}) }));
 console.log(`${stats.source} : ${stats.sales} ventes, ${stats.pricePerM2} €/m²`);
 for (const t of ['T1', 'T2', 'T3', 'T4', 'T5'] as const) console.log(`  ${t} : ${(demandMix[t] * 100).toFixed(0)} % des ventes · ${stats.byTypology[t].area} m² · ${stats.byTypology[t].pricePerM2} €/m² · prix relatif ×${typologyRatio[t]}`);

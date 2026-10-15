@@ -10,10 +10,14 @@ const assets = readdirSync('dist-artifact/assets');
 const css = assets.filter((f) => f.endsWith('.css')).map((f) => readFileSync(`dist-artifact/assets/${f}`, 'utf8')).join('\n');
 const js = assets.filter((f) => f.endsWith('.js')).map((f) => readFileSync(`dist-artifact/assets/${f}`, 'utf8')).join('\n');
 const body = html.slice(html.indexOf('<div id="app">'), html.indexOf('</body>')).replace(/<script[\s\S]*?<\/script>/g, '');
-// Les cartes (instantanés JSON) sont intégrées à la page, compressées : la page autonome ne peut rien télécharger.
-const districts = readdirSync('dist-artifact/data/districts')
-  .filter((f) => f.endsWith('.json'))
-  .map((f) => `<script type="application/octet-stream" id="district-${f.replace(/\.json$/, '')}">${gzipSync(readFileSync(`dist-artifact/data/districts/${f}`), { level: 9 }).toString('base64')}</script>`);
+// Cartes intégrées à la page autonome (compressées) : elle ne peut rien télécharger, et la page est limitée à 16 Mo. Les autres
+// cartes sont proposées au téléchargement sur le site publié.
+const EMBED = ['montreuil-mairie', 'sucy-en-brie'];
+const index = JSON.parse(readFileSync('dist-artifact/data/districts/index.json', 'utf8')).filter((m) => EMBED.includes(m.id));
+const districts = [
+  `<script type="application/json" id="districts-index">${JSON.stringify(index)}</script>`,
+  ...EMBED.map((id) => `<script type="application/octet-stream" id="district-${id}">${gzipSync(readFileSync(`dist-artifact/data/districts/${id}.json`), { level: 9 }).toString('base64')}</script>`),
+];
 const page = [
   '<meta charset="utf-8">',
   '<title>Urbasim Prototype</title>',

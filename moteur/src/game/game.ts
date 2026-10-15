@@ -265,7 +265,8 @@ export function createGame(g: NewGame): GameState {
   // Trésorerie de départ : 2,5 fois le prix médian d'un terrain constructible (les petites parcelles à assembler ne comptent pas).
   const buildable = plots.filter((p) => !p.issue);
   const asks = (buildable.length ? buildable : plots).map((p) => p.basePrice).sort((a, b) => a - b);
-  const autoCash = Math.round((2.5 * (asks[Math.floor(asks.length / 2)] ?? 0) * config.startCashFactor) / 50_000) * 50_000 || 1_000_000;
+  // Plancher : dans une ville où les terrains valent presque rien, la mise doit quand même financer des chantiers (15 fois les coûts fixes d'une opération).
+  const autoCash = Math.max(Math.round((2.5 * (asks[Math.floor(asks.length / 2)] ?? 0) * config.startCashFactor) / 50_000) * 50_000, Math.round((15 * config.market.fixedCostPerOperation * config.startCashFactor) / 50_000) * 50_000) || 1_000_000;
   const startCash = config.startCash || autoCash;
   const structureCost = config.structureCost || Math.round((startCash * config.structureCostRate) / 1000) * 1000;
   const salesDemand = config.salesDemand || Math.max(6, Math.round(0.03 * plots.length));

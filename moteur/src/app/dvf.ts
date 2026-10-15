@@ -1,4 +1,4 @@
-import type { MarketStats, Typology } from '../engine';
+import type { Market, MarketStats, Typology } from '../engine';
 
 /** Typologies de logement, de la plus petite à la plus grande. */
 const TYPOLOGIES: Typology[] = ['T1', 'T2', 'T3', 'T4', 'T5'];
@@ -142,4 +142,50 @@ export async function fetchMarketStats(insee: string, name: string, get: (url: s
   }
   if (sales.length === 0) return null;
   return marketStats(sales, `Ventes réelles (DVF) ${name} ${Math.min(...years)}–${Math.max(...years)}`);
+}
+
+/** Prix plancher d'un logement neuf (€/m² habitable) : en dessous, plus personne ne construit, quel que soit le prix de l'ancien. */
+export const MIN_NEW_PRICE = 2200;
+
+/**
+ * Un logement neuf se vend au-dessus du prix médian de l'ancien, d'autant plus que la ville est bon marché (la construction
+ * coûte à peu près pareil partout : à 1 500 €/m² dans l'ancien le neuf se vend plutôt 2 500). Observé : ×1,1 à Montreuil,
+ * ×1,3 à Sucy-en-Brie.
+ */
+export function newBuildPremium(ancien: number): number {
+  const cheap = Math.min(1, Math.max(0, (5000 - ancien) / 5000));
+  return 1.15 + 0.75 * cheap ** 1.2;
+}
+
+/**
+ * Adapte un marché de référence (structure de coûts d'un type de ville) au niveau de prix réel d'une commune : les prix de
+ * vente suivent les ventes locales (ancien × prime du neuf, avec un plancher), le foncier encore plus fort, les coûts de
+ * construction beaucoup moins (un immeuble coûte à peu près pareil à Paris et à Bourges). Quand les ventes sont rares, le
+ * niveau local est tiré vers celui du marché de référence. Renvoie les seuls champs modifiés.
+ */
+export function deriveMarketAdjust(base: Market, stats: MarketStats): Partial<Market> {
+  const w = stats.sales / (stats.sales + 25);
+  const ancien = w * stats.pricePerM2 + (1 - w) * (base.housingPerShab / 1.3);
+  const housing = Math.max(MIN_NEW_PRICE, ancien * newBuildPremium(ancien));
+  const ratio = housing / base.housingPerShab;
+  const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
+  const price = (v: number) => Math.round(v * ratio);
+  const cost = (v: number, e: number) => Math.round(v * clamp(ratio ** e, 0.6, 1.25));
+  return {
+    name: `${base.name} (prix locaux)`,
+    housingPerShab: Math.round(housing / 50) * 50,
+    commercePerSdp: price(base.commercePerSdp),
+    officePerSdp: price(base.officePerSdp),
+    parkingBasementSpace: price(base.parkingBasementSpace),
+    parkingOtherSpace: price(base.parkingOtherSpace),
+    buildHousingPerSdp: cost(base.buildHousingPerSdp, 0.4),
+    buildCommercePerSdp: cost(base.buildCommercePerSdp, 0.4),
+    buildOfficePerSdp: cost(base.buildOfficePerSdp, 0.4),
+    offsiteParkingPlace: price(base.offsiteParkingPlace),
+    buildBasementSpace: cost(base.buildBasementSpace, 0.4),
+    buildOtherSpace: cost(base.buildOtherSpace, 0.4),
+    demolitionPerSdp: cost(base.demolitionPerSdp, 0.4),
+    fixedCostPerOperation: cost(base.fixedCostPerOperation, 0.5),
+    landPerSdp: Math.round(base.landPerSdp * ratio ** 1.2),
+  };
 }

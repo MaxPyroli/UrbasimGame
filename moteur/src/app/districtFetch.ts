@@ -1,9 +1,9 @@
-import { type ContextBuilding, type LonLat, type MarketId, buildingsCredit } from '../engine';
+import { type ContextBuilding, type LonLat, type MarketId, MARKETS, buildingsCredit } from '../engine';
 import { buildDistrict, type District, type DistrictRoad, type DistrictZone } from '../game/district';
 import { zoneFamily } from '../game/plu';
 import type { Poi, PoiKind } from '../game/location';
 import { fetchNearbyBuildings, fetchWfsPage } from './services';
-import { fetchMarketStats, marketMix } from './dvf';
+import { deriveMarketAdjust, fetchMarketStats, marketMix } from './dvf';
 
 const API = 'https://apicarto.ign.fr/api/cadastre/parcelle';
 const PAGE = 500;
@@ -65,10 +65,10 @@ export async function fetchDistrict(opts: { name: string; center: LonLat; radius
 }
 
 /** Toutes les parcelles cadastrales d'une commune (code INSEE), par pages. */
-export async function fetchCadastreCommune(insee: string): Promise<{ type: 'FeatureCollection'; features: any[] }> {
+export async function fetchCadastreCommune(insee: string, arr?: string): Promise<{ type: 'FeatureCollection'; features: any[] }> {
   const features: any[] = [];
   for (let start = 0; start < 60 * PAGE; start += PAGE) {
-    const j = await getJson(`${API}?code_insee=${insee}&_limit=${PAGE}&_start=${start}`);
+    const j = await getJson(`${API}?code_insee=${insee}${arr ? `&code_arr=${arr}` : ''}&_limit=${PAGE}&_start=${start}`);
     const got: any[] = j.features ?? [];
     features.push(...got);
     if (got.length < PAGE) break;
@@ -94,17 +94,48 @@ export async function fetchCommuneBounds(insee: string): Promise<{ minLon: numbe
  * Télécharge toute une commune : parcelles par code INSEE, puis bâti, voies, équipements et zonage par carreaux d'environ
  * 1 km (les services plafonnent le nombre d'objets par requête). Les objets à cheval sur deux carreaux sont dédoublonnés.
  */
-export async function fetchCommune(opts: { name: string; insee: string; market: MarketId; log?: (m: string) => void }): Promise<District> {
+export interface CommuneOptions {
+  name: string;
+  insee: string;
+  market: MarketId;
+  /** Arrondissement (Paris, Lyon, Marseille) : code d'arrondissement du cadastre (ex. « 111 » pour Paris 11e). */
+  arr?: string;
+  /** Secteur autour d'un point plutôt que la commune entière (grandes communes, ou service qui refuse la requête par commune). */
+  sector?: { center: LonLat; radius: number };
+  /** Côté des carreaux de téléchargement (m) : 1 000 par défaut, moins en tissu très dense (le service plafonne les objets par requête). */
+  tile?: number;
+  /** Adapte les prix du marché de référence au niveau des ventes réelles de la commune. */
+  adjustMarket?: boolean;
+  /** Code des ventes réelles (DVF) si différent du code INSEE : arrondissement (75111 pour Paris 11e). Par défaut déduit de `arr`. */
+  dvfInsee?: string;
+  log?: (m: string) => void;
+}
+
+/** Rectangle englobant (lon/lat) d'un ensemble de parcelles GeoJSON. */
+function boundsOf(features: any[]): { minLon: number; maxLon: number; minLat: number; maxLat: number } {
+  let minLon = 180, maxLon = -180, minLat = 90, maxLat = -90;
+  for (const f of features) {
+    const polys: number[][][][] = f.geometry?.type === 'MultiPolygon' ? f.geometry.coordinates : f.geometry?.type === 'Polygon' ? [f.geometry.coordinates] : [];
+    for (const poly of polys) for (const q of poly[0] ?? []) {
+      minLon = Math.min(minLon, q[0]); maxLon = Math.max(maxLon, q[0]);
+      minLat = Math.min(minLat, q[1]); maxLat = Math.max(maxLat, q[1]);
+    }
+  }
+  return { minLon, maxLon, minLat, maxLat };
+}
+
+export async function fetchCommune(opts: CommuneOptions): Promise<District> {
   const log = opts.log ?? (() => {});
-  const bounds = await fetchCommuneBounds(opts.insee);
+  // Parcelles : commune (ou arrondissement) par code, ou secteur autour d'un point ; l'étendue se déduit des parcelles.
+  const cadastre = opts.sector ? await fetchCadastreBox(opts.sector.center, opts.sector.radius) : await fetchCadastreCommune(opts.insee, opts.arr);
+  const bounds = boundsOf(cadastre.features);
   const center = { lon: (bounds.minLon + bounds.maxLon) / 2, lat: (bounds.minLat + bounds.maxLat) / 2 };
   const kx = 111320 * Math.cos((center.lat * Math.PI) / 180);
   const widthM = (bounds.maxLon - bounds.minLon) * kx;
   const heightM = (bounds.maxLat - bounds.minLat) * 110574;
   const radius = Math.ceil(Math.hypot(widthM, heightM) / 2 / 50) * 50;
-  const cadastre = await fetchCadastreCommune(opts.insee);
   log(`${cadastre.features.length} parcelles`);
-  const TILE = 1000;
+  const TILE = opts.tile ?? 1000;
   const tiles: LonLat[] = [];
   for (let x = TILE / 2; x < widthM + TILE / 2; x += TILE)
     for (let y = TILE / 2; y < heightM + TILE / 2; y += TILE) tiles.push({ lon: bounds.minLon + x / kx, lat: bounds.minLat + y / 110574 });
@@ -124,7 +155,7 @@ export async function fetchCommune(opts: { name: string; insee: string; market: 
   const fetchedAt = new Date().toISOString().slice(0, 10);
   const buildings = [...bMap.values()];
   // Ventes réelles de la commune : mix de logements et prix par typologie (absent si la commune n'a pas de ventes d'appartements).
-  const stats = await fetchMarketStats(opts.insee, opts.name, async (url) => {
+  const stats = await fetchMarketStats(opts.dvfInsee ?? (opts.arr ? `${opts.insee.slice(0, 2)}${opts.arr.slice(-3)}` : opts.insee), opts.name, async (url) => {
     try {
       const r = await fetch(url);
       return r.ok ? await r.text() : null;
@@ -146,7 +177,8 @@ export async function fetchCommune(opts: { name: string; insee: string; market: 
     credits: ['Parcelles : IGN / DGFiP, cadastre Etalab (Licence Ouverte 2.0)', buildingsCredit(buildings, fetchedAt), 'Équipements : IGN, BD TOPO® (Licence Ouverte 2.0)', 'Zonage : Géoportail de l’Urbanisme (PLU, Licence Ouverte 2.0)'],
     fetchedAt,
   });
-  return stats ? { ...district, marketStats: stats, ...marketMix(stats) } : district;
+  const adjust = opts.adjustMarket && stats ? deriveMarketAdjust(MARKETS[opts.market], stats) : undefined;
+  return stats ? { ...district, marketStats: stats, ...marketMix(stats), ...(adjust ? { marketAdjust: adjust } : {}) } : district;
 }
 
 const WFS = 'https://data.geopf.fr/wfs/ows';

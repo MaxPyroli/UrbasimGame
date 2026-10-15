@@ -86,13 +86,17 @@ import {
 } from '../../moteur/src/game';
 import { pointInRing } from '../../moteur/src/game/district';
 import { CHANGELOG } from './changelog';
-import { DISTRICTS, DEFAULT_DISTRICT, chooseDistrict, chosenDistrictId, loadDistrict } from './districts';
+import { DISTRICTS, DEFAULT_DISTRICT, chooseDistrict, chosenDistrictId, deleteMap, downloadMap, downloadedMaps, listMaps, loadDistrict, type MapEntry } from './districts';
 
 // Carte choisie sur l'écran d'accueil (changer de carte recharge la page) ; ses données sont chargées à la demande.
 const districtId = chosenDistrictId();
 let district: District;
 try {
-  district = await loadDistrict(districtId, __APP_BUILD__);
+  // Première ouverture de cette carte : téléchargement (avec progression), puis elle reste sur l'appareil.
+  const bootEl = document.getElementById('boot');
+  district = await loadDistrict(districtId, (done) => {
+    if (bootEl) bootEl.innerHTML = `<b>Téléchargement de la carte…</b><div class="dl-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(done * 100)}"><i style="width:${Math.round(done * 100)}%"></i></div><span class="muted">${Math.round(done * 100)} % · une seule fois, la carte reste ensuite sur cet appareil</span>`;
+  });
 } catch (e) {
   const boot = document.getElementById('boot');
   if (boot) boot.innerHTML = `<b>Impossible de charger la carte.</b><br>${e instanceof Error ? e.message : ''}<br><button id="boot-retry" type="button">Réessayer</button>${districtId !== DEFAULT_DISTRICT ? ' <button id="boot-default" type="button">Revenir à Montreuil</button>' : ''}`;
@@ -1127,11 +1131,13 @@ async function installApp() {
 
 // Service worker : jeu utilisable hors ligne et installable. Pas dans la page unique hébergée (sans fichiers annexes).
 if ('serviceWorker' in navigator && import.meta.env.PROD && !NO_TILES) {
-  window.addEventListener('load', () => {
+  // Le chargement de la carte (await ci-dessus) peut finir après l'événement « load » : on enregistre alors tout de suite.
+  const registerSW = () =>
     navigator.serviceWorker.register('./sw.js').catch(() => {
       /* service worker indisponible (navigation privée, http) : le jeu fonctionne quand même */
     });
-  });
+  if (document.readyState === 'complete') void registerSW();
+  else window.addEventListener('load', () => void registerSW());
 }
 
 // ---------------------------------------------------------------- écran d'accueil
@@ -1143,6 +1149,89 @@ function hideHome() {
 }
 
 /** Écran d'accueil : reprendre la partie, en commencer une nouvelle, lire le mode d'emploi. */
+const fmtMB = (bytes: number) => `${(bytes / 1048576).toFixed(bytes < 1.5e7 ? 1 : 0).replace('.', ',')} Mo`;
+
+/** Page des cartes : on choisit une ville, on la télécharge une fois (progression), puis on y joue, même hors ligne. */
+async function openMaps() {
+  openModal(
+    `<h2 class="mh">Cartes</h2>
+     <p class="muted" style="margin-top:0">Chaque carte se télécharge une fois, puis reste sur votre appareil (jeu possible hors ligne). Chaque carte a sa propre partie enregistrée.</p>
+     <div id="maps-body" class="maps"><p class="muted">Chargement de la liste…</p></div>
+     <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="mp-close" type="button">Fermer</button></div>`,
+    (root) => (root.querySelector<HTMLButtonElement>('#mp-close')!.onclick = closeModal),
+  );
+  const body = document.getElementById('maps-body')!;
+  let maps: MapEntry[] = [];
+  try {
+    maps = await listMaps();
+  } catch (e) {
+    body.innerHTML = `<p class="bad">Liste des cartes indisponible (${esc(e instanceof Error ? e.message : 'réseau')}).</p>`;
+    return;
+  }
+  let have = await downloadedMaps(maps);
+  const progress = new Map<string, number>();
+  const render = () => {
+    body.innerHTML = DISTRICTS.map((d) => {
+      const m = maps.find((x) => x.id === d.id);
+      const current = d.id === districtId;
+      const facts = m
+        ? [
+            `${m.parcels.toLocaleString('fr-FR')} parcelles`,
+            m.pricePerM2 ? `appartements ${m.pricePerM2.toLocaleString('fr-FR')} €/m² (${m.sales!.toLocaleString('fr-FR')} ventes)` : 'pas de ventes d’appartements : marché par défaut',
+            m.zones > 0 ? 'PLU numérisé' : 'sans PLU numérisé : règles par défaut',
+            fmtMB(m.bytes),
+          ].join(' · ')
+        : 'Non disponible dans cette version : voir le site publié';
+      const p = progress.get(d.id);
+      const action = current
+        ? '<span class="pill" style="--pc:#1f6feb">Carte actuelle</span>'
+        : !m
+          ? ''
+          : p !== undefined
+            ? `<div class="dl-bar" role="progressbar" aria-valuenow="${Math.round(p * 100)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${Math.round(p * 100)}%"></i></div><span class="muted">Téléchargement ${Math.round(p * 100)} %</span>`
+            : have.has(d.id)
+              ? `<button type="button" class="primary" data-play="${d.id}">Jouer ici</button><button type="button" data-del="${d.id}" title="Libère la place sur l’appareil (la partie enregistrée est conservée)">Supprimer</button><span class="muted">✓ téléchargée</span>`
+              : `<button type="button" class="primary" data-dl="${d.id}">Télécharger · ${fmtMB(m.bytes)}</button>`;
+      return `<div class="mapcard2${current ? ' on' : ''}"><div class="place-head"><b>${esc(d.title)}</b><i>${esc(d.tag)}</i></div><div class="place-blurb">${esc(d.blurb)}</div><div class="place-facts">${esc(facts)}</div><div class="row" style="margin-top:8px;align-items:center">${action}</div></div>`;
+    }).join('');
+    body.querySelectorAll<HTMLButtonElement>('[data-play]').forEach((b) => {
+      b.onclick = () => {
+        chooseDistrict(b.dataset.play!);
+        b.textContent = 'Chargement…';
+        location.reload();
+      };
+    });
+    body.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) => {
+      b.onclick = async () => {
+        const m = maps.find((x) => x.id === b.dataset.del);
+        if (m) await deleteMap(m);
+        have = await downloadedMaps(maps);
+        render();
+      };
+    });
+    body.querySelectorAll<HTMLButtonElement>('[data-dl]').forEach((b) => {
+      b.onclick = async () => {
+        const m = maps.find((x) => x.id === b.dataset.dl)!;
+        progress.set(m.id, 0);
+        render();
+        try {
+          await downloadMap(m, (done) => {
+            progress.set(m.id, done);
+            const bar = body.querySelector<HTMLElement>(`.mapcard2:nth-child(${DISTRICTS.findIndex((d) => d.id === m.id) + 1}) .dl-bar i`);
+            if (bar) bar.style.width = `${Math.round(done * 100)}%`;
+          });
+        } catch (e) {
+          toast(`Téléchargement impossible : ${e instanceof Error ? e.message : 'réseau'}`, true);
+        }
+        progress.delete(m.id);
+        have = await downloadedMaps(maps);
+        render();
+      };
+    });
+  };
+  render();
+}
+
 function showHome() {
   closeNotif();
   const h = $('home');
@@ -1166,7 +1255,7 @@ function showHome() {
         <button id="hm-howto" class="big">Mode d’emploi</button>
         ${canInstall() ? '<button id="hm-install" class="big install">📲 Installer l’application</button>' : ''}
       </div>
-      <div class="home-places"><small>Lieu de la partie</small>${DISTRICTS.map((d) => `<button type="button" class="place${d.id === districtId ? ' on' : ''}" data-place="${d.id}" ${d.id === districtId ? 'aria-current="true"' : ''}><span class="place-head"><b>${esc(d.title)}</b><i>${esc(d.tag)}</i></span><span class="place-blurb">${esc(d.blurb)}</span><span class="place-facts">${esc(d.facts)}${d.id === districtId ? ' · carte actuelle' : ' · charger cette carte'}</span></button>`).join('')}<span class="soon">D’autres villes et quartiers de France viendront.</span></div>
+      <div class="home-place"><div><small>Lieu de la partie</small><b>${esc(DISTRICTS.find((d) => d.id === districtId)?.title ?? district.name)}</b></div><button id="hm-maps" type="button">Choisir une carte</button></div>
       <div class="home-beta"><b>Version bêta</b> : le jeu évolue vite, des choses bougent ou cassent, et les prix, coûts et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.
         <div class="home-soon"><b>À venir</b><ul><li>Plus de lieux : d’autres villes et quartiers de France</li><li>Mode multijoueur : jouer contre vos amis, sans serveur</li><li>Programmes et dispositifs (TVA 5,5 %, ZAC propres à un territoire)</li><li>Une carte plus belle et plus lisible, puis une vue 3D</li></ul></div></div>
       <ul class="home-points">
@@ -1191,14 +1280,7 @@ function showHome() {
   h.querySelector<HTMLAnchorElement>('#hm-version')!.onclick = (e) => (e.preventDefault(), openVersion());
   const inst = q('hm-install');
   if (inst) inst.onclick = installApp;
-  h.querySelectorAll<HTMLButtonElement>('[data-place]').forEach((b) => {
-    b.onclick = () => {
-      if (b.dataset.place === districtId) return;
-      chooseDistrict(b.dataset.place!);
-      b.querySelector('.place-facts')!.textContent = 'Chargement de la carte…';
-      location.reload();
-    };
-  });
+  q('hm-maps')!.onclick = () => void openMaps();
   (cont ?? q('hm-new'))!.focus();
 }
 

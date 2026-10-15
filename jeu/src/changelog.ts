@@ -7,6 +7,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.12.0',
+    title: 'Page des cartes et six nouvelles villes',
+    notes: [
+      'Nouvelle page « Choisir une carte » : on télécharge une ville une fois (barre de progression), elle reste sur l’appareil et se joue ensuite même sans réseau ; on peut la supprimer pour libérer la place',
+      'Six villes à tester, de 1 900 à 11 800 €/m² : Paris 11e, Villeurbanne, Brie-Comte-Robert, Biarritz, Bourges (centre) et Murat (rural, presque sans ventes)',
+      'Les prix de chaque ville suivent ses ventes réelles : le niveau de prix du neuf se déduit de l’ancien (prime plus forte dans les villes bon marché), le foncier suit plus fort, les coûts de construction bien moins',
+      'La mise de départ a un plancher : dans une ville où les terrains valent presque rien, elle finance quand même un chantier',
+      'Correction : le jeu installable (hors ligne) fonctionne de nouveau après le chargement des cartes',
+    ],
+  },
+  {
     version: '0.11.1',
     title: 'Calculs plus rapides',
     notes: ['Le placement du bâtiment est réutilisé d’un niveau à l’autre : estimer un terrain, « Meilleur projet » et le tour des concurrents sont 2 à 4 fois plus rapides, avec exactement les mêmes résultats'],

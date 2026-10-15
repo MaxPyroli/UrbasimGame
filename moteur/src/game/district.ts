@@ -87,6 +87,8 @@ export interface District {
   radius: number;
   /** Marché de référence du bilan. */
   market: MarketId;
+  /** Ajustement des prix et coûts du marché de référence au niveau local (tiré des ventes réelles) ; facultatif. */
+  marketAdjust?: Partial<Market>;
   /** Ventes réelles de la commune (DVF) : mix de logements, prix par typologie (facultatif : sans, le marché de référence seul). */
   marketStats?: MarketStats;
   /** Répartition des logements du marché et prix relatifs, tirés des ventes réelles (facultatif). */
@@ -135,8 +137,8 @@ export function pointInRing(x: number, y: number, ring: [number, number][]): boo
 }
 
 /** Marché du quartier : marché de référence, complété par le mix et les prix par typologie des ventes réelles quand on les a. */
-export function marketOf(d: Pick<District, 'market' | 'demandMix' | 'typologyRatio'>): Market {
-  return { ...MARKETS[d.market], ...(d.demandMix ? { demandMix: d.demandMix } : {}), ...(d.typologyRatio ? { typologyRatio: d.typologyRatio } : {}) };
+export function marketOf(d: Pick<District, 'market' | 'demandMix' | 'typologyRatio' | 'marketAdjust'>): Market {
+  return { ...MARKETS[d.market], ...(d.marketAdjust ?? {}), ...(d.demandMix ? { demandMix: d.demandMix } : {}), ...(d.typologyRatio ? { typologyRatio: d.typologyRatio } : {}) };
 }
 
 export const MIN_PARCEL_AREA = 20;

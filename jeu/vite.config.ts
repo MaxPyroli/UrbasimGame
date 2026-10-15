@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { defineConfig, type Plugin } from 'vite';
 
 declare const process: { env: Record<string, string | undefined> };
@@ -17,12 +17,57 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 
 const DATA = new URL('../moteur/data/districts/', import.meta.url);
 
-/** Instantanés des cartes (moteur/data/districts) : servis en développement, copiés dans la construction (chargés à la demande par le jeu). */
+/** Fiche d'une carte (nom, nombre de parcelles, taille, prix de marché…) pour la page de téléchargement. */
+const entryCache = new Map<string, { stamp: string; entry: ReturnType<typeof mapEntry> }>();
+function mapEntry(file: string): { id: string; name: string; parcels: number; buildings: number; bytes: number; fetchedAt: string; marketName: string; pricePerM2?: number; sales?: number; zones: number } {
+  const stamp = (() => { const s = statSync(new URL(file, DATA)); return `${s.size}-${s.mtimeMs}`; })();
+  const hit = entryCache.get(file);
+  if (hit?.stamp === stamp) return hit.entry;
+  const entry = readEntry(file);
+  entryCache.set(file, { stamp, entry });
+  return entry;
+}
+function readEntry(file: string) {
+  const raw = readFileSync(new URL(file, DATA));
+  const d = JSON.parse(raw.toString('utf8')) as {
+    name: string; fetchedAt: string; parcels: unknown[]; buildings: unknown[]; zones?: unknown[];
+    market: string; marketAdjust?: { name?: string }; marketStats?: { pricePerM2: number; sales: number };
+  };
+  return {
+    id: file.replace(/\.json$/, ''),
+    name: d.name,
+    parcels: d.parcels.length,
+    buildings: d.buildings.length,
+    bytes: raw.length,
+    fetchedAt: d.fetchedAt,
+    marketName: d.marketAdjust?.name ?? d.market,
+    ...(d.marketStats ? { pricePerM2: d.marketStats.pricePerM2, sales: d.marketStats.sales } : {}),
+    zones: d.zones?.length ?? 0,
+  };
+}
+/** Cartes lisibles (un fichier en cours d'écriture est ignoré). */
+const mapIndex = () =>
+  readdirSync(DATA)
+    .filter((n) => n.endsWith('.json') && n !== 'index.json')
+    .flatMap((n) => {
+      try {
+        return [mapEntry(n)];
+      } catch {
+        return [];
+      }
+    });
+
+/** Instantanés des cartes (moteur/data/districts) : servis en développement, copiés dans la construction avec leur liste (téléchargés à la demande par le jeu). */
 const districts = (): Plugin => ({
   name: 'urbasim-districts',
   configureServer(server) {
     server.middlewares.use((req, res, next) => {
-      const m = /^\/data\/districts\/([a-z0-9-]+)\.json/.exec(req.url ?? '');
+      const url = (req.url ?? '').split('?')[0];
+      if (url === '/data/districts/index.json') {
+        res.setHeader('Content-Type', 'application/json');
+        return res.end(JSON.stringify(mapIndex()));
+      }
+      const m = /^\/data\/districts\/([a-z0-9-]+)\.json$/.exec(url);
       if (!m || !existsSync(new URL(`${m[1]}.json`, DATA))) return next();
       res.setHeader('Content-Type', 'application/json');
       res.end(readFileSync(new URL(`${m[1]}.json`, DATA)));
@@ -30,6 +75,7 @@ const districts = (): Plugin => ({
   },
   generateBundle() {
     for (const f of readdirSync(DATA).filter((n) => n.endsWith('.json'))) this.emitFile({ type: 'asset', fileName: `data/districts/${f}`, source: readFileSync(new URL(f, DATA)) });
+    this.emitFile({ type: 'asset', fileName: 'data/districts/index.json', source: JSON.stringify(mapIndex()) });
   },
 });
 

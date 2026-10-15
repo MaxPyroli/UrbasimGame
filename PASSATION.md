@@ -488,6 +488,24 @@ collectivité jouent le rôle des enchères du Monopoly.
   (comparaison projet par projet, test dans `tests/rear.test.ts`). Recalcul des prix de Sucy : 4 min 23 s → 1 min 35 s (cartes inchangées) ; partie simulée sur Sucy 51 s → 25 s (même issue,
   tour max 3,2 → 2,1 s). Restent : placement lui-même (`adaptedFootprint`, découpes de polygones), bâtiments supplémentaires, recherche des délaissés (~60 % du recalcul de Sucy).
 
+- Fait : **page des cartes (téléchargement) et villes de test** (version 0.12.0).
+  - **Cartes** (`moteur/data/districts`, une par ville) : montreuil-mairie, sucy-en-brie, **paris-11e** (4 485 parcelles, arrondissement via `--arr=111`, DVF 75111, marché `paris` ajusté 11 800 €/m²), **villeurbanne**
+    (10 006 ; 4 850), **brie-comte-robert** (5 559 ; 4 750), **biarritz** (9 200 ; 8 600), **bourges-centre** (secteur de 1 km autour de 2,3985 / 47,0825 : le service refuse la requête par commune ; 7 214 ; 2 550),
+    **murat** (secteur de 1,2 km ; 1 908 parcelles ; une seule vente d'appartement : teste le cas sans données, le marché reste proche de la référence). Fabrication : `npm run commune -- <id> "<nom>" <insee> <marché>
+    [--arr=] [--sector=lon,lat,rayon] [--tile=500] [--adjust]` puis `npm run reprice -- <id>` ; `npm run market -- <id> <insee> "<nom>" --adjust` recalcule statistiques et prix locaux d'une carte existante.
+    Poids : 0,4 à 12,6 Mo de JSON par carte (≈ 60 Mo en tout) ; recalcul de 1 à 3 minutes chacune. Cadastre : le service ne répond pas par code pour Noisy-le-Grand, Cergy, Bourges, Chamonix, Murat (secteur à la place).
+  - **Prix locaux** : `deriveMarketAdjust` (`app/dvf.ts`) adapte le marché de référence au niveau des ventes de la commune : prix du neuf = ancien × `newBuildPremium` (1,15 à 1,9 : plus forte en ville bon marché ; observé ×1,1 Montreuil,
+    ×1,3 Sucy) avec plancher `MIN_NEW_PRICE` (2 200 €/m²) ; peu de ventes → niveau tiré vers la référence ; foncier ×ratio^1,2, coûts de construction ×ratio^0,4 (0,6 à 1,25). `District.marketAdjust` ; `marketOf` l'applique.
+    Montreuil et Sucy n'ont pas d'ajustement (marchés réglés à la main). Mise de départ : plancher 15 × coûts fixes d'une opération (Bourges : 50 k€ → 600 k€).
+  - **Page de téléchargement** (`jeu/src/districts.ts`, `openMaps` dans `main.ts`) : catalogue `DISTRICTS` (texte) + liste générée à la construction (`data/districts/index.json` : parcelles, taille, prix médian, ventes, PLU ;
+    plugin Vite). Téléchargement en flux avec progression (taille connue de l'index), gardé dans le cache `urbasim-maps-v1` (clé versionnée par taille et date de la carte), lecture hors ligne ; supprimer/retélécharger ;
+    première ouverture d'une carte = téléchargement avec barre de progression sur l'écran de démarrage ; le service worker laisse passer `/data/districts/` et ne purge pas `urbasim-maps*`. La version autonome n'embarque que
+    Montreuil et Sucy (limite de 16 Mo) ; les autres sont signalées « voir le site publié ».
+  - **Corrections** : l'enregistrement du service worker attendait l'événement « load », qui arrive avant la fin du chargement de la carte (await de haut niveau) : le jeu installable ne l'était plus depuis 0.10 ; `mergeParcels` ne lève plus
+    d'exception sur un contour dégénéré (plantait la recherche des délaissés à Biarritz).
+  - Simulations (normal) : Paris 11e ×0,8 / ordinateurs ×0,6 à ×1,1 ; Villeurbanne ×0,8 / ×0,4 à ×2,0 ; Brie ×0,8 / ×1,0 à ×1,7 ; Biarritz ×0,8 / ×0,7 à ×2,6 ; Bourges ×0,9 / ×1,7 à ×2,1 ; Murat ×0,8 / ×1,1 à ×1,4 ;
+    aucune faillite. À surveiller : Bourges (ordinateurs très gagnants), Paris (très peu de terrains libres, 11 livrés).
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,
