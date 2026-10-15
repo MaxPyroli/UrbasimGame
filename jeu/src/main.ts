@@ -32,6 +32,8 @@ import {
   tenderWorth,
   programmeParams,
   LAUNCH_GRACE,
+  EQUIPMENT_BUILD_ROUNDS,
+  type Zac,
   MAX_SOCIAL_SHARE,
   type Quality,
   type Tender,
@@ -111,7 +113,7 @@ function load(): GameState | null {
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) {
       const s = JSON.parse(raw) as GameState;
-      if (s?.players?.some((p) => p.id === ME) && Array.isArray(s.plots) && typeof s.demandShock === 'number' && s.config?.salesDemand > 0 && s.plots.every((p) => Array.isArray(p.zones)) && Array.isArray(s.offers) && Array.isArray(s.tenders) && s.players.every((p) => typeof p.debt === 'number')) return s;
+      if (s?.players?.some((p) => p.id === ME) && Array.isArray(s.plots) && typeof s.demandShock === 'number' && s.config?.salesDemand > 0 && s.plots.every((p) => Array.isArray(p.zones)) && Array.isArray(s.offers) && Array.isArray(s.tenders) && Array.isArray(s.zacs) && s.players.every((p) => typeof p.debt === 'number')) return s;
     }
   } catch {
     /* sauvegarde absente ou illisible : nouvelle partie */
@@ -119,6 +121,12 @@ function load(): GameState | null {
   return null;
 }
 
+let pendingStart: GameEvent[] = [];
+function showStartPopups() {
+  const list = pendingStart;
+  pendingStart = [];
+  if (list.length) showPopups(list);
+}
 const saved = load();
 /** Vrai dès qu'une partie existe (sauvegardée ou lancée pendant cette session) : l'écran d'accueil propose alors de la reprendre. */
 let gameStarted = saved !== null;
@@ -200,16 +208,41 @@ function afterAdvance(message: string, before = state.log.length) {
   if (popups.length) showPopups(popups);
 }
 
+/** Les concurrents calculent leur tour (parfois plusieurs secondes la première fois) : on l'indique avant de bloquer la page. */
+function busy(work: () => void) {
+  const end = document.getElementById('end');
+  if (end) {
+    end.textContent = 'Les concurrents jouent…';
+    end.setAttribute('disabled', '');
+  }
+  document.body.classList.add('busy');
+  // Deux images pour que le navigateur affiche l'indication avant le calcul.
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      try {
+        work();
+      } finally {
+        document.body.classList.remove('busy');
+      }
+    }),
+  );
+}
+
 function endTurn() {
   if (state.over) return;
-  const before = state.log.length;
-  const { mine } = advanceOne();
-  afterAdvance(`${quarterLabel(state.round)}${mine.length ? ` — ${mine.length} nouvelle${mine.length > 1 ? 's' : ''} pour vous` : ''}`, before);
+  busy(() => {
+    const before = state.log.length;
+    const { mine } = advanceOne();
+    afterAdvance(`${quarterLabel(state.round)}${mine.length ? ` — ${mine.length} nouvelle${mine.length > 1 ? 's' : ''} pour vous` : ''}`, before);
+  });
 }
 
 /** Avance jusqu'à ce qu'il se passe quelque chose pour vous (étape d'une opération, aléa), au plus 8 trimestres. */
 function fastForward() {
   if (state.over) return;
+  busy(runFastForward);
+}
+function runFastForward() {
   const hasStake = state.projects.some((p) => p.owner === ME);
   const limit = hasStake ? 8 : 4;
   const before = state.log.length;
@@ -284,6 +317,7 @@ const affordable = (p: Plot) => buyCost(p) <= me().cash;
 
 function plotStyle(p: Plot): L.PathOptions {
   const sel = selected.has(p.id);
+  if (p.zacRole === 'equipement') return { color: sel ? '#000' : '#4a6f9c', weight: sel ? 3 : 1.5, fillColor: '#8fb2dc', fillOpacity: 0.4, dashArray: '2 3' };
   if (p.municipal && !p.owner) return { color: sel ? '#000' : '#0f8b8d', weight: sel ? 3 : 2.5, fillColor: '#7fd1d3', fillOpacity: 0.55, dashArray: '6 3' };
   const col = ownerColor(p);
   const ppm = p.askingPrice / Math.max(1, areaOf(p));
@@ -412,6 +446,47 @@ map.createPane('bati2');
 map.getPane('bati2')!.style.zIndex = '360';
 map.getPane('bati2')!.style.pointerEvents = 'none';
 const builtLayer = L.layerGroup().addTo(map);
+/** ZAC : périmètre en pointillés et pastilles des équipements publics (prévus, en travaux, livrés). */
+const zacLayer = L.layerGroup().addTo(map);
+const EQUIPMENT_STATUS = { prevu: 'prévu', chantier: 'en travaux', livre: 'livré' } as const;
+function hull(points: [number, number][]): [number, number][] {
+  const pts = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o: [number, number], a: [number, number], b: [number, number]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const build = (list: [number, number][]) => {
+    const h: [number, number][] = [];
+    for (const p of list) {
+      while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], p) <= 0) h.pop();
+      h.push(p);
+    }
+    h.pop();
+    return h;
+  };
+  return [...build(pts), ...build(pts.reverse())];
+}
+function drawZacs() {
+  zacLayer.clearLayers();
+  for (const z of state.zacs) {
+    const plots = [...z.lots, ...z.equipment.map((e) => e.plot)].map((id) => plotById(id)).filter((p): p is Plot => !!p);
+    // Un lot attribué puis assemblé change d'identifiant : on garde au moins ce qui reste visible.
+    const pts = plots.flatMap((p) => p.parcel.ring.map((q) => [q.lat, q.lon] as [number, number]));
+    if (pts.length >= 3) {
+      L.polygon(hull(pts), { interactive: false, color: '#0f8b8d', weight: 2, dashArray: '10 6', fillColor: '#0f8b8d', fillOpacity: 0.05, lineJoin: 'round' })
+        .bindTooltip(`ZAC ${esc(z.name)} · ${z.launched}/${z.lots.length} lots lancés`, { sticky: true })
+        .addTo(zacLayer);
+    }
+    for (const e of z.equipment) {
+      const p = plotById(e.plot);
+      if (!p) continue;
+      const lat = p.parcel.ring.reduce((t, q) => t + q.lat, 0) / p.parcel.ring.length;
+      const lon = p.parcel.ring.reduce((t, q) => t + q.lon, 0) / p.parcel.ring.length;
+      const icon = poiIcon(e.kind === 'creche' ? 'ecole' : e.kind, true);
+      icon.options.className = `poi zac-eq ${e.status}`;
+      L.marker([lat, lon], { icon, keyboard: false, zIndexOffset: 700 })
+        .bindTooltip(`${esc(e.label)} de la ZAC ${esc(z.name)} · ${EQUIPMENT_STATUS[e.status]}${e.status === 'chantier' && e.deliverAt !== undefined ? ` (livraison dans ${Math.max(0, e.deliverAt - state.round)} trim.)` : ''}`, { direction: 'top', offset: [0, -10] })
+        .addTo(zacLayer);
+    }
+  }
+}
 /** Rendu SVG des bâtiments des promoteurs : on y glisse des motifs de hachures (un par couleur de promoteur). */
 const builtRenderer = L.svg({ pane: 'bati2' });
 builtRenderer.addTo(map);
@@ -605,6 +680,7 @@ function buildingNote(p: Plot): string {
 function drawPlots() {
   computeRange();
   drawBuildings();
+  drawZacs();
   const ids = new Set(state.plots.map((p) => p.id));
   for (const [id, layer] of layers) if (!ids.has(id)) (layer.remove(), layers.delete(id));
   for (const p of state.plots) {
@@ -721,7 +797,10 @@ function openIdentity(mode: 'new' | 'edit') {
         closeModal();
         hideHome();
         renderAll();
+        // Annonces du départ (ouverture d'une ZAC…) : montrées après le mode d'emploi la première fois.
+        pendingStart = state.log.filter((e) => e.popup && isRelevant(e, ME) && (e.player === ME || !e.player));
         if (!localStorage_get(TUTO_KEY)) openTutorial();
+        else showStartPopups();
       };
       q('co-go').onclick = go;
       name.onkeydown = (e) => e.key === 'Enter' && go();
@@ -751,6 +830,7 @@ const TUTORIAL: { title: string; body: string }[] = [
     body: `<p>Cliquez sur une parcelle : vous voyez son <b>prix</b>, sa <b>zone</b> d’urbanisme et le bâti existant (à démolir avant de construire). On n’achète pas au prix affiché : on <b>fait une offre</b>.</p>
       <p><b>Terrains en vente</b> (contour doré, onglet « Marché ») : les offres restent ouvertes deux trimestres, sous pli fermé. <b>Le plus offrant l’emporte</b> et les autres sont remboursés.</p>
       <p><b>Autres terrains</b> : vous pouvez prospecter le propriétaire. Il répond à la fin du trimestre, n’accepte que s’il est satisfait du prix, et les frais de prospection sont perdus. Si deux promoteurs se positionnent, le plus offrant gagne.</p>
+      <p>Sélectionnez plusieurs terrains pour déposer <b>des offres groupées</b>. Méfiez-vous des terrains dont le <b>prix grimpe</b> plus vite que le marché : leur propriétaire <b>spécule</b>, ne les mettra pas en vente et refusera une offre ordinaire.</p>
       <p class="muted">Votre offre bloque l’argent (prix et frais de notaire) jusqu’au verdict. Les concurrents enchérissent aussi.</p>`,
   },
   {
@@ -758,6 +838,7 @@ const TUTORIAL: { title: string; body: string }[] = [
     body: `<p>La commune garde quelques terrains (en <b>turquoise</b> sur la carte) et les cède par <b>appel d’offres</b>, dans l’onglet <b>Commune</b>. Elle choisit le <b>meilleur projet</b>, pas le plus offrant.</p>
       <p>Chaque appel annonce un <b>cahier des charges</b> (logements sociaux, hauteur, commerces, qualité, délai) et la <b>pondération</b> des critères : à vous de doser prix, mixité sociale, qualité et délai. Votre note s’affiche en direct.</p>
       <p>En échange, le <b>cadre de l’opération</b> apporte des avantages : en <b>ZAC</b>, terrain à prix réduit, pas de taxe d’aménagement et un étage de plus ; en <b>PUP</b>, permis instruit en 3 mois et taxe réduite ; en <b>quartier prioritaire</b>, TVA à 5,5 % donc des logements plus chers.</p>
+      <p>Certains terrains forment une <b>ZAC</b> : un quartier de plusieurs lots, attribués l’un après l’autre, avec des <b>équipements publics</b> (école, square) financés par une participation au m² de plancher. Livrés, ils font monter le prix des logements de la ZAC : les premiers lancent, les suivants en profitent.</p>
       <p class="muted">Vos engagements sont contractuels : lancez à temps (sinon la commune reprend le terrain et garde 10 %) et livrez dans le délai promis (sinon pénalités).</p>`,
   },
   {
@@ -769,12 +850,14 @@ const TUTORIAL: { title: string; body: string }[] = [
   {
     title: 'Assembler des parcelles',
     body: `<p>Les parcelles <b>violettes en pointillés</b> sont trop petites ou enclavées pour être construites seules. Achetez-en plusieurs <b>qui se touchent</b>, sélectionnez-les avec <b>Maj+clic</b> (ou « sélection multiple »), puis cliquez sur <b>Assembler</b>.</p>
-      <p>Le panneau vous dit en direct si l’assemblage est possible et, sinon, pourquoi. Un grand terrain permet un immeuble plus gros, donc de meilleures marges.</p>`,
+      <p>Le panneau vous dit en direct si l’assemblage est possible et, sinon, pourquoi. <b>Avant d’acheter</b>, la fiche simule le projet de l’ensemble (marge, fonds propres) sans rien engager. Un grand terrain permet un immeuble plus gros, donc de meilleures marges.</p>
+      <p class="muted">Les parcelles grisées sont des <b>délaissés</b> : même assemblées, elles n’apportent presque rien.</p>`,
   },
   {
     title: 'Lancer un projet',
     body: `<p>Choisissez le nombre de niveaux ; <b>« Meilleur projet »</b> teste les options autorisées et prend la plus rentable. Trois chiffres comptent :</p>
       <ul><li><b>Marge</b> : ce que vous gagnez une fois tout vendu.</li><li><b>Fonds propres</b> : l’argent à sortir de votre poche.</li><li><b>Durée</b> en trimestres.</li></ul>
+      <p>Dans « Options », choisissez l’<b>implantation</b> : le long de la rue ou en retrait au fond du terrain (en centre-ville dense, le PLU impose l’alignement sur la rue), et la forme du bâtiment. Sous le nom du terrain, les <b>règles applicables</b> et le <b>meilleur projet</b> sont résumés d’un coup d’œil.</p>
       <p class="muted">Petit projet = frais fixes (études, permis, raccordements, chantier) qui pèsent lourd : mieux vaut assembler.</p>`,
   },
   {
@@ -825,6 +908,7 @@ function openTutorial(step = 0) {
           /* stockage indisponible : le mode d'emploi se proposera de nouveau */
         }
         closeModal();
+        showStartPopups();
       };
       root.querySelector<HTMLButtonElement>('#tu-skip')!.onclick = done;
       root.querySelector<HTMLButtonElement>('#tu-next')!.onclick = () => (step === last ? done() : openTutorial(step + 1));
@@ -1256,6 +1340,8 @@ function statusPill(p: Plot): string {
   if (p.projectId) return pill('opération en cours', colorOf(p.owner ?? ''));
   if (p.owner === ME) return pill(p.obligation ? 'à vous · engagements' : 'à vous', colorOf(ME));
   if (p.owner) return pill(esc(state.players.find((x) => x.id === p.owner)!.name), colorOf(p.owner));
+  if (p.zacRole === 'equipement') return pill('équipement public', '#4a6f9c');
+  if (p.zacRole === 'lot' && p.municipal) return pill('lot de ZAC', '#0f8b8d');
   if (p.municipal) return pill('terrain communal', '#0f8b8d');
   if (p.issue === 'zone') return pill('inconstructible', '#777');
   if (p.issue === 'delaisse') return pill('délaissé', '#8a8478');
@@ -1282,6 +1368,18 @@ function renderSingle(p: Plot): string {
   if (run) {
     drawOverlay(null);
     return html + `<h2>Opération ${esc(run.id)}</h2>` + operationCard(run.id) + details(p);
+  }
+  if (p.zacRole === 'equipement') {
+    drawOverlay(null);
+    const z = state.zacs.find((x) => x.id === p.zacId);
+    const e = z?.equipment.find((x) => x.plot === p.id);
+    if (z && e) {
+      const left = e.deliverAt !== undefined ? Math.max(0, e.deliverAt - state.round) : null;
+      return html + `<div class="notice" style="--nc:#4a6f9c"><b>${esc(e.label[0].toUpperCase() + e.label.slice(1))}</b> de la ZAC ${esc(z.name)} · <b>${EQUIPMENT_STATUS[e.status]}</b>
+        <div class="muted" style="font-size:12px;margin-top:4px">Terrain public : il ne se vend pas. L’équipement est financé par les participations des lots de la ZAC (${z.participation} € par m² de plancher) et démarre quand assez de lots sont lancés. Une fois livré, les logements de la ZAC se vendent <b>${Math.round(e.premium * 100)} % plus cher</b>.</div>
+        ${e.status === 'chantier' && left !== null ? pbar(EQUIPMENT_BUILD_ROUNDS - left, EQUIPMENT_BUILD_ROUNDS, `livraison dans ${left} trim.`) : ''}
+        ${e.status === 'prevu' ? pbar(z.launched, z.lots.length, `${z.launched}/${z.lots.length} lots lancés`) : ''}</div>` + details(p);
+    }
   }
   if (p.municipal && !p.owner) {
     drawOverlay(null);
@@ -1462,6 +1560,8 @@ const ALERT_INFO: Record<string, { icon: string; title: string; why: string; tip
   fouilles: { icon: '🏺', title: 'Fouilles archéologiques', why: 'Le sous-sol contient des vestiges : le chantier s’arrête le temps des fouilles préventives.', tip: 'Deux trimestres de retard. Un projet sans sous-sol n’est pas concerné.' },
   'taux-hausse': { icon: '🏦', title: 'Les taux montent', why: 'Le crédit promoteur coûte plus cher : vos opérations non vendues et votre découvert vous coûtent davantage.', tip: 'Vendez vite les lots en cours, et évitez de lancer sans fonds propres suffisants.' },
   'taux-baisse': { icon: '🏦', title: 'Les taux baissent', why: 'Le crédit promoteur devient moins cher : les opérations en cours coûtent moins en intérêts.' },
+  'zac-ouverte': { icon: '🏙️', title: 'Une ZAC démarre', why: 'La commune aménage un quartier : plusieurs lots seront attribués l’un après l’autre, et des équipements publics (école, square…) seront construits grâce aux participations des promoteurs.', tip: 'Les lots d’une ZAC sont vendus à prix réduit, avec un étage de plus que le PLU. Les premiers lancés financent les équipements dont profiteront les derniers.' },
+  'zac-equipement': { icon: '🏫', title: 'Équipement public livré', why: 'Un équipement de la ZAC est livré : le quartier devient plus attractif, les logements de la ZAC se vendent plus cher.', tip: 'Si vous avez des lots invendus dans la ZAC, c’est le moment de remonter vos prix.' },
   'ao-gagne': { icon: '🏆', title: 'Appel d’offres remporté', why: 'La commune vous cède le terrain : vos engagements (logements sociaux, qualité, délai) sont désormais contractuels.', tip: 'Lancez l’opération avant l’échéance, sinon la commune reprend le terrain et garde 10 % du prix.' },
   'ao-perdu': { icon: '📋', title: 'Appel d’offres perdu', why: 'Un autre promoteur a obtenu une meilleure note. Votre somme bloquée vous est rendue.', tip: 'Regardez la pondération annoncée : un critère lourd (mixité, délai…) peut valoir plus qu’un meilleur prix.' },
   'ao-reprise': { icon: '⏰', title: 'Terrain repris par la commune', why: 'Vous n’avez pas lancé l’opération dans le délai accordé : la commune reprend son terrain et garde une pénalité.' },
@@ -1586,6 +1686,32 @@ function tenderCard(t: Tender): string {
 }
 
 /** Onglet « Commune » : appels d'offres ouverts, mes engagements, résultats passés. */
+/** Fiche d'une ZAC : lots (à venir, ouverts, attribués, lancés), équipements publics et leur avancement. */
+function zacCard(z: Zac): string {
+  const lotRow = (id: string, k: number) => {
+    const p = plotById(id);
+    const tender = openTenders(state).find((t) => t.plotId === id);
+    let status: string;
+    if (!p) status = 'attribué, assemblé';
+    else if (tender) status = `<b>appel d’offres ${esc(tender.id)} ouvert</b> · réponse avant la fin de ${quarterLabel(tender.closesAt - 1)}`;
+    else if (p.projectId) status = `opération lancée par ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}`;
+    else if (p.owner) status = `attribué à ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}${p.obligation ? ', à lancer' : ', livré'}`;
+    else status = k < z.opened ? 'à relancer' : 'à venir';
+    return `<li>${p ? `<a href="#" data-goto="${esc(id)}">Lot ${k + 1}</a>` : `Lot ${k + 1}`} <span class="muted">${p ? Math.round(areaOf(p)) + ' m² · ' : ''}${status}</span></li>`;
+  };
+  const eqRow = (e: Zac['equipment'][number]) => {
+    const left = e.deliverAt !== undefined ? Math.max(0, e.deliverAt - state.round) : null;
+    return `<li><a href="#" data-goto="${esc(e.plot)}">${esc(e.label[0].toUpperCase() + e.label.slice(1))}</a> <span class="pill" style="--pc:${e.status === 'livre' ? 'var(--good)' : e.status === 'chantier' ? 'var(--warn)' : '#8a8478'}">${EQUIPMENT_STATUS[e.status]}</span> <span class="muted">+${Math.round(e.premium * 100)} % sur les ventes${e.status === 'chantier' && left !== null ? ` · livraison dans ${left} trim.` : ''}</span>${e.status === 'chantier' && left !== null ? pbar(EQUIPMENT_BUILD_ROUNDS - left, EQUIPMENT_BUILD_ROUNDS, `${EQUIPMENT_BUILD_ROUNDS - left}/${EQUIPMENT_BUILD_ROUNDS} trim.`) : ''}</li>`;
+  };
+  const delivered = z.equipment.filter((e) => e.status === 'livre').reduce((t, e) => t + e.premium, 0);
+  return `<div class="card zac"><div><b>ZAC ${esc(z.name)}</b> ${pill(`${z.lots.length} lots`, '#0f8b8d')}</div>
+    <div class="muted" style="font-size:12px;margin:4px 0">Quartier aménagé par la commune : les lots sont attribués l’un après l’autre. Chaque lot lancé verse <b>${z.participation} € par m² de plancher</b> pour financer les équipements publics ; une fois livrés, ils valorisent les logements de la ZAC${delivered ? ` (déjà +${Math.round(delivered * 100)} %)` : ''}.</div>
+    ${pbar(z.launched, z.lots.length, `${z.launched}/${z.lots.length} lots lancés`)}
+    <ul class="zaclist">${z.lots.map(lotRow).join('')}</ul>
+    <div style="font-size:12px;margin-top:6px"><b>Équipements publics</b></div>
+    <ul class="zaclist">${z.equipment.map(eqRow).join('')}</ul></div>`;
+}
+
 function renderCommune(): string {
   drawOverlay(null);
   const open = openTenders(state);
@@ -1597,7 +1723,7 @@ function renderCommune(): string {
     const who = t.status === 'awarded' ? `attribué à <b>${esc(state.players.find((x) => x.id === t.winner)?.name ?? '?')}</b>` : 'infructueux';
     return `<li>${esc(t.id)} · ${esc(p ? shortLabel(p).replace(/ · \d+ m²$/, '') : t.plotId)} <span class="muted">${esc(t.spec.programme.label)}</span> : ${who}</li>`;
   };
-  return `<h2>Appels d’offres de la commune (${open.length})</h2>
+  return `${state.zacs.length ? `<h2>ZAC (${state.zacs.length})</h2>${state.zacs.map(zacCard).join('')}` : ''}<h2>Appels d’offres de la commune (${open.length})</h2>
     <p class="muted" style="font-size:12px">La commune cède ses terrains au <b>meilleur projet</b>, pas au plus offrant : chaque proposition (prix, logements sociaux, qualité, délai) est notée selon des critères annoncés. En échange du cahier des charges, le cadre de l’opération (ZAC, PUP, quartier prioritaire) apporte des avantages.</p>
     ${open.map(tenderCard).join('') || '<p class="muted">Aucun appel d’offres ouvert pour le moment : la commune en lance régulièrement.</p>'}
     ${committed ? `<p class="muted" style="font-size:12px">${eur(committed)} sont bloqués sur votre trésorerie tant que les appels d’offres sont ouverts.</p>` : ''}
@@ -1739,6 +1865,7 @@ function bestBrief(p: Plot, owned: boolean): BestPlan | null {
 
 /** Résumé de lecture immédiate d'un terrain : règles, meilleur projet, prix par rapport au quartier. */
 function plotBrief(p: Plot, owned: boolean): string {
+  if (p.zacRole === 'equipement') return '';
   const rule = ruleOf(p);
   const area = areaOf(p);
   const chip = (t: string, cls = '') => `<span class="chip ${cls}">${t}</span>`;

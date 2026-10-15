@@ -1,4 +1,5 @@
 import type { GameState, ProjectPhase, ProjectRun } from './types';
+import { zacPremium } from './zac';
 
 /** Poids d'un programme auprès des acheteurs selon son avancement : sur plan, on hésite ; un immeuble livré rassure. */
 export const STAGE_WEIGHT: Record<ProjectPhase, number> = { permis: 0.5, preventes: 0.8, chantier: 1, livraison: 1.25 };
@@ -21,7 +22,7 @@ export const lotsLeft = (p: ProjectRun) => p.lots - p.lotsSold;
 /** Prix d'un lot aujourd'hui : prix du lancement, suivi du marché, ajusté par la politique de prix de l'opération. */
 export function lotPrice(s: GameState, p: ProjectRun): number {
   // Les logements sociaux sont déjà cédés ; le prix des autres lots est le prix du marché.
-  return ((p.bilan.revenue.total - p.socialRevenue) / Math.max(1, p.lots - p.socialLots)) * (s.marketIndex / p.marketIndexAtLaunch) * (1 + p.pricePolicy);
+  return ((p.bilan.revenue.total - p.socialRevenue) / Math.max(1, p.lots - p.socialLots)) * (s.marketIndex / p.marketIndexAtLaunch) * (1 + p.pricePolicy) * (1 + zacPremium(s, p.terms?.zacId));
 }
 
 /** Part des lots vendus. */

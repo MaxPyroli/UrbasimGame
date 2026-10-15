@@ -21,6 +21,7 @@ const BASE: Partial<GameConfig> = {
   tenderRounds: 3,
   tenderEvery: 3,
   speculatorShare: 0.15,
+  zacs: 1,
 };
 
 export const DIFFICULTIES: Record<Difficulty, DifficultyPreset> = {

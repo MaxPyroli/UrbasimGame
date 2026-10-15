@@ -356,6 +356,32 @@ collectivité jouent le rôle des enchères du Monopoly.
   L'instantané se recalcule sans réseau par `npm run reprice -- montreuil-mairie` (environ 6 minutes) ; à relancer quand les
   règles ou la géométrie changent.
 
+- Fait (notes « finitions », suite) :
+  - **Implantation au choix** : formulaire de projet avec « Implantation » (automatique, le long de la rue, en retrait au fond du
+    terrain) et « Forme » (adaptée ou rectangle) ; le moteur savait déjà les calculer. Règle de PLU associée : `ZoneRule.alignment`
+    (`'rue'` = alignement obligatoire sur la rue, pour la centralité et tout tissu dense ; `'libre'` ailleurs) ; `applyRule` impose
+    alors `placement: 'rue'`.
+  - **Carte agrandie** (bouton ⤢ sous le zoom) : le panneau latéral se masque, une fiche flottante résume le terrain choisi.
+  - **Animations** : entrée des panneaux et fenêtres, barres qui se remplissent, montants de la barre du haut qui défilent avec
+    un éclair vert/rouge, pulsation du trimestre, hachures des chantiers qui respirent ; tout est désactivé si le système demande
+    moins de mouvement.
+  - **Simuler un projet sur plusieurs parcelles** : en sélectionnant plusieurs parcelles (même non achetées), la fiche affiche le
+    bilan du terrain assemblé (`virtualPlot`) avec « Meilleur projet » et l'emprise sur la carte, sans rien acheter.
+  - **Prospection groupée** : bouton « Déposer N offres » sur une sélection de terrains libres. **Spéculateurs**
+    (`Plot.speculator`, `speculatorShare` = 15 % en campagne) : prix affiché en hausse de 2,5 % par trimestre (jusqu'à +80 %), jamais
+    mis en vente, seuil de réserve ×1,2 ; la hausse est visible (infobulle, fiche), les bots les ignorent.
+  - **Résumé de lecture d'un terrain** (`plotBrief`) : règles applicables en puces, meilleur projet (niveaux, logements, marge, prix
+    de terrain max) et position du prix par rapport à la médiane des terrains libres, sans rien déplier.
+  - **ZAC développées** (`moteur/src/game/zac.ts`, `Zac`, `GameState.zacs`, `config.zacs` = 1 en campagne) : un quartier de 4 lots
+    voisins attribués l'un après l'autre (phasage, un appel d'offres de ZAC à la fois) et d'équipements publics (groupe scolaire,
+    square, crèche) sur des terrains voisins, de préférence les petits bouts inutilisables. Chaque lot lancé verse une participation
+    de 60 €/m² de plancher (au lieu de la taxe d'aménagement) ; les équipements démarrent quand assez de lots sont lancés, se livrent
+    4 trimestres plus tard, et chaque équipement livré augmente de 2 à 4 % le prix de vente des logements de la ZAC (`zacPremium`
+    dans `lotPrice`). Interface : périmètre en pointillés et pastilles d'équipements sur la carte (prévu / en travaux / livré), fiche
+    de ZAC dans l'onglet Commune (lots, équipements, avancement), fiche d'équipement, suivi dans les notifications, fenêtres d'alerte.
+    Les sauvegardes d'avant les ZAC ne se rechargent pas.
+  - Équilibrage à revérifier après ces changements de règles (voir la simulation ci-dessous si présente).
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,

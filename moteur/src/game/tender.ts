@@ -165,13 +165,18 @@ function draw(s: GameState, n: number): [number, GameState] {
 }
 
 /** Ouvre un appel d'offres sur un terrain communal libre, avec un cahier des charges tiré au hasard (dans l'état : rejouable). */
-export function openTender(state: GameState, worth: (s: GameState, plot: Plot, spec: TenderSpec) => number): GameState {
+export function openTender(
+  state: GameState,
+  worth: (s: GameState, plot: Plot, spec: TenderSpec) => number,
+  /** Lot de ZAC : terrain et cadre d'opération imposés par la ZAC. */
+  lot?: { plotId: string; programme: Programme; zacId: string },
+): GameState {
   let s = state;
   const busy = new Set(openTenders(s).map((t) => t.plotId));
-  const pool = s.plots.filter((p) => p.municipal && p.owner === null && !busy.has(p.id));
+  const pool = lot ? s.plots.filter((p) => p.id === lot.plotId) : s.plots.filter((p) => p.municipal && p.owner === null && !busy.has(p.id) && !p.zacId);
   if (!pool.length) return s;
-  let i: number;
-  [i, s] = draw(s, pool.length);
+  let i = 0;
+  if (!lot) [i, s] = draw(s, pool.length);
   const plot = pool[i];
   const rule = plot.zones.length ? adaptToDensity(combineRules(plot.zones), plot.density) : null;
   let preset: number;
@@ -188,13 +193,14 @@ export function openTender(state: GameState, worth: (s: GameState, plot: Plot, s
   [quality, s] = draw(s, 10);
   [late, s] = draw(s, 3);
   [kind, s] = draw(s, PROGRAMME_KINDS.length);
-  const programme = PROGRAMMES[PROGRAMME_KINDS[kind]];
+  const programme = lot?.programme ?? PROGRAMMES[PROGRAMME_KINDS[kind]];
   const cap = rule ? rule.maxLevels : 6;
   const spec: TenderSpec = {
     minSocialShare: [0.2, 0.25, 0.3, 0.35][social],
     groundCommerce: commerce === 1,
     maxLevels: Math.max(1, Math.min(cap, 3 + lv) + programme.bonusLevels),
     programme,
+    ...(lot ? { zacId: lot.zacId } : {}),
     minQuality: quality >= 7 ? 1 : 0,
     minDelivery: 5,
     maxDelivery: 7 + late,
@@ -206,7 +212,7 @@ export function openTender(state: GameState, worth: (s: GameState, plot: Plot, s
   const id = `AO${s.nextTenderId}`;
   const tender: Tender = { id, plotId: plot.id, opensAt: s.round, closesAt: s.round + s.config.tenderRounds, spec, bids: [], status: 'open' };
   s = { ...s, tenders: [...s.tenders, tender], nextTenderId: s.nextTenderId + 1 };
-  return withEvent(s, { kind: 'commune', tone: 'info', code: 'ao-ouvert', ref: { tender: id, plot: plot.id }, text: `La commune lance l’appel d’offres ${id} sur ${plot.label ? plot.label.replace(' · Montreuil', '') : plot.id} : ${programme.label} ; ${Math.round(spec.minSocialShare * 100)} % de logements sociaux au moins, R+${spec.maxLevels} maximum, réponse avant le trimestre ${tender.closesAt + 1}` });
+  return withEvent(s, { kind: 'commune', tone: 'info', code: 'ao-ouvert', ref: { tender: id, plot: plot.id }, text: `La commune lance l’appel d’offres ${id} sur ${plot.label ? plot.label.replace(' · Montreuil', '') : plot.id} : ${lot ? `lot de la ${s.zacs.find((z) => z.id === lot.zacId)?.name ?? 'ZAC'}` : programme.label} ; ${Math.round(spec.minSocialShare * 100)} % de logements sociaux au moins, R+${spec.maxLevels} maximum, réponse avant le trimestre ${tender.closesAt + 1}` });
 }
 
 /** Clôt les appels d'offres échus : la meilleure note l'emporte, les autres sont remboursés. */
@@ -231,6 +237,7 @@ export function resolveTenders(state: GameState): GameState {
     const terms: TenderTerms = {
       tenderId: t.id,
       programme: t.spec.programme,
+      ...(t.spec.zacId ? { zacId: t.spec.zacId } : {}),
       socialShare: win.b.socialShare,
       quality: win.b.quality,
       delivery: win.b.delivery,

@@ -18,6 +18,7 @@ import { charge, credit, eur, hashFrac, mapPlayer, mapPlot, mapProject, withEven
 import { committedCash, dropOffers, listPlots, listingCount, placeOffer, resolveMarket, withdrawOffer } from './market';
 import { dropTenderBids, committedTenderCash, enforceObligations, openTender, pickMunicipalIds, programmeParams, placeTenderBid, resolveTenders, shouldOpenTender, withdrawTenderBid } from './tender';
 import { SOCIAL_PRICE_RATIO } from '../engine';
+import { advanceZacs, openZacLots, planZacs, zacOnLaunch } from './zac';
 import { nextGaussian, nextRandom } from './rng';
 import { expectedSales, lotPrice, lotsLeft, soldShare } from './sales';
 import type { Action, ActionResult, BotProfileName, GameConfig, Density, GameState, Plot, PlotIssue, Quality, TenderSpec, ProjectPhase, ProjectRun, ZoneFamily } from './types';
@@ -46,6 +47,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   prospectFeeMin: 3000,
   reserveSpread: 0.2,
   speculatorShare: 0,
+  zacs: 0,
   structureCostRate: 0,
   structureCost: 0,
   debtSpread: 0.03,
@@ -246,9 +248,11 @@ export function createGame(g: NewGame): GameState {
       projectId: null,
     };
   });
+  // Les ZAC : lots groupés et équipements publics, choisis avant les terrains communaux isolés.
+  const zacs = config.communeTenders && config.zacs > 0 ? planZacs(plots, config.zacs) : [];
   // La commune garde quelques terrains pour ses appels d'offres.
   if (config.communeTenders) {
-    const ids = new Set(pickMunicipalIds(plots, config.municipalPlots));
+    const ids = new Set(pickMunicipalIds(plots.filter((p) => !p.zacId), config.municipalPlots));
     for (const p of plots) if (ids.has(p.id)) p.municipal = true;
   }
   // Quelques propriétaires spéculent : ils retiennent leur terrain et en font monter le prix.
@@ -270,6 +274,7 @@ export function createGame(g: NewGame): GameState {
     offers: [],
     tenders: [],
     nextTenderId: 1,
+    zacs,
     marketIndex: 1,
     demandShock: 0,
     landHeat: 1,
@@ -280,7 +285,8 @@ export function createGame(g: NewGame): GameState {
   });
   // Mode enchères : le marché ouvre avec des terrains déjà mis en vente.
   const listed = config.landMarket === 'auction' ? listPlots(created, listingCount(created)) : created;
-  return config.communeTenders ? openTender(listed, tenderLandValue) : listed;
+  const withZac = config.communeTenders ? openZacLots(listed, tenderLandValue) : listed;
+  return config.communeTenders ? openTender(withZac, tenderLandValue) : withZac;
 }
 
 /** Prix affiché des terrains : prix de référence × indice de marché × demande. */
@@ -486,6 +492,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
   let s = mapPlayer(state, player.id, (p) => ({ ...p, cash: p.cash - equityBuild }));
   s = mapPlot(s, plot.id, (p) => ({ ...p, projectId: run.id }));
   s = { ...s, projects: [...s.projects, run], nextProjectId: s.nextProjectId + 1 };
+  if (terms?.zacId) s = zacOnLaunch(s, terms.zacId, run.sdp);
   const total = run.permitRounds + run.buildRounds + run.sellRounds;
   return {
     ok: true,
@@ -711,6 +718,8 @@ export function advanceRound(state: GameState): GameState {
   if (config.communeTenders) {
     s = resolveTenders(s);
     s = enforceObligations(s);
+    s = openZacLots(s, tenderLandValue);
+    s = advanceZacs(s);
     if (shouldOpenTender(s)) s = openTender(s, tenderLandValue);
   }
 

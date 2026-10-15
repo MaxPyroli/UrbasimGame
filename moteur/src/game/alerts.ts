@@ -107,6 +107,22 @@ export function watchList(state: GameState, playerId: PlayerId): Watch[] {
     });
   }
 
+  // ZAC en cours : lots lancés et équipements en chantier.
+  for (const z of state.zacs) {
+    const pending = z.equipment.filter((e) => e.status !== 'livre');
+    if (z.launched >= z.lots.length && pending.length === 0) continue;
+    const building = pending.filter((e) => e.status === 'chantier' && e.deliverAt !== undefined);
+    const soonest = building.length ? Math.min(...building.map((e) => e.deliverAt!)) - state.round : null;
+    out.push({
+      id: `zac:${z.id}`,
+      tone: 'info',
+      title: `ZAC ${z.name}`,
+      detail: `${z.launched}/${z.lots.length} lots lancés${pending.length ? `, ${pending.length} équipement${pending.length > 1 ? 's' : ''} à livrer (${pending.map((e) => e.label).join(', ')})` : ''}${soonest !== null ? ` : prochaine livraison dans ${plural(Math.max(0, soonest), 'trimestre', 'trimestres')}` : ''}.`,
+      progress: { value: z.launched, max: z.lots.length, label: `${z.launched}/${z.lots.length} lots lancés` },
+      ref: { plot: z.lots[0] },
+    });
+  }
+
   // Offres sur des terrains en vente.
   for (const o of state.offers) {
     if (o.player !== playerId) continue;

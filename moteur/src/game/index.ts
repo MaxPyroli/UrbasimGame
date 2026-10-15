@@ -13,3 +13,4 @@ export * from './market';
 export * from './rules';
 export * from './tender';
 export * from './alerts';
+export * from './zac';

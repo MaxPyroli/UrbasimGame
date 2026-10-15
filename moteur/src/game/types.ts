@@ -49,6 +49,8 @@ export interface GameConfig {
   reserveSpread: number;
   /** Part des terrains dont le propriétaire spécule : prix affiché en hausse chaque trimestre, jamais mis en vente, exigeant en prospection. */
   speculatorShare: number;
+  /** Nombre de ZAC (quartiers aménagés par la commune, plusieurs lots et équipements publics). */
+  zacs: number;
   /** Frais de structure de la société par trimestre, en part de la trésorerie de départ (équipe, loyers) : 0 = aucun. */
   structureCostRate: number;
   /** Frais de structure par trimestre en euros (calculé à la création de la partie). */
@@ -116,6 +118,9 @@ export interface Plot {
   density?: Density;
   /** Terrain de la commune : il ne se vend que par appel d'offres (ni enchères ni prospection). */
   municipal?: boolean;
+  /** ZAC à laquelle appartient le terrain, et son rôle : lot à attribuer ou emplacement d'un équipement public. */
+  zacId?: string;
+  zacRole?: 'lot' | 'equipement';
   /** Engagements pris auprès de la commune en remportant un appel d'offres. */
   obligation?: TenderTerms;
   /** Terrain mis en vente : ouvert aux offres jusqu'à ce tour (non compris), prix minimum figé à la mise en vente. */
@@ -256,6 +261,40 @@ export interface Programme {
   salesPremium: number;
 }
 
+/** Équipement public d'une ZAC : financé par les participations des lots, livré quelques trimestres après son lancement. */
+export interface ZacEquipment {
+  kind: 'ecole' | 'parc' | 'creche';
+  label: string;
+  /** Terrain public qui l'accueille. */
+  plot: PlotId;
+  /** Coût de l'équipement (financé par la commune et les participations des lots). */
+  cost: number;
+  /** Hausse des prix de vente des logements de la ZAC une fois l'équipement livré. */
+  premium: number;
+  status: 'prevu' | 'chantier' | 'livre';
+  deliverAt?: number;
+}
+
+/**
+ * Zone d'aménagement concerté : un morceau de quartier que la commune aménage. Plusieurs lots sont attribués l'un après
+ * l'autre par appels d'offres ; les promoteurs participent au financement d'équipements publics, qui valorisent ensuite
+ * les logements de la ZAC.
+ */
+export interface Zac {
+  id: string;
+  name: string;
+  /** Terrains des lots, dans l'ordre d'ouverture. */
+  lots: PlotId[];
+  equipment: ZacEquipment[];
+  /** Participation aux équipements (€ par m² de SDP), à la place de la taxe d'aménagement. */
+  participation: number;
+  /** Appels d'offres de lots déjà ouverts, opérations lancées, participations perçues (€). */
+  opened: number;
+  launched: number;
+  collected: number;
+  openedAt: number;
+}
+
 /** Cahier des charges d'un appel d'offres de la commune. */
 export interface TenderSpec {
   /** Part minimale de logements sociaux (cédés en bloc à un bailleur à un prix réduit). */
@@ -270,6 +309,8 @@ export interface TenderSpec {
   maxDelivery: number;
   /** Cadre de l'opération : avantages accordés en échange du cahier des charges. */
   programme: Programme;
+  /** ZAC dont ce lot fait partie (le cadre est alors celui de la ZAC, avec ses équipements). */
+  zacId?: string;
   /** Prix de cession minimal du terrain. */
   minPrice: number;
   /** Pondération annoncée de la sélection (somme = 1). */
@@ -311,6 +352,7 @@ export interface TenderTerms {
   maxLevels: number;
   groundCommerce: boolean;
   programme: Programme;
+  zacId?: string;
   /** L'opération doit être lancée avant ce tour, sinon la commune reprend le terrain et garde une pénalité. */
   launchBy: number;
   /** Prix payé pour le terrain (hors frais), pour calculer la pénalité de reprise. */
@@ -356,6 +398,7 @@ export interface GameState {
   offers: Offer[];
   tenders: Tender[];
   nextTenderId: number;
+  zacs: Zac[];
   /** Indice des prix de vente (1 = référence), évolue au fil des tours. */
   marketIndex: number;
   /** Choc de demande des ménages (retournement ou regain de confiance), qui s'estompe de 25 % par trimestre. */

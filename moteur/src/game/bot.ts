@@ -41,19 +41,23 @@ export interface Plan {
   maxLand: number;
 }
 
-// Les projets ne dépendent que de la géométrie et du gabarit : on les mémorise par terrain.
+// Les projets ne dépendent que de la géométrie et des critères : on les mémorise par terrain et par jeu de critères.
 const projectCache = new WeakMap<Parcel, Map<string, Project>>();
 
-function projectFor(plot: Plot, levels: number, attic: boolean): { criteria: Criteria; project: Project } {
-  const parcel: Parcel = plot.parcel;
-  const ob = plot.obligation;
-  const criteria: Criteria = criteriaFor(plot, { ...DEFAULT_CRITERIA, levels, attic, ...(ob?.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) }, ob?.programme.bonusLevels ?? 0);
+/** Projet d'un terrain pour des critères donnés, mémorisé (le calcul géométrique est le poste le plus lent d'un tour de bot). */
+function projectOf(parcel: Parcel, criteria: Criteria): Project {
   let byKey = projectCache.get(parcel);
   if (!byKey) projectCache.set(parcel, (byKey = new Map()));
-  const key = `${levels}/${attic}`;
+  const key = JSON.stringify(criteria);
   let project = byKey.get(key);
   if (!project) byKey.set(key, (project = computeProject(parcel, criteria)));
-  return { criteria, project };
+  return project;
+}
+
+function projectFor(plot: Plot, levels: number, attic: boolean): { criteria: Criteria; project: Project } {
+  const ob = plot.obligation;
+  const criteria: Criteria = criteriaFor(plot, { ...DEFAULT_CRITERIA, levels, attic, ...(ob?.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) }, ob?.programme.bonusLevels ?? 0);
+  return { criteria, project: projectOf(plot.parcel, criteria) };
 }
 
 /** Meilleur projet (marge absolue maximale) respectant le seuil de marge, pour un terrain acheté à `landPrice`. */
@@ -138,6 +142,8 @@ function bid(state: GameState, playerId: string, profile: BotProfile): GameState
     if (plot.owner !== null || plot.municipal || offerOf(s, plot.id, playerId)) continue;
     const listed = !!plot.listing;
     if (plot.speculator) continue; // un spéculateur ne vend pas au prix du marché : inutile de payer des frais de prospection
+    // Prospection : le bot n'étudie qu'une partie des terrains non vendeurs à chaque trimestre (le calcul est long).
+    if (!listed && (hashFrac(`${plot.id}:${s.round}:${playerId}`) > 0.15 || plot.askingPrice * 1.04 * (1 + rate) > me().cash * 0.7)) continue;
     const floor = minOfferPrice(plot);
     const plan = bestPlan(s, plot, listed ? floor : plot.askingPrice, profile);
     if (!plan || saturated(s, plan.lots, profile)) continue;
@@ -186,7 +192,7 @@ function tenderTurn(state: GameState, playerId: string, profile: BotProfile): Ga
       for (const attic of levels >= 2 && levels < spec.maxLevels ? [false, true] : [false]) {
         const base = { ...DEFAULT_CRITERIA, levels, attic, groundFloorUse: spec.groundCommerce ? ('commerce' as const) : DEFAULT_CRITERIA.groundFloorUse };
         const criteria = criteriaFor(plot, base, spec.programme.bonusLevels);
-        const project = computeProject(plot.parcel, criteria);
+        const project = projectOf(plot.parcel, criteria);
         if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
         const d = buildDuration(project, programmeParams(s.config.bilanParams, spec.programme));
         const planned = Math.ceil(d.permit / 3) + Math.ceil(d.build / 3);
@@ -203,13 +209,14 @@ function tenderTurn(state: GameState, playerId: string, profile: BotProfile): Ga
             const score = scoreBid(spec, { price, socialShare: share, quality, delivery }).total;
             const c = bilan.costs;
             const equity = (c.demolition + c.works + c.fixed + c.design + c.insurance + c.contingency + c.taxes) * (1 - s.config.bilanParams.loanShare);
+            // Seules comptent les propositions que le bot peut financer : un lot trop gros pour sa trésorerie se joue en plus petit.
+            if (me().cash - price * (1 + rate) < equity + me().cash * profile.reserve) continue;
             if (!best || score > best.score) best = { price, share, quality, delivery, score, equity };
           }
         }
       }
     }
     if (!best) continue;
-    if (me().cash - best.price * (1 + rate) < best.equity + me().cash * profile.reserve) continue;
     const r = applyAction(s, { type: 'tenderBid', player: playerId, tender: t.id, price: best.price, socialShare: best.share, quality: best.quality, delivery: best.delivery });
     if (r.ok) s = r.state;
   }
