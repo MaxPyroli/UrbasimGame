@@ -56,27 +56,6 @@ function normalizedMix(mix: Record<Typology, number>): Record<Typology, number> 
   return out;
 }
 
-/** Énumère les multi-ensembles de taille n (compteurs par typologie). */
-function* multisets(types: Typology[], n: number): Generator<Record<Typology, number>> {
-  const counts = Object.fromEntries(TYPOLOGIES.map((t) => [t, 0])) as Record<Typology, number>;
-  function* rec(idx: number, left: number): Generator<Record<Typology, number>> {
-    if (idx === types.length - 1) {
-      counts[types[idx]] = left;
-      yield { ...counts };
-      counts[types[idx]] = 0;
-      return;
-    }
-    for (let k = 0; k <= left; k++) {
-      counts[types[idx]] = k;
-      yield* rec(idx + 1, left - k);
-    }
-    counts[types[idx]] = 0;
-  }
-  yield* rec(0, n);
-}
-
-const EXACT_LIMIT = 8;
-
 /** n logements répartis au plus près du mix cible compte tenu de ce qui est déjà construit (plus fort reste). */
 function proportionalCounts(n: number, allowed: Typology[], totals: Record<Typology, number>, mix: Record<Typology, number>): Record<Typology, number> {
   const soFar = TYPOLOGIES.reduce((s, t) => s + totals[t], 0);
@@ -91,11 +70,15 @@ function proportionalCounts(n: number, allowed: Typology[], totals: Record<Typol
   return counts;
 }
 
+/** Les logements d'un niveau sont un peu plus petits que la surface type du mix (leurs surfaces s'ajustent pour remplir le niveau) : calé pour retrouver le nombre de logements de l'ancienne recherche de combinaisons. */
+const AVERAGE_AREA_FACTOR = 0.88;
+
 /**
- * Répartit une surface habitable de niveau en logements, en cherchant à la fois
- * à remplir la surface (échelle des surfaces proches de 1) et à rejoindre le mix cible.
+ * Répartit la surface habitable d'un niveau en logements par une règle de surface : leur nombre est la surface divisée par la
+ * surface moyenne du mix (plafonné par la longueur de façade), la répartition par typologie suit le mix cible compte tenu de
+ * ce qui est déjà construit aux autres niveaux, et les surfaces s'ajustent pour remplir exactement le niveau.
  */
-function packLevel(
+function allocateLevel(
   shab: number,
   maxCount: number,
   totals: Record<Typology, number>,
@@ -104,35 +87,19 @@ function packLevel(
 ): { typology: Typology; area: number }[] {
   if (shab < 20 || maxCount < 1) return [];
   const allowed = TYPOLOGIES.filter((t) => mix[t] > 0);
-  const avg = allowed.reduce((s, t) => s + mix[t] * areas[t], 0) || 65;
-  const n0 = Math.max(1, Math.min(maxCount, Math.round(shab / avg)));
-  const totalSoFar = TYPOLOGIES.reduce((s, t) => s + totals[t], 0);
-
-  let best: { counts: Record<Typology, number>; scale: number; score: number } | null = null;
-  for (const n of [n0 - 1, n0, n0 + 1]) {
-    if (n < 1 || n > maxCount) continue;
-    // énumération exacte pour les petits niveaux ; répartition proportionnelle au-delà (le nombre de combinaisons explose)
-    const options = n <= EXACT_LIMIT ? multisets(allowed, n) : [proportionalCounts(n, allowed, totals, mix)];
-    for (const counts of options) {
-      const nominal = allowed.reduce((s, t) => s + counts[t] * areas[t], 0);
-      const scale = shab / nominal;
-      if (scale < 0.78 || scale > 1.5) continue;
-      const denom = totalSoFar + n;
-      const dev = TYPOLOGIES.reduce((s, t) => s + Math.abs((totals[t] + counts[t]) / denom - mix[t]), 0);
-      const score = 3 * Math.abs(Math.log(scale)) + 2 * dev;
-      if (!best || score < best.score) best = { counts, scale, score };
-    }
-  }
-  if (best) {
-    const units: { typology: Typology; area: number }[] = [];
-    for (const t of allowed) for (let k = 0; k < best.counts[t]; k++) units.push({ typology: t, area: areas[t] * best.scale });
-    return units.sort((a, b) => a.area - b.area);
-  }
-  // Repli : logements identiques de la surface disponible, typologie la plus proche.
-  const n = Math.max(1, Math.min(maxCount, Math.round(shab / 65)));
-  const each = shab / n;
-  const closest = TYPOLOGIES.reduce((b, t) => (Math.abs(areas[t] - each) < Math.abs(areas[b] - each) ? t : b), 'T3' as Typology);
-  return Array.from({ length: n }, () => ({ typology: closest, area: each }));
+  const avg = (allowed.reduce((s, t) => s + mix[t] * areas[t], 0) || 65) * AVERAGE_AREA_FACTOR;
+  let n = Math.max(1, Math.min(maxCount, Math.round(shab / avg)));
+  const split = (k: number) => {
+    const counts = proportionalCounts(k, allowed, totals, mix);
+    return { counts, scale: shab / allowed.reduce((s, t) => s + counts[t] * areas[t], 0) };
+  };
+  let cur = split(n);
+  // Logements trop grands (ou trop petits) : un de plus (ou de moins) quand la façade et la surface le permettent.
+  if (cur.scale > 1.5 && n < maxCount) cur = split(++n);
+  else if (cur.scale < 0.78 && n > 1) cur = split(--n);
+  const units: { typology: Typology; area: number }[] = [];
+  for (const t of allowed) for (let k = 0; k < cur.counts[t]; k++) units.push({ typology: t, area: areas[t] * cur.scale });
+  return units.sort((a, b) => a.area - b.area);
 }
 
 function levelLabel(i: number, kind: LevelPlan['kind']): string {
@@ -191,7 +158,7 @@ export function computeProgram(input: ProgramInput): ProgramResult {
         plan.parkingSpaces = Math.floor(Math.max(0, inner - core - services) / a.spaceGross);
         groundParkingCapacity = plan.parkingSpaces;
       } else if (use === 'logement') {
-        const units = packLevel(usable * a.shabRatio, maxPerLevel, totals, mix, a.typologyArea);
+        const units = allocateLevel(usable * a.shabRatio, maxPerLevel, totals, mix, a.typologyArea);
         for (const u of units) {
           totals[u.typology]++;
           dwellings.push({ levelId: plan.id, typology: u.typology, area: u.area });

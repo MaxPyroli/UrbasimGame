@@ -1,4 +1,4 @@
-import { DEFAULT_CRITERIA, PROMOTER_CRITERIA, computeBilan, computeProject, type Bilan, type Criteria, type Parcel, type Project } from '../engine';
+import { DEFAULT_CRITERIA, promoterCriteria, computeBilan, computeProject, type Bilan, type Criteria, type Parcel, type Project } from '../engine';
 import { MAX_PRICE_POLICY, MIN_PRICE_POLICY, applyAction, criteriaFor, currentMarket, currentParams, ruleOf } from './game';
 import { buildDuration } from '../engine';
 import { minOfferPrice, offerOf } from './market';
@@ -54,9 +54,9 @@ function projectOf(parcel: Parcel, criteria: Criteria): Project {
   return project;
 }
 
-function projectFor(plot: Plot, levels: number, attic: boolean): { criteria: Criteria; project: Project } {
+function projectFor(state: GameState, plot: Plot, levels: number, attic: boolean): { criteria: Criteria; project: Project } {
   const ob = plot.obligation;
-  const criteria: Criteria = criteriaFor(plot, { ...PROMOTER_CRITERIA, levels, attic, ...(ob?.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) }, ob?.programme.bonusLevels ?? 0);
+  const criteria: Criteria = criteriaFor(plot, { ...promoterCriteria(state.config.market), levels, attic, ...(ob?.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) }, ob?.programme.bonusLevels ?? 0);
   return { criteria, project: projectOf(plot.parcel, criteria) };
 }
 
@@ -70,7 +70,7 @@ export function bestPlan(state: GameState, plot: Plot, landPrice: number, profil
   const cap = Math.min(plot.obligation ? plot.obligation.maxLevels : Infinity, zoneCap);
   for (let levels = 0; levels <= Math.min(profile.maxLevels, cap); levels++) {
     for (const attic of levels >= 2 && levels + 1 <= cap ? [false, true] : [false]) {
-      const { criteria, project } = projectFor(plot, levels, attic);
+      const { criteria, project } = projectFor(state, plot, levels, attic);
       if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
       const bilan = computeBilan({ project, market: currentMarket(state, plot), landPrice, existingSdp: plot.existingSdp, params: { ...programmeParams(currentParams(state), plot.obligation?.programme), targetMargin: profile.minMargin }, ...(plot.obligation ? { socialShare: plot.obligation.socialShare, quality: plot.obligation.quality, salesPremium: plot.obligation.programme.salesPremium } : {}) });
       if (bilan.marginRate < profile.minMargin) continue;
@@ -207,7 +207,7 @@ function tenderTurn(state: GameState, playerId: string, profile: BotProfile): Ga
     let best: { price: number; share: number; quality: 0 | 1 | 2; delivery: number; score: number; equity: number } | null = null;
     for (let levels = 0; levels <= Math.min(profile.maxLevels, spec.maxLevels); levels++) {
       for (const attic of levels >= 2 && levels < spec.maxLevels ? [false, true] : [false]) {
-        const base = { ...PROMOTER_CRITERIA, levels, attic, groundFloorUse: spec.groundCommerce ? ('commerce' as const) : DEFAULT_CRITERIA.groundFloorUse };
+        const base = { ...promoterCriteria(s.config.market), levels, attic, groundFloorUse: spec.groundCommerce ? ('commerce' as const) : DEFAULT_CRITERIA.groundFloorUse };
         const criteria = criteriaFor(plot, base, spec.programme.bonusLevels);
         const project = projectOf(plot.parcel, criteria);
         if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;

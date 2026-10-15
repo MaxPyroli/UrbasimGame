@@ -1,10 +1,32 @@
-import type { Project } from './types';
+import type { Project, Typology } from './types';
 
 /**
  * Bilan du promoteur : de `Project` (ce que le terrain permet) à une marge (ce que l'opération rapporte).
  * Module pur et déterministe. Tous les montants sont en euros HT ; les prix sont des ordres de grandeur
  * inspirés du marché français, pas des valeurs d'expertise.
  */
+
+/** Ce que les ventes réelles disent d'une typologie (T1 à T5) : part des ventes, surface et prix typiques. */
+export interface TypologySales {
+  /** Part des ventes d'appartements (0 à 1). */
+  share: number;
+  /** Surface médiane (m²). */
+  area: number;
+  /** Prix médian (€/m²). */
+  pricePerM2: number;
+}
+
+/** Statistiques de marché d'une commune, tirées des ventes réelles (DVF) : aide à choisir la répartition des logements. */
+export interface MarketStats {
+  /** Origine et période, pour l'affichage (ex. « DVF Sucy-en-Brie 2022-2025 »). */
+  source: string;
+  /** Nombre de ventes d'appartements retenues. */
+  sales: number;
+  /** Prix médian des appartements (€/m²) et évolution annuelle médiane depuis la première année (€/m², par année). */
+  pricePerM2: number;
+  byYear: { year: number; pricePerM2: number; sales: number }[];
+  byTypology: Record<Typology, TypologySales>;
+}
 
 export interface Market {
   name: string;
@@ -33,6 +55,10 @@ export interface Market {
    * C'est ce qui rend les très petites opérations déficitaires.
    */
   fixedCostPerOperation: number;
+  /** Répartition des logements que le marché absorbe (parts T1 à T5, somme 1) : mix proposé par défaut. */
+  demandMix?: Record<Typology, number>;
+  /** Prix au m² de chaque typologie rapporté au prix moyen (1 = prix moyen) : les petits logements se vendent plus cher au m². */
+  typologyRatio?: Record<Typology, number>;
   /** Charge foncière « normale » du quartier, €/m² de SDP constructible (sert à proposer un prix de terrain). */
   landPerSdp: number;
 }
@@ -247,6 +273,31 @@ export function buildDuration(project: Project, p: BilanParams): { permit: numbe
   return { permit: p.permitMonths, build, sellOut: p.sellOutMonths, total: p.permitMonths + build + p.sellOutMonths };
 }
 
+/** Prix moyen des logements du projet rapporté au prix de marché : les typologies qui se vendent plus cher au m² (petites) font monter la moyenne. */
+export function typologyPriceFactor(project: Project, market: Market): number {
+  const ratio = market.typologyRatio;
+  if (!ratio) return 1;
+  let area = 0;
+  let weighted = 0;
+  for (const d of project.dwellings) {
+    area += d.area;
+    weighted += d.area * (ratio[d.typology] ?? 1);
+  }
+  return area > 0 ? weighted / area : 1;
+}
+
+/**
+ * Adéquation du programme à ce que le marché achète : 1 si la répartition des logements est celle de la demande, de moins en
+ * moins quand elle s'en écarte (T5 en quantité là où l'on achète des T2…). Les logements mal calés se vendent plus lentement.
+ */
+export function mixFit(counts: Record<Typology, number>, demand: Record<Typology, number> | undefined): number {
+  if (!demand) return 1;
+  const total = (Object.values(counts) as number[]).reduce((s, n) => s + n, 0);
+  if (total === 0) return 1;
+  const dist = ((Object.keys(demand) as Typology[]).reduce((s, t) => s + Math.abs(counts[t] / total - demand[t]), 0)) / 2;
+  return Math.max(0.6, 1 - 0.7 * dist);
+}
+
 export function computeBilan(input: BilanInput): Bilan {
   const { project, market, landPrice } = input;
   const p: BilanParams = { ...DEFAULT_BILAN_PARAMS, ...input.params };
@@ -258,7 +309,7 @@ export function computeBilan(input: BilanInput): Bilan {
   const social = Math.min(1, Math.max(0, input.socialShare ?? 0));
   const premium = QUALITY_PREMIUM[q] * (1 + (input.salesPremium ?? 0));
   // Les logements sociaux sont cédés en bloc à un bailleur, sans prime de qualité.
-  const housing = ind.shab * market.housingPerShab * ((1 - social) * premium + social * SOCIAL_PRICE_RATIO);
+  const housing = ind.shab * market.housingPerShab * typologyPriceFactor(project, market) * ((1 - social) * premium + social * SOCIAL_PRICE_RATIO);
   const commerce = sumLevels(project, 'commerce') * market.commercePerSdp * premium;
   const office = sumLevels(project, 'bureaux') * market.officePerSdp * premium;
   const parking = pk.basement * market.parkingBasementSpace + (pk.rdc + pk.surface) * market.parkingOtherSpace;

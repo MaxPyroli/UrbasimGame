@@ -38,7 +38,7 @@ export const unitsOnOffer = (s: GameState) => s.projects.reduce((t, p) => t + lo
 export function expectedSales(s: GameState): Map<string, number> {
   const out = new Map<string, number>();
   const demand = marketDemand(s);
-  const weights = s.projects.map((p) => ({ p, w: lotsLeft(p) > 0 ? lotsLeft(p) * STAGE_WEIGHT[p.phase] * Math.exp(-s.config.priceElasticity * p.pricePolicy) : 0 }));
+  const weights = s.projects.map((p) => ({ p, w: lotsLeft(p) > 0 ? lotsLeft(p) * STAGE_WEIGHT[p.phase] * Math.exp(-s.config.priceElasticity * p.pricePolicy) * (p.mixFit ?? 1) : 0 }));
   const total = weights.reduce((t, x) => t + x.w, 0);
   for (const { p, w } of weights) out.set(p.id, total > 0 ? Math.min(lotsLeft(p), (demand * w) / total) : 0);
   return out;

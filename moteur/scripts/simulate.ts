@@ -1,8 +1,7 @@
 // Simule des parties (un humain inactif + 3 ordinateurs) sur une carte, pour vérifier le temps de calcul et l'équilibrage.
 // Usage : npm run simulate -- <id> [difficulté=normal] [graines=1,2]
 import { readFileSync } from 'node:fs';
-import { MARKETS } from '../src/engine';
-import { DIFFICULTIES, applyAction, botIdentities, campaignConfig, createGame, districtToSeeds, netWorth, playBots, type District, type Difficulty } from '../src/game';
+import { DIFFICULTIES, applyAction, botIdentities, campaignConfig, createGame, districtToSeeds, marketOf, netWorth, playBots, type District, type Difficulty } from '../src/game';
 
 const [id, diff = 'normal', seedList = '1,2'] = process.argv.slice(2);
 const district = JSON.parse(readFileSync(new URL(`../data/districts/${id}.json`, import.meta.url), 'utf8')) as District;
@@ -14,7 +13,7 @@ for (const seed of seedList.split(',').map(Number)) {
   let s = createGame({
     players: [{ id: 'moi', name: 'Moi', color: player.color, slogan: '' }, bot('prudent', 0), bot('equilibre', 1), bot('agressif', 2)],
     plots: seeds,
-    config: { market: MARKETS[district.market], ...campaignConfig(diff as Difficulty) },
+    config: { market: marketOf(district), ...campaignConfig(diff as Difficulty) },
     seed,
   });
   const t0 = Date.now();

@@ -2,9 +2,10 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 import {
-  PROMOTER_CRITERIA,
+  DEFAULT_ASSUMPTIONS,
+  DEFAULT_CRITERIA,
+  promoterCriteria,
   LocalProjection,
-  MARKETS,
   QUALITY_COST,
   QUALITY_PREMIUM,
   computeBilan,
@@ -12,6 +13,9 @@ import {
   type Criteria,
   type FootprintShape,
   type Parcel,
+  type Typology,
+  mixFit,
+  typologyPriceFactor,
   type ParkingStrategy,
   type Placement,
 } from '../../moteur/src/engine';
@@ -62,6 +66,7 @@ import {
   currentParams,
   LOCATION_RULES,
   districtToSeeds,
+  marketOf,
   expectedSales,
   lotsLeft,
   lotPrice,
@@ -126,7 +131,7 @@ function newGame(identity: Identity, difficulty: Difficulty = 'normal', seed = D
   return createGame({
     players: [{ id: ME, name: identity.name, color: identity.color, slogan: identity.slogan }, bot('prudent', 0), bot('equilibre', 1), bot('agressif', 2)],
     plots: seeds,
-    config: { market: MARKETS[district.market], ...campaignConfig(difficulty) },
+    config: { market: marketOf(district), ...campaignConfig(difficulty) },
     seed,
   });
 }
@@ -189,7 +194,7 @@ const SEEN_KEY = 'urbasim-seen-v1';
 let seenLog = Math.max(0, Math.round(+(localStorage_get(SEEN_KEY) ?? 0)) || 0);
 type NotifFilter = 'tout' | 'alea' | 'commune' | 'operation' | 'terrain';
 let notifFilter: NotifFilter = 'tout';
-let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number; placement: Placement; shape: FootprintShape; second: boolean; secondLevels: number | null } = { levels: 3, attic: false, parking: 'auto', depth: 12, placement: 'auto', shape: 'adapte', second: true, secondLevels: null };
+let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number; placement: Placement; shape: FootprintShape; second: boolean; secondLevels: number | null; mix: Record<Typology, number> | null } = { levels: 3, attic: false, parking: 'auto', depth: 12, placement: 'auto', shape: 'adapte', second: true, secondLevels: null, mix: null };
 
 function save() {
   try {
@@ -228,7 +233,7 @@ const plotById = (id: string) => {
   return idx.get(id);
 };
 const quarterLabel = (round: number) => `T${(round % 4) + 1} ${2027 + Math.floor(round / 4)}`;
-const criteria = (): Criteria => ({ ...PROMOTER_CRITERIA, levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth, placement: form.placement, footprintShape: form.shape, secondBuilding: form.second, secondLevels: form.secondLevels });
+const criteria = (): Criteria => ({ ...promoterCriteria(state.config.market), ...(form.mix ? { mix: form.mix } : {}), levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth, placement: form.placement, footprintShape: form.shape, secondBuilding: form.second, secondLevels: form.secondLevels });
 
 /** Passe un trimestre sans rien afficher ; retourne les nouvelles du journal qui concernent le joueur. */
 function advanceOne(): { mine: string[]; phases: string } {
@@ -918,6 +923,7 @@ const TUTORIAL: { title: string; body: string }[] = [
       <p><b>Autres terrains</b> : vous pouvez prospecter le propriétaire. Il répond à la fin du trimestre, n’accepte que s’il est satisfait du prix, et les frais de prospection sont perdus. Si deux promoteurs se positionnent, le plus offrant gagne.</p>
       <p>Sélectionnez plusieurs terrains pour déposer <b>des offres groupées</b>. Méfiez-vous des terrains dont le <b>prix grimpe</b> plus vite que le marché : leur propriétaire <b>spécule</b>, ne les mettra pas en vente et refusera une offre ordinaire.</p>
       <p>Le promoteur occupe le terrain au mieux : quand le PLU le permet et qu’il y a la place, le projet comprend <b>plusieurs bâtiments</b> (un sur rue, d’autres au fond ou à côté, séparés par un recul et desservis par une allée ou un porche). Vous pouvez décocher « plusieurs bâtiments si possible » pour n’en garder qu’un.</p>
+      <p>Dans <b>« Répartition des logements »</b>, choisissez la part de T1 à T5. Le panneau montre ce que la commune achète vraiment (ventes réelles) : un programme trop éloigné de la demande se vend plus lentement, et les petits logements se vendent plus cher au m².</p>
       <p class="muted">Votre offre bloque l’argent (prix et frais de notaire) jusqu’au verdict. Les concurrents enchérissent aussi.</p>`,
   },
   {
@@ -2145,6 +2151,38 @@ function locationDetail(p: Plot): string {
   return `<div class="muted" style="font-size:12px">Les équipements proches font monter les prix de vente (donc le terrain) :<br>${parts.map((x) => `${esc(LOCATION_RULES[x.kind].label)} ${esc(x.name)} · ${x.distance} m · +${(x.bonus * 100).toFixed(1).replace('.', ',')} %`).join('<br>')}</div>`;
 }
 
+const TYPOS: Typology[] = ['T1', 'T2', 'T3', 'T4', 'T5'];
+let mixOpen = false;
+/**
+ * Répartition des logements : ce que le marché de la commune achète (ventes réelles), le programme choisi, et ce que cet écart
+ * change (prix moyen de vente, rapidité des ventes).
+ */
+function mixFold(proj: ReturnType<typeof computeProject>): string {
+  const market = state.config.market;
+  const stats = district.marketStats;
+  const mix = form.mix ?? market.demandMix ?? criteria().mix;
+  const sum = TYPOS.reduce((s, t) => s + mix[t], 0) || 1;
+  const counts = proj.typologyCounts;
+  const total = TYPOS.reduce((s, t) => s + counts[t], 0);
+  const fit = mixFit(counts, market.demandMix);
+  const factor = typologyPriceFactor(proj, market);
+  const head = stats
+    ? `<div class="muted" style="font-size:12px">${esc(stats.source)} · ${stats.sales.toLocaleString('fr-FR')} ventes d’appartements · médiane ${stats.pricePerM2.toLocaleString('fr-FR')} €/m²${stats.byYear.length > 1 ? ` (${stats.byYear[0].year} : ${stats.byYear[0].pricePerM2.toLocaleString('fr-FR')} → ${stats.byYear[stats.byYear.length - 1].year} : ${stats.byYear[stats.byYear.length - 1].pricePerM2.toLocaleString('fr-FR')})` : ''}</div>`
+    : '<div class="muted" style="font-size:12px">Pas de statistiques de ventes pour cette carte : répartition standard.</div>';
+  const rows = TYPOS.map((t) => {
+    const s = stats?.byTypology[t];
+    return `<tr><td><b>${t}</b></td><td>${s ? `${Math.round(s.share * 100)} %` : '–'}</td><td>${s ? `${s.area} m²` : `${Math.round(DEFAULT_ASSUMPTIONS.typologyArea[t])} m²`}</td><td>${s ? `${s.pricePerM2.toLocaleString('fr-FR')} €` : '–'}</td><td><input type="number" min="0" max="100" step="5" data-mix="${t}" value="${Math.round((mix[t] / sum) * 100)}" aria-label="Part de ${t} dans votre programme (%)"/></td><td class="muted">${total ? `${counts[t]}` : '–'}</td></tr>`;
+  }).join('');
+  const fitTxt = market.demandMix
+    ? `<div class="check ${fit >= 0.9 ? 'ok' : fit >= 0.78 ? 'warn' : 'bad'}">Adéquation au marché <b>${Math.round(fit * 100)} %</b>${fit >= 0.95 ? ' : programme calé sur ce que la commune achète.' : ' : les logements qui s’écartent de la demande se vendent plus lentement.'}${market.typologyRatio ? ` Prix moyen de vente ${Math.abs(Math.round((factor - 1) * 100)) === 0 ? '<b>égal</b> au prix de la commune' : `<b>${factor >= 1 ? '+' : '−'}${Math.abs(Math.round((factor - 1) * 100))} %</b> par rapport au prix de la commune`} (les petits logements se vendent plus cher au m²).` : ''}</div>`
+    : '';
+  const body = `${head}
+    <table class="mixtable"><tr><th></th><th title="Part des ventes d’appartements">Ventes</th><th title="Surface médiane vendue">Taille</th><th title="Prix médian au m²">Prix</th><th title="Part dans votre programme (%)">Votre mix</th><th title="Logements obtenus">Obtenus</th></tr>${rows}</table>
+    ${fitTxt}
+    <div class="row"><button id="mix-market" type="button" ${market.demandMix ? '' : 'disabled'} title="Reprendre la répartition des ventes de la commune">Caler sur le marché</button><button id="mix-default" type="button" title="Répartition standard du jeu">Standard</button></div>`;
+  return `<details class="fold" id="mix-fold" ${mixOpen ? 'open' : ''}><summary>Répartition des logements${market.demandMix ? ` · adéquation ${Math.round(fit * 100)} %` : ''}</summary><div class="foldbody">${body}</div></details>`;
+}
+
 function projectForm(p: Plot, owned: boolean): string {
   const rule = ruleOf(p);
   const ob = obligationOf(p, owned);
@@ -2172,7 +2210,8 @@ function projectForm(p: Plot, owned: boolean): string {
       <button id="best" title="Teste les niveaux autorisés par le PLU, avec ou sans attique, et choisit le plus rentable sans erreur">Meilleur projet</button>
     </div>
     ${secondControl}
-    ${fold('Options', options)}`;
+    ${fold('Options', options)}
+    ${mixFold(proj)}`;
   if (!proj.footprint) return html + `<p class="bad">Rien de constructible avec ces critères.</p>`;
 
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : landDraft(p);
@@ -2413,6 +2452,20 @@ function bindSelection() {
   if (sec) sec.onchange = () => ((form.second = sec.checked), renderAll());
   const secLv = side.querySelector<HTMLSelectElement>('#f-second-levels');
   if (secLv) secLv.onchange = () => ((form.secondLevels = secLv.value === '' ? null : +secLv.value), renderAll());
+  const mixFoldEl = side.querySelector<HTMLDetailsElement>('#mix-fold');
+  if (mixFoldEl) mixFoldEl.ontoggle = () => (mixOpen = mixFoldEl.open);
+  side.querySelectorAll<HTMLInputElement>('[data-mix]').forEach((inp) => {
+    inp.onchange = () => {
+      const next = { ...(form.mix ?? state.config.market.demandMix ?? criteria().mix) } as Record<Typology, number>;
+      for (const i of side.querySelectorAll<HTMLInputElement>('[data-mix]')) next[i.dataset.mix as Typology] = Math.max(0, Math.min(100, +i.value || 0)) / 100;
+      form.mix = TYPOS.some((t) => next[t] > 0) ? next : null;
+      renderAll();
+    };
+  });
+  const mixMarket = side.querySelector<HTMLButtonElement>('#mix-market');
+  if (mixMarket) mixMarket.onclick = () => ((form.mix = null), renderAll());
+  const mixDefault = side.querySelector<HTMLButtonElement>('#mix-default');
+  if (mixDefault) mixDefault.onclick = () => ((form.mix = { ...DEFAULT_CRITERIA.mix }), renderAll());
   const plc = side.querySelector<HTMLSelectElement>('#f-placement');
   if (plc) plc.onchange = () => ((form.placement = plc.value as Placement), renderAll());
   const shp = side.querySelector<HTMLSelectElement>('#f-shape');

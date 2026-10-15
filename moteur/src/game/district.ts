@@ -14,7 +14,9 @@ import {
   union,
   type ContextBuilding,
   type LonLat,
+  type Market,
   type MarketId,
+  type MarketStats,
   type Ring,
 } from '../engine';
 import { DEFAULT_CONFIG, SMALL_PLOT_AREA, appraise, askingPriceFrom, plotIssue, ruleOf, type PlotSeed } from './game';
@@ -85,6 +87,11 @@ export interface District {
   radius: number;
   /** Marché de référence du bilan. */
   market: MarketId;
+  /** Ventes réelles de la commune (DVF) : mix de logements, prix par typologie (facultatif : sans, le marché de référence seul). */
+  marketStats?: MarketStats;
+  /** Répartition des logements du marché et prix relatifs, tirés des ventes réelles (facultatif). */
+  demandMix?: Market['demandMix'];
+  typologyRatio?: Market['typologyRatio'];
   parcels: DistrictParcel[];
   buildings: DistrictBuilding[];
   /** Équipements qui valorisent les terrains alentour (y compris juste hors du quartier). */
@@ -125,6 +132,11 @@ export function pointInRing(x: number, y: number, ring: [number, number][]): boo
     if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
   }
   return inside;
+}
+
+/** Marché du quartier : marché de référence, complété par le mix et les prix par typologie des ventes réelles quand on les a. */
+export function marketOf(d: Pick<District, 'market' | 'demandMix' | 'typologyRatio'>): Market {
+  return { ...MARKETS[d.market], ...(d.demandMix ? { demandMix: d.demandMix } : {}), ...(d.typologyRatio ? { typologyRatio: d.typologyRatio } : {}) };
 }
 
 export const MIN_PARCEL_AREA = 20;
@@ -422,7 +434,7 @@ export const wastelandCandidates = (d: District): number[] => d.parcels.flatMap(
 
 /** Identifiants des délaissés parmi les parcelles d'indices `only` (toutes les candidates par défaut) ; parallélisable par indices. */
 export function wastelandIds(d: District, appraised?: number[], only?: number[]): Set<string> {
-  const config = { ...DEFAULT_CONFIG, market: MARKETS[d.market] };
+  const config = { ...DEFAULT_CONFIG, market: marketOf(d) };
   const kx = 111320 * Math.cos((d.center.lat * Math.PI) / 180);
   const ky = 110540;
   const info = d.parcels.map((p) => {
@@ -472,8 +484,8 @@ export interface ParcelAnalysis {
 }
 
 /** Analyse une parcelle (longue : ~0,2 s) ; indépendante des autres, donc parallélisable. */
-export function analyseParcel(p: DistrictParcel, market: MarketId): ParcelAnalysis {
-  const config = { ...DEFAULT_CONFIG, market: MARKETS[market] };
+export function analyseParcel(p: DistrictParcel, market: Market): ParcelAnalysis {
+  const config = { ...DEFAULT_CONFIG, market };
   const parcel = { ring: p.ring, streetEdges: p.streetEdges };
   const rule = parcelRule(p);
   // Contrôle géométrique d'abord (rapide), puis une seule estimation : elle sert à la fois au prix et au verdict « rentable seule ».
@@ -498,8 +510,8 @@ export function withBasePrices(source: District, analyses?: ParcelAnalysis[]): D
 /** Première étape de `withBasePrices` : densité, prix de référence et constructibilité seule (sans la recherche des délaissés). */
 export function priceParcels(source: District, analyses?: ParcelAnalysis[]): { priced: District; appraised: number[] } {
   const d = withDensity(source);
-  const config = { ...DEFAULT_CONFIG, market: MARKETS[d.market] };
-  const all = analyses ?? d.parcels.map((p) => analyseParcel(p, d.market));
+  const config = { ...DEFAULT_CONFIG, market: marketOf(d) };
+  const all = analyses ?? d.parcels.map((p) => analyseParcel(p, marketOf(d)));
   const priced = {
     ...d,
     parcels: d.parcels.map((p, i) => ({

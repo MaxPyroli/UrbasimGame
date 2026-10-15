@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
-import { analyseParcel, priceParcels, wastelandCandidates, wastelandIds, withRoadClip, withWasteland, type District, type ParcelAnalysis } from '../src/game/district';
+import { analyseParcel, marketOf, priceParcels, wastelandCandidates, wastelandIds, withRoadClip, withWasteland, type District, type ParcelAnalysis } from '../src/game/district';
 
 type Job = { kind: 'analyse'; district: District; indices: number[] } | { kind: 'waste'; district: District; appraised: number[]; indices: number[] };
 
@@ -13,7 +13,7 @@ if (!isMainThread) {
   if (job.kind === 'analyse') {
     const out: ParcelAnalysis[] = [];
     job.indices.forEach((i, k) => {
-      out.push(analyseParcel(job.district.parcels[i], job.district.market));
+      out.push(analyseParcel(job.district.parcels[i], marketOf(job.district)));
       if (k % 50 === 49) parentPort!.postMessage({ progress: 50 });
     });
     parentPort!.postMessage({ done: out });

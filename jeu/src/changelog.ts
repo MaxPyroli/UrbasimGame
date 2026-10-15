@@ -7,6 +7,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.11.0',
+    title: 'Le marché réel et la répartition des logements',
+    notes: [
+      'Statistiques de marché tirées des ventes réelles de la commune (DVF 2022-2025) : part de T1 à T5 achetés, taille et prix au m² de chacun. Les petits logements se vendent plus cher au m², les grands moins cher : à Sucy un T1 se vend environ 4 400 €/m², un T5 environ 2 900 €/m²',
+      'Nouveau panneau « Répartition des logements » dans le projet : vous choisissez votre mix, voyez celui du marché et l’adéquation de votre programme. Un programme mal calé se vend plus lentement ; le prix moyen de vente suit la taille des logements',
+      'Les concurrents et l’estimation des terrains partent du mix du marché de la carte (Montreuil : plutôt petits logements ; Sucy : plutôt des T3 et plus)',
+      'Le nombre de logements par étage suit désormais la surface (règle de surface plutôt qu’une recherche de combinaisons) : calculs bien plus rapides, résultats voisins',
+      'Recalcul des prix de Sucy en 4 minutes au lieu de 30',
+    ],
+  },
+  {
     version: '0.10.0',
     title: 'Sucy-en-Brie et bâtiments multiples',
     notes: [

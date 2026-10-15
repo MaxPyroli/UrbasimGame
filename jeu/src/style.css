@@ -404,3 +404,10 @@ button.add { padding: 1px 9px; font-size: 12px; border-radius: 12px; border-colo
 .place-blurb { font-size: 13px; opacity: 0.85; }
 .place-facts { font-size: 12px; opacity: 0.6; }
 .home-places .soon { font-size: 12px; opacity: 0.6; }
+
+/* Répartition des logements */
+.mixtable { width: 100%; border-collapse: collapse; margin: 6px 0; font-size: 12.5px; }
+.mixtable th { text-align: right; font-weight: 600; color: var(--muted); padding: 2px 4px; }
+.mixtable th:first-child, .mixtable td:first-child { text-align: left; }
+.mixtable td { text-align: right; padding: 2px 4px; border-top: 1px solid var(--line); }
+.mixtable input[type='number'] { width: 58px; padding: 2px 4px; text-align: right; }

@@ -3,6 +3,7 @@ import { buildDistrict, type District, type DistrictRoad, type DistrictZone } fr
 import { zoneFamily } from '../game/plu';
 import type { Poi, PoiKind } from '../game/location';
 import { fetchNearbyBuildings, fetchWfsPage } from './services';
+import { fetchMarketStats, marketMix } from './dvf';
 
 const API = 'https://apicarto.ign.fr/api/cadastre/parcelle';
 const PAGE = 500;
@@ -122,7 +123,16 @@ export async function fetchCommune(opts: { name: string; insee: string; market: 
   for (const t of tiles) for (const p of await fetchPois(t, TILE / 2 - 700 > 0 ? TILE / 2 - 700 : 0)) poiMap.set(`${p.kind}|${p.lon}|${p.lat}`, p);
   const fetchedAt = new Date().toISOString().slice(0, 10);
   const buildings = [...bMap.values()];
-  return buildDistrict({
+  // Ventes réelles de la commune : mix de logements et prix par typologie (absent si la commune n'a pas de ventes d'appartements).
+  const stats = await fetchMarketStats(opts.insee, opts.name, async (url) => {
+    try {
+      const r = await fetch(url);
+      return r.ok ? await r.text() : null;
+    } catch {
+      return null;
+    }
+  });
+  const district = buildDistrict({
     name: opts.name,
     center,
     radius,
@@ -136,6 +146,7 @@ export async function fetchCommune(opts: { name: string; insee: string; market: 
     credits: ['Parcelles : IGN / DGFiP, cadastre Etalab (Licence Ouverte 2.0)', buildingsCredit(buildings, fetchedAt), 'Équipements : IGN, BD TOPO® (Licence Ouverte 2.0)', 'Zonage : Géoportail de l’Urbanisme (PLU, Licence Ouverte 2.0)'],
     fetchedAt,
   });
+  return stats ? { ...district, marketStats: stats, ...marketMix(stats) } : district;
 }
 
 const WFS = 'https://data.geopf.fr/wfs/ows';

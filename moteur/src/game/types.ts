@@ -195,6 +195,8 @@ export interface ProjectRun {
   sellRounds: number;
   /** Bilan calculé au lancement (prix de l'époque). */
   bilan: Bilan;
+  /** Adéquation de la répartition des logements à ce que le marché achète (0,6 à 1) : elle pèse sur le rythme des ventes. Absent = 1. */
+  mixFit?: number;
   sdp: number;
   /** Hauteur du bâtiment projeté (m). */
   height: number;

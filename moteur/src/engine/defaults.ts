@@ -1,3 +1,4 @@
+import type { Market } from './bilan';
 import type { Assumptions, Criteria } from './types';
 
 /**
@@ -66,3 +67,6 @@ export const DEFAULT_CRITERIA: Criteria = {
 
 /** Critères d'un promoteur dans le jeu : il occupe le terrain au mieux, avec plusieurs bâtiments quand il y a la place et que le PLU le permet. */
 export const PROMOTER_CRITERIA: Criteria = { ...DEFAULT_CRITERIA, secondBuilding: true };
+
+/** Critères d'un promoteur sur un marché donné : même base, avec la répartition des logements que ce marché achète. */
+export const promoterCriteria = (market?: Market): Criteria => (market?.demandMix ? { ...PROMOTER_CRITERIA, mix: { ...market.demandMix } } : PROMOTER_CRITERIA);

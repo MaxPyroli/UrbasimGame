@@ -1,6 +1,6 @@
 import {
   DEFAULT_BILAN_PARAMS,
-  PROMOTER_CRITERIA,
+  promoterCriteria,
   MARKETS,
   buildDuration,
   computeBilan,
@@ -17,7 +17,7 @@ import { mergeParcels } from './merge';
 import { charge, credit, eur, hashFrac, mapPlayer, mapPlot, mapProject, withEvent } from './ledger';
 import { committedCash, dropOffers, listPlots, listingCount, placeBundle, placeOffer, resolveMarket, withdrawOffer } from './market';
 import { dropTenderBids, committedTenderCash, enforceObligations, openTender, pickMunicipalIds, programmeParams, placeTenderBid, resolveTenders, shouldOpenTender, withdrawTenderBid } from './tender';
-import { SOCIAL_PRICE_RATIO } from '../engine';
+import { SOCIAL_PRICE_RATIO, mixFit } from '../engine';
 import { advanceZacs, openZacLots, planZacs, zacOnLaunch } from './zac';
 import { nextGaussian, nextRandom } from './rng';
 import { expectedSales, lotPrice, lotsLeft, soldShare } from './sales';
@@ -127,7 +127,7 @@ export function plotIssue(parcel: Parcel, config?: GameConfig, locationFactor = 
   if (rule && !rule.buildable) return 'zone';
   if (parcel.streetEdges.length === 0) return 'enclavee';
   const ok = [1, 3].some((levels) => {
-    const base: Criteria = { ...PROMOTER_CRITERIA, levels };
+    const base: Criteria = { ...promoterCriteria(config?.market), levels };
     const pr = computeProject(parcel, rule ? applyRule(base, rule) : base);
     return pr.footprint !== null && pr.checks.every((c) => c.status !== 'error');
   });
@@ -162,7 +162,7 @@ export function appraise(parcel: Parcel, existingSdp: number, config: GameConfig
   if (parcel.streetEdges.length === 0 || (rule && !rule.buildable)) return { best: 0, area };
   let best = 0;
   for (let levels = 0; levels <= 5; levels++) for (const attic of [false, true]) {
-    const base: Criteria = { ...PROMOTER_CRITERIA, levels, attic };
+    const base: Criteria = { ...promoterCriteria(config.market), levels, attic };
     const project = computeProject(parcel, rule ? applyRule(base, rule) : base);
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
     const b = computeBilan({ project, market, landPrice: 0, existingSdp, params: { ...config.bilanParams, targetMargin: config.askMargin } });
@@ -212,7 +212,7 @@ export function tenderWorth(
   const prog = spec.programme;
   let best = { value: 0, levels: 0, attic: false };
   for (let levels = 0; levels <= spec.maxLevels; levels++) for (const attic of levels >= 2 && levels < spec.maxLevels ? [false, true] : [false]) {
-    const base: Criteria = { ...PROMOTER_CRITERIA, levels, attic, ...(spec.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) };
+    const base: Criteria = { ...promoterCriteria(s.config.market), levels, attic, ...(spec.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) };
     const project = computeProject(plot.parcel, criteriaFor(plot, base, prog.bonusLevels));
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
     const b = computeBilan({ project, market: currentMarket(s, plot), landPrice: 0, existingSdp: plot.existingSdp, params: { ...programmeParams(currentParams(s), prog), targetMargin }, socialShare, quality, salesPremium: prog.salesPremium });
@@ -477,6 +477,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     buildRounds,
     sellRounds: q(d.sellOut),
     bilan,
+    mixFit: mixFit(project.typologyCounts, state.config.market.demandMix),
     sdp: project.indicators.sdpTotal,
     height: project.indicators.height,
     marketIndexAtLaunch: state.marketIndex,

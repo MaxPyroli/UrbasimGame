@@ -460,6 +460,28 @@ collectivité jouent le rôle des enchères du Monopoly.
     densité : 95 % des parcelles de Sucy sont « diffuses » (seuils calés sur Montreuil) ; règle PLU propre aux pavillons à affiner ; difficulté « difficile » non resimulée.
     Affichage allégé pour les grandes cartes : rendu canvas, bâti d'origine créé à la demande (vue « hauteur »), infobulles à la demande, styles mis en cache.
 
+- Fait : **statistiques de marché (ventes réelles) et répartition des logements** (version 0.11.0).
+  - **Rangement des logements simplifié** (`engine/program.ts`, `allocateLevel`) : le nombre de logements d'un étage = surface habitable / surface moyenne du mix
+    (× `AVERAGE_AREA_FACTOR` 0,88, calé pour retrouver le nombre de l'ancienne recherche de combinaisons : -0,8 % au total, 10 % d'écart médian par projet), répartition
+    par typologie au plus près du mix (`proportionalCounts`), surfaces ajustées pour remplir l'étage. Le bilan ne dépend que de la surface habitable, pas de la répartition.
+  - **Statistiques de marché** : `app/dvf.ts` (`parseDvf`, `marketStats`, `marketMix`, `fetchMarketStats`) lit les ventes réelles DVF géolocalisées Etalab par commune et
+    année (`files.data.gouv.fr/geo-dvf/latest/csv/<année>/communes/<dép>/<insee>.csv`), ne garde que les ventes simples d'un appartement, et en tire par typologie la part,
+    la surface et le prix médians (mélangés à un a priori `PRIOR_*` quand les ventes sont rares). `District.marketStats/demandMix/typologyRatio` ; `marketOf(district)` =
+    marché de référence + mix + prix relatifs. `npm run market -- <id> <insee>` les ajoute à un instantané existant (`fetchCommune` le fait aussi) ; relancer ensuite `npm run reprice`.
+    Données : Montreuil 3 595 ventes à 6 328 €/m² (T1 16 %, T2 34 %, T3 31 %, T4 16 %, T5 4 %), Sucy 493 ventes à 3 626 €/m² (8/24/41/22/5 %).
+  - **Effets en jeu** : `Market.typologyRatio` (prix relatif par typologie, moyenne pondérée par la surface = 1) joue dans le chiffre d'affaires (`typologyPriceFactor`) ;
+    `Market.demandMix` est le mix par défaut des promoteurs (`promoterCriteria(market)` : interface, concurrents, estimation, appels d'offres) ; `mixFit` (0,6 à 1) mesure
+    l'écart du programme à la demande, stocké à la vente dans `ProjectRun.mixFit` et appliqué au poids de l'opération dans `expectedSales` (ventes plus lentes).
+    Interface : panneau « Répartition des logements » (marché, votre mix, logements obtenus, adéquation, effet sur le prix moyen ; boutons « Caler sur le marché » et « Standard »).
+  - **Performance** : recalcul de Montreuil 17 s, de Sucy 4 min 23 s (30 min avant). Simulations (humain inactif + 3 ordinateurs, normal) : Sucy ×0,8 / ordinateurs ×1,0 à ×2,3 ;
+    Montreuil ×0,8 / ×0,8 à ×3,3 ; aucune faillite.
+  - **Communes à ajouter pour les tests** (prix d'appartements 2024 en €/m²) : Paris 11e 9 808 (hyper-dense), Villeurbanne 3 506 (10 769 parcelles), Noisy-le-Grand 4 233 (ville
+    nouvelle), Brie-Comte-Robert 3 520 (6 422 parcelles, banlieue lointaine), Biarritz 7 267 (9 982, littoral), Chamonix 9 161 (montagne), Bourges 1 500 (marché bas), Murat (rural,
+    pas de ventes d'appartements : teste l'a priori). Rezé, Albi, Saint-Nazaire et Saint-Denis (Réunion) sont trop grosses en commune entière. Le cadastre n'a pas répondu pour Paris 11e,
+    Lyon 7e, Noisy, Cergy, Bourges (à vérifier : code ou arrondissements).
+  - **Idée de fond (carte ouverte)** : l'utilisateur choisit une commune, elle est téléchargée et préparée dans le navigateur (barre de progression, mise en cache) avant de jouer. Pistes
+    d'allègement chiffrées : placement du bâtiment 35 % du coût d'un plan, bâtiments supplémentaires 14 %, recherche des délaissés ~620 ms par candidate.
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,

@@ -9,6 +9,7 @@
     "district": "rolldown scripts/fetch-district.ts -f esm -p node -o .build/fetch-district.mjs && node .build/fetch-district.mjs",
     "commune": "rolldown scripts/fetch-commune.ts -f esm -p node -o .build/fetch-commune.mjs && node .build/fetch-commune.mjs",
     "simulate": "rolldown scripts/simulate.ts -f esm -p node -o .build/simulate.mjs && node .build/simulate.mjs",
+    "market": "rolldown scripts/market-stats.ts -f esm -p node -o .build/market-stats.mjs && node .build/market-stats.mjs",
     "reprice": "rolldown scripts/reprice-district.ts -f esm -p node -o .build/reprice-district.mjs && node .build/reprice-district.mjs"
   },
   "dependencies": {
