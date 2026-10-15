@@ -73,6 +73,7 @@ import {
   type Plot,
   type ProjectRun,
 } from '../../moteur/src/game';
+import { pointInRing } from '../../moteur/src/game/district';
 import districtData from '../../moteur/data/districts/montreuil-mairie.json';
 
 const district = districtData as unknown as District;
@@ -296,7 +297,7 @@ function plotStyle(p: Plot): L.PathOptions {
     weight: sel ? 3 : p.projectId ? 2.5 : listed ? 3 : small ? 1.8 : view === 'hauteur' ? 1.5 : 1,
     fillColor: col ?? (listed && view !== 'prix' && view !== 'lieu' ? '#f6d27a' : zoneBlocked ? '#bdbdbd' : small ? '#cdb6e6' : lieu ? lieuColor(p.locationFactor) : free),
     // Vue « hauteur » : les parcelles libres restent transparentes pour laisser voir le bâti.
-    fillOpacity: col ? (p.projectId ? 0.7 : view === 'hauteur' || view === 'zonage' ? 0.35 : 0.55) : listed ? 0.45 : zoneBlocked ? 0.35 : small ? 0.5 : view === 'hauteur' || view === 'zonage' ? 0 : lieu ? 0.8 : 0.45,
+    fillOpacity: col ? (p.projectId ? 0.16 : view === 'hauteur' || view === 'zonage' ? 0.35 : 0.55) : listed ? 0.45 : zoneBlocked ? 0.35 : small ? 0.5 : view === 'hauteur' || view === 'zonage' ? 0 : lieu ? 0.8 : 0.45,
     dashArray: p.projectId ? '4 3' : small ? '2 4' : undefined,
   };
   if (dim) return { ...base, opacity: 0.2, fillOpacity: (base.fillOpacity ?? 0) * 0.2 };
@@ -348,8 +349,10 @@ map.createPane('bati');
 map.getPane('bati')!.style.zIndex = '350';
 map.getPane('bati')!.style.pointerEvents = 'none';
 const buildingsLayer = L.layerGroup();
+/** Bâti d'origine, avec son centre : il disparaît de la carte quand une opération le démolit. */
+const existingBuildings: { layer: L.Polygon; cx: number; cy: number; hidden: boolean }[] = [];
 for (const b of district.buildings) {
-  L.polygon(b.ring.map(([lon, lat]) => [lat, lon] as [number, number]), {
+  const layer = L.polygon(b.ring.map(([lon, lat]) => [lat, lon] as [number, number]), {
     pane: 'bati',
     interactive: false,
     stroke: true,
@@ -359,6 +362,80 @@ for (const b of district.buildings) {
     fillColor: heightColor(b.height),
     fillOpacity: b.estimated ? 0.7 : 0.9,
   }).addTo(buildingsLayer);
+  existingBuildings.push({ layer, cx: b.ring.reduce((t, q) => t + q[0], 0) / b.ring.length, cy: b.ring.reduce((t, q) => t + q[1], 0) / b.ring.length, hidden: false });
+}
+
+// Bâtiments des promoteurs : opérations en cours et livrées, dessinés à l'emplacement réel de leur emprise.
+map.createPane('bati2');
+map.getPane('bati2')!.style.zIndex = '360';
+map.getPane('bati2')!.style.pointerEvents = 'none';
+const builtLayer = L.layerGroup().addTo(map);
+const footprintCache = new Map<string, [number, number][] | null>();
+let hiddenKey = '';
+
+/** Emprise d'un projet sur la carte ([lat, lon]), mémorisée : le calcul géométrique est coûteux. */
+function footprintOf(p: Plot, criteria: Criteria, key: string): [number, number][] | null {
+  let ring = footprintCache.get(key);
+  if (ring === undefined) {
+    const project = computeProject(p.parcel, criteria);
+    if (project.footprint) {
+      const proj = new LocalProjection(project.origin.lon, project.origin.lat);
+      ring = project.footprint.map((v) => proj.toLonLat(v)).map((q) => [q.lat, q.lon] as [number, number]);
+    } else ring = null;
+    footprintCache.set(key, ring);
+  }
+  return ring;
+}
+
+const PHASE_STYLE: Record<string, { opacity: number; dash?: string }> = {
+  permis: { opacity: 0.22, dash: '3 3' },
+  preventes: { opacity: 0.35, dash: '3 3' },
+  chantier: { opacity: 0.62, dash: '6 2' },
+  livraison: { opacity: 0.88 },
+};
+
+/** Les bâtiments des joueurs remplacent le bâti d'origine des terrains qu'ils développent. */
+function drawBuildings() {
+  const developed = state.plots.filter((p) => p.projectId || p.built?.length);
+  // Bâti d'origine démoli : son centre tombe dans un terrain où une opération est lancée ou livrée.
+  const key = developed.map((p) => `${p.id}:${p.projectId ?? 'b'}`).join('|');
+  if (key !== hiddenKey) {
+    hiddenKey = key;
+    const rings = developed.map((p) => p.parcel.ring.map((q) => [q.lon, q.lat] as [number, number]));
+    for (const b of existingBuildings) {
+      const gone = rings.some((r) => pointInRing(b.cx, b.cy, r));
+      if (gone && !b.hidden) buildingsLayer.removeLayer(b.layer);
+      else if (!gone && b.hidden) buildingsLayer.addLayer(b.layer);
+      b.hidden = gone;
+    }
+  }
+  builtLayer.clearLayers();
+  const add = (ring: [number, number][], owner: string, height: number, phase: string) => {
+    const st = PHASE_STYLE[phase];
+    const col = colorOf(owner);
+    L.polygon(ring, {
+      pane: 'bati2',
+      interactive: false,
+      color: col,
+      weight: phase === 'livraison' ? 2 : 2.5,
+      opacity: 1,
+      dashArray: st.dash,
+      fillColor: view === 'hauteur' ? heightColor(height) : col,
+      fillOpacity: st.opacity,
+    }).addTo(builtLayer);
+  };
+  for (const p of developed) {
+    const run = p.projectId ? state.projects.find((r) => r.id === p.projectId) : undefined;
+    if (run) {
+      const ring = footprintOf(p, run.criteria, `${p.id}|${run.id}`);
+      if (ring) add(ring, run.owner, run.height, run.phase);
+    } else {
+      for (const b of p.built ?? []) {
+        const ring = footprintOf(p, b.criteria, `${p.id}|${b.runId}`);
+        if (ring) add(ring, b.owner, b.height, 'livraison');
+      }
+    }
+  }
 }
 
 const mapLegend = new L.Control({ position: 'bottomleft' });
@@ -385,7 +462,7 @@ function updateMapLegend() {
   }
   // Repères communs à toutes les vues : propriétaires et symboles.
   const owners = [`<span><i class="swatch" style="background:${colorOf(ME)}"></i>vous</span>`, ...state.players.filter((p) => p.bot).map((p) => `<span><i class="swatch" style="background:${colorOf(p.id)}"></i>${esc(shortName(p.name))}</span>`)].join(' ');
-  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#f6d27a;border:2px solid #c98200"></i>en vente</span> <span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span><i class="swatch" style="background:#7fd1d3;border:1px dashed #0f8b8d"></i>terrain communal</span> <span>pointillé épais : opération</span></div>`;
+  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#f6d27a;border:2px solid #c98200"></i>en vente</span> <span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span><i class="swatch" style="background:#7fd1d3;border:1px dashed #0f8b8d"></i>terrain communal</span> <span><i class="swatch" style="background:#fff;border:2.5px solid #1f6feb"></i>bâtiment construit (contour = promoteur ; pointillé = en chantier)</span></div>`;
   // Repliable (fermée par défaut sur petit écran) : le titre devient la ligne cliquable.
   const title = el.querySelector('b');
   const heading = title ? title.outerHTML : '<b>Légende</b>';
@@ -438,8 +515,18 @@ function computeRange() {
   ppmRange = v.length ? [v[Math.floor(v.length * 0.1)], v[Math.floor(v.length * 0.9)]] : [0, 1];
 }
 
+/** Ce qui se construit ou a été construit sur un terrain, pour l'infobulle. */
+function buildingNote(p: Plot): string {
+  const nameOf = (id: string) => esc(state.players.find((x) => x.id === id)?.name ?? id);
+  const run = p.projectId ? state.projects.find((r) => r.id === p.projectId) : undefined;
+  if (run) return `<br><b>${esc(run.id)}</b> · ${nameOf(run.owner)} · ${PHASE_LABEL[run.phase].toLowerCase()} · ${Math.round(run.height)} m, ${Math.round(run.sdp)} m²`;
+  const b = p.built?.[p.built.length - 1];
+  return b ? `<br>Livré par ${nameOf(b.owner)} · ${Math.round(b.height)} m, ${Math.round(b.sdp)} m²` : '';
+}
+
 function drawPlots() {
   computeRange();
+  drawBuildings();
   const ids = new Set(state.plots.map((p) => p.id));
   for (const [id, layer] of layers) if (!ids.has(id)) (layer.remove(), layers.delete(id));
   for (const p of state.plots) {
@@ -457,7 +544,7 @@ function drawPlots() {
       layers.set(p.id, layer);
     }
     layer.setStyle(plotStyle(p));
-    layer.bindTooltip(`${esc(p.label ?? p.id)}${p.zones.length ? ` · ${esc(ruleOf(p)!.label)}` : ''}<br>${eur(p.askingPrice)} · situation ×${p.locationFactor.toFixed(2).replace('.', ',')}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : p.municipal ? ' · terrain communal (appel d’offres)' : ''}`, { sticky: true });
+    layer.bindTooltip(`${esc(p.label ?? p.id)}${p.zones.length ? ` · ${esc(ruleOf(p)!.label)}` : ''}<br>${eur(p.askingPrice)} · situation ×${p.locationFactor.toFixed(2).replace('.', ',')}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : p.municipal ? ' · terrain communal (appel d’offres)' : ''}${buildingNote(p)}`, { sticky: true });
   }
 }
 
@@ -1658,6 +1745,7 @@ if (import.meta.env.DEV) {
       while (!state.over) advanceOne();
       afterAdvance('');
     },
+    zoomTo: (id: string) => { const p = plotById(id); if (p) map.fitBounds(L.latLngBounds(p.parcel.ring.map((q) => [q.lat, q.lon] as [number, number])), { maxZoom: 19, padding: [120, 120] }); },
     select: (ids: string[]) => ((selected = new Set(ids)), (tab = 'terrain'), renderAll()),
     /** Premières paires de parcelles libres, petites et assemblables. */
     mergeablePairs: (max = 5) => {

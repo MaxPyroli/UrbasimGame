@@ -317,6 +317,14 @@ collectivité jouent le rôle des enchères du Monopoly.
 - Bots : à l'approche de l'échéance de lancement d'un terrain de la commune (dernier trimestre), ils acceptent une marge nulle
   et ignorent la saturation du marché, pour ne pas perdre 10 % du prix.
 
+- Fait : **bâtiments des promoteurs sur la carte** (`drawBuildings` dans `jeu/src/main.ts`, `Plot.built` côté moteur). Une opération
+  lancée remplace le bâti d'origine du terrain (les bâtiments dont le centre tombe dans le terrain disparaissent) par son
+  emprise réelle (`computeProject`), colorée par hauteur (vue « Hauteur ») ou par promoteur (autres vues), avec le contour de la
+  couleur du promoteur. Opacité selon l'étape (permis, préventes : pointillé et léger ; chantier : plus dense ; livré : plein).
+  À la livraison, le bâtiment reste sur la carte (`Plot.built`, conservé par l'assemblage) jusqu'à la prochaine démolition.
+  Infobulle du terrain : opération, promoteur, étape, hauteur, surface. Limites : pas de volume 3D, bâti partiellement
+  chevauchant un terrain non démoli, emprise recalculée à partir des critères du projet.
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,
@@ -329,8 +337,7 @@ collectivité jouent le rôle des enchères du Monopoly.
   contraintes de programme) et se combinent avec les appels d'offres.
 
 ### Notes de la partie « clarté » (à traiter plus tard)
-- **Voir les bâtiments construits par les autres sur la carte** : les opérations (en cours et livrées) doivent remplacer le
-  bâti existant sur la carte, avec leur hauteur réelle, au lieu de seulement colorer la parcelle.
+- ~~Voir les bâtiments construits par les autres sur la carte~~ : fait (voir plus haut).
 - **Choix de l'implantation du bâtiment** : le joueur choisit de construire **le long de la route** (à l'alignement, en front
   de rue) **ou en retrait, à l'arrière / au cœur du terrain** (cour ou jardin côté rue). Aujourd'hui le bâtiment est
   placé automatiquement avec les retraits de la zone. À ajouter : option d'implantation dans le formulaire de projet, règles de

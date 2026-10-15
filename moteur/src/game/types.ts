@@ -82,6 +82,19 @@ export type ZoneFamily = 'centre' | 'renouvellement' | 'mixte' | 'preservation' 
 /** Pourquoi un terrain ne peut pas être construit seul : à combiner avec des parcelles voisines. */
 export type PlotIssue = 'trop-petite' | 'enclavee' | 'inconstructible' | 'zone';
 
+/** Bâtiment livré sur un terrain par une opération : reste sur la carte (et sera démoli par la prochaine opération). */
+export interface BuiltBuilding {
+  runId: string;
+  owner: PlayerId;
+  criteria: Criteria;
+  /** Hauteur (m) et surface de plancher (m²). */
+  height: number;
+  sdp: number;
+  dwellings: number;
+  /** Tour de livraison. */
+  round: number;
+}
+
 export interface Plot {
   id: PlotId;
   label?: string;
@@ -104,6 +117,8 @@ export interface Plot {
   existingSdp: number;
   /** Hauteur du bâti existant (m). */
   existingHeight: number;
+  /** Bâtiments livrés par les opérations des joueurs : ils remplacent le bâti d'origine sur la carte. */
+  built?: BuiltBuilding[];
   /** Coefficient de situation sur les prix de vente (transports, centre, équipements) ; 1 = médiane du quartier. */
   locationFactor: number;
   /** Surface du terrain (m²). */

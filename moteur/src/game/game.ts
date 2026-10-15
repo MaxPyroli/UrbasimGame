@@ -334,6 +334,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
       basePrice: plots.reduce((t, p) => t + p.basePrice, 0),
       paid: plots.reduce((t, p) => t + p.paid, 0),
       projectId: null,
+      ...(plots.some((p) => p.built?.length) ? { built: plots.flatMap((p) => p.built ?? []) } : {}),
     };
     const issue = plotIssue(merged.parcel, state.config, fusion.locationFactor, ruleOf(fusion));
     if (issue) fusion.issue = issue;
@@ -690,7 +691,7 @@ export function advanceRound(state: GameState): GameState {
     });
     s = due > 0 ? charge(s, p.owner, due) : credit(s, p.owner, -due);
     const base = Math.max(MIN_PLOT_PRICE, Math.round((p.sdp * config.market.landPerSdp * 1.2) / 1000) * 1000);
-    s = mapPlot(s, p.plotId, (x) => ({ ...x, owner: null, paid: 0, projectId: null, existingSdp: p.sdp, existingHeight: p.height, basePrice: base, obligation: undefined }));
+    s = mapPlot(s, p.plotId, (x) => ({ ...x, owner: null, paid: 0, projectId: null, existingSdp: p.sdp, existingHeight: p.height, built: [{ runId: p.id, owner: p.owner, criteria: p.criteria, height: p.height, sdp: p.sdp, dwellings: p.lots, round: s.round }], basePrice: base, obligation: undefined }));
     s = { ...s, projects: s.projects.filter((x) => x.id !== p.id) };
     s = withEvent(s, { player: p.owner, kind: 'operation', tone: net >= 0 ? 'good' : 'bad', popup: true, code: 'solde', ref: { project: p.id, plot: p.plotId }, text: `${owner.name} solde ${p.id} : ${p.lots} lots vendus ${eur(p.soldRevenue)}, résultat net ${eur(net)} en ${p.roundsRun} trimestres` });
   }

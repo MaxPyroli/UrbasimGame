@@ -92,3 +92,20 @@ describe('à surveiller', () => {
     expect(watchList(s, 'b').some((x) => x.id === 'debt')).toBe(false);
   });
 });
+
+describe('bâtiments livrés', () => {
+  it('une opération soldée laisse son bâtiment sur le terrain, et un assemblage les conserve', () => {
+    let s = make({ eventChance: 0, landMarket: 'instant', communeTenders: false });
+    s = play(s, { type: 'buy', player: 'a', plot: 'T0' });
+    s = play(s, { type: 'buy', player: 'a', plot: 'T1' });
+    s = play(s, { type: 'launch', player: 'a', plot: 'T0', criteria: { ...DEFAULT_CRITERIA, levels: 3 } });
+    expect(s.plots.find((p) => p.id === 'T0')!.built).toBeUndefined();
+    for (let i = 0; i < 40 && s.projects.length && !s.over; i++) s = next(s);
+    const t0 = s.plots.find((p) => p.id === 'T0')!;
+    expect(s.projects).toHaveLength(0);
+    expect(t0.built).toHaveLength(1);
+    expect(t0.built![0]).toMatchObject({ owner: 'a', runId: 'P1' });
+    expect(t0.built![0].height).toBeGreaterThan(5);
+    expect(t0.projectId).toBeNull();
+  });
+});
