@@ -15,13 +15,13 @@ import { marketAt } from './location';
 import { adaptToDensity, applyRule, combineRules, type ZoneRule } from './plu';
 import { mergeParcels } from './merge';
 import { charge, credit, eur, hashFrac, mapPlayer, mapPlot, mapProject, withEvent } from './ledger';
-import { committedCash, dropOffers, listPlots, listingCount, placeOffer, resolveMarket, withdrawOffer } from './market';
+import { committedCash, dropOffers, listPlots, listingCount, placeBundle, placeOffer, resolveMarket, withdrawOffer } from './market';
 import { dropTenderBids, committedTenderCash, enforceObligations, openTender, pickMunicipalIds, programmeParams, placeTenderBid, resolveTenders, shouldOpenTender, withdrawTenderBid } from './tender';
 import { SOCIAL_PRICE_RATIO } from '../engine';
 import { advanceZacs, openZacLots, planZacs, zacOnLaunch } from './zac';
 import { nextGaussian, nextRandom } from './rng';
 import { expectedSales, lotPrice, lotsLeft, soldShare } from './sales';
-import type { Action, ActionResult, BotProfileName, GameConfig, Density, GameState, Plot, PlotIssue, Quality, TenderSpec, ProjectPhase, ProjectRun, ZoneFamily } from './types';
+import type { Action, ActionResult, BotProfileName, GameConfig, Density, GameState, Plot, PlotIssue, Player, Quality, TenderSpec, ProjectPhase, ProjectRun, ZoneFamily } from './types';
 
 export const DEFAULT_CONFIG: GameConfig = {
   market: MARKETS['petite-couronne'],
@@ -275,6 +275,7 @@ export function createGame(g: NewGame): GameState {
     tenders: [],
     nextTenderId: 1,
     zacs,
+    pendingMerges: [],
     marketIndex: 1,
     demandShock: 0,
     landHeat: 1,
@@ -303,6 +304,46 @@ const fail = (error: string): ActionResult => ({ ok: false, error });
 /** Phase d'une opération (l'avancement est stocké : l'attente de préventes et les retards le rendent imprévisible). */
 export const projectPhase = (p: ProjectRun, _round?: number): ProjectPhase => p.phase;
 
+/** Assemble des parcelles que le joueur possède en un seul terrain (action « merge » et assemblage automatique d'une offre groupée). */
+function mergePlots(state: GameState, player: Player, ids0: string[]): ActionResult {
+  const ids = [...new Set(ids0)].sort();
+  if (ids.length < 2) return fail('il faut au moins deux parcelles');
+  const list = ids.map((id) => state.plots.find((p) => p.id === id));
+  if (list.some((p) => !p)) return fail('terrain inconnu');
+  const plots = list as Plot[];
+  if (plots.some((p) => p.owner !== player.id)) return fail('vous devez posséder toutes les parcelles à assembler');
+  if (plots.some((p) => p.projectId)) return fail('une opération est en cours sur l’une des parcelles');
+  if (plots.some((p) => p.obligation)) return fail('un terrain obtenu auprès de la commune ne peut pas être assemblé : il porte un cahier des charges');
+  const merged = mergeParcels(plots.map((p) => p.parcel));
+  if (!merged.ok) return fail(merged.error);
+  const id = ids.join('+');
+  const fusion: Plot = {
+    id,
+    label: `Assemblage ${ids.length} parcelles · ${Math.round(merged.area)} m²`,
+    parts: ids.flatMap((i) => state.plots.find((p) => p.id === i)!.parts ?? [i]),
+    parcel: merged.parcel,
+    owner: player.id,
+    existingSdp: plots.reduce((t, p) => t + p.existingSdp, 0),
+    existingHeight: Math.max(...plots.map((p) => p.existingHeight)),
+    zones: [...new Set(plots.flatMap((p) => p.zones))],
+    // L'assemblage prend la densité de sa plus grande parcelle.
+    ...(plots.slice().sort((a, b) => b.area - a.area)[0].density ? { density: plots.slice().sort((a, b) => b.area - a.area)[0].density } : {}),
+    ...(plots.slice().sort((a, b) => b.area - a.area)[0].zoneCode ? { zoneCode: plots.slice().sort((a, b) => b.area - a.area)[0].zoneCode } : {}),
+    locationFactor: plots.reduce((t, p) => t + p.locationFactor * p.area, 0) / plots.reduce((t, p) => t + p.area, 0),
+    area: merged.area,
+    askingPrice: 0,
+    basePrice: plots.reduce((t, p) => t + p.basePrice, 0),
+    paid: plots.reduce((t, p) => t + p.paid, 0),
+    projectId: null,
+    ...(plots.some((p) => p.built?.length) ? { built: plots.flatMap((p) => p.built ?? []) } : {}),
+  };
+  const issue = plotIssue(merged.parcel, state.config, fusion.locationFactor, ruleOf(fusion));
+  if (issue) fusion.issue = issue;
+  let s: GameState = { ...state, plots: [...state.plots.filter((p) => !ids.includes(p.id)), fusion] };
+  s = reprice(s);
+  return { ok: true, state: withEvent(s, { player: player.id, kind: 'terrain', tone: 'info', text: `${player.name} assemble ${ids.join(', ')} (${Math.round(merged.area)} m²)` }) };
+}
+
 /** Application d'une action d'un joueur. Pure : ne modifie pas l'état reçu. */
 export function applyAction(state: GameState, action: Action): ActionResult {
   if (state.over) return fail('la partie est terminée');
@@ -319,44 +360,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
   }
   if (player.ready) return fail('tour terminé : attendez le prochain trimestre');
 
-  if (action.type === 'merge') {
-    const ids = [...new Set(action.plots)].sort();
-    if (ids.length < 2) return fail('il faut au moins deux parcelles');
-    const list = ids.map((id) => state.plots.find((p) => p.id === id));
-    if (list.some((p) => !p)) return fail('terrain inconnu');
-    const plots = list as Plot[];
-    if (plots.some((p) => p.owner !== player.id)) return fail('vous devez posséder toutes les parcelles à assembler');
-    if (plots.some((p) => p.projectId)) return fail('une opération est en cours sur l’une des parcelles');
-    if (plots.some((p) => p.obligation)) return fail('un terrain obtenu auprès de la commune ne peut pas être assemblé : il porte un cahier des charges');
-    const merged = mergeParcels(plots.map((p) => p.parcel));
-    if (!merged.ok) return fail(merged.error);
-    const id = ids.join('+');
-    const fusion: Plot = {
-      id,
-      label: `Assemblage ${ids.length} parcelles · ${Math.round(merged.area)} m²`,
-      parts: ids.flatMap((i) => state.plots.find((p) => p.id === i)!.parts ?? [i]),
-      parcel: merged.parcel,
-      owner: player.id,
-      existingSdp: plots.reduce((t, p) => t + p.existingSdp, 0),
-      existingHeight: Math.max(...plots.map((p) => p.existingHeight)),
-      zones: [...new Set(plots.flatMap((p) => p.zones))],
-      // L'assemblage prend la densité de sa plus grande parcelle.
-      ...(plots.slice().sort((a, b) => b.area - a.area)[0].density ? { density: plots.slice().sort((a, b) => b.area - a.area)[0].density } : {}),
-      ...(plots.slice().sort((a, b) => b.area - a.area)[0].zoneCode ? { zoneCode: plots.slice().sort((a, b) => b.area - a.area)[0].zoneCode } : {}),
-      locationFactor: plots.reduce((t, p) => t + p.locationFactor * p.area, 0) / plots.reduce((t, p) => t + p.area, 0),
-      area: merged.area,
-      askingPrice: 0,
-      basePrice: plots.reduce((t, p) => t + p.basePrice, 0),
-      paid: plots.reduce((t, p) => t + p.paid, 0),
-      projectId: null,
-      ...(plots.some((p) => p.built?.length) ? { built: plots.flatMap((p) => p.built ?? []) } : {}),
-    };
-    const issue = plotIssue(merged.parcel, state.config, fusion.locationFactor, ruleOf(fusion));
-    if (issue) fusion.issue = issue;
-    let s: GameState = { ...state, plots: [...state.plots.filter((p) => !ids.includes(p.id)), fusion] };
-    s = reprice(s);
-    return { ok: true, state: withEvent(s, { player: player.id, kind: 'terrain', tone: 'info', text: `${player.name} assemble ${ids.join(', ')} (${Math.round(merged.area)} m²)` }) };
-  }
+  if (action.type === 'merge') return mergePlots(state, player, action.plots);
 
   if (action.type === 'setPrice') {
     const run = state.projects.find((p) => p.id === action.project);
@@ -376,6 +380,11 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     return { ok: true, state: r.state };
   }
 
+  if (action.type === 'bundleOffer') {
+    const r = placeBundle(state, player.id, action.offers, action.extra);
+    if (!r.ok) return fail(r.error);
+    return { ok: true, state: r.state };
+  }
   if (action.type === 'offer' || action.type === 'withdraw') {
     const r = action.type === 'offer' ? placeOffer(state, player.id, action.plot, action.price) : withdrawOffer(state, player.id, action.plot);
     if (!r.ok) return fail(r.error);
@@ -726,6 +735,15 @@ export function advanceRound(state: GameState): GameState {
   // Marché foncier : enchères échues et prospections résolues, puis nouveaux terrains mis en vente.
   if (config.landMarket === 'auction') {
     s = resolveMarket(s);
+    // Offres groupées remportées : les parcelles sont assemblées d'office.
+    for (const m of s.pendingMerges) {
+      const owner = s.players.find((p) => p.id === m.player);
+      if (!owner || owner.bankrupt) continue;
+      const r = mergePlots(s, owner, m.plots);
+      if (r.ok) s = withEvent(r.state, { player: m.player, kind: 'terrain', tone: 'good', ref: { plot: [...m.plots].sort().join('+') }, text: `Vos ${m.plots.length} parcelles sont assemblées en un seul terrain : lancez votre projet` });
+      else s = withEvent(s, { player: m.player, kind: 'terrain', tone: 'bad', text: `Assemblage automatique impossible (${r.error}) : vos parcelles restent séparées` });
+    }
+    s = { ...s, pendingMerges: [] };
     s = listPlots(s, listingCount(s));
   }
 

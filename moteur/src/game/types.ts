@@ -368,6 +368,10 @@ export interface Offer {
   round: number;
   /** Somme bloquée sur la trésorerie : prix et frais de notaire. */
   reserved: number;
+  /** Offre groupée « tout ou rien » : identifiant commun aux offres d'un même projet sur plusieurs terrains. */
+  bundle?: string;
+  /** Parcelles que le joueur possède déjà et qui seront assemblées avec celles de l'offre groupée si elle est remportée. */
+  extra?: PlotId[];
 }
 
 /** Famille d'un événement du journal : sert à filtrer les notifications et à choisir l'icône. */
@@ -399,6 +403,8 @@ export interface GameState {
   tenders: Tender[];
   nextTenderId: number;
   zacs: Zac[];
+  /** Assemblages à faire en fin de trimestre : les terrains d'une offre groupée remportée. */
+  pendingMerges: { player: PlayerId; plots: PlotId[] }[];
   /** Indice des prix de vente (1 = référence), évolue au fil des tours. */
   marketIndex: number;
   /** Choc de demande des ménages (retournement ou regain de confiance), qui s'estompe de 25 % par trimestre. */
@@ -417,6 +423,8 @@ export type Action =
   /** Dépose ou remplace une offre sur un terrain libre (mode enchères). */
   | { type: 'offer'; player: PlayerId; plot: PlotId; price: number }
   | { type: 'withdraw'; player: PlayerId; plot: PlotId }
+  /** Offre groupée « tout ou rien » sur plusieurs terrains : si une seule n'est pas remportée, aucune ne l'est, et les terrains remportés sont assemblés. */
+  | { type: 'bundleOffer'; player: PlayerId; offers: { plot: PlotId; price: number }[]; /** Parcelles déjà possédées, à assembler avec le reste. */ extra?: PlotId[] }
   /** Propose un projet à la commune pour un de ses terrains (dépose ou remplace sa proposition). */
   | { type: 'tenderBid'; player: PlayerId; tender: string; price: number; socialShare: number; quality: Quality; delivery: number }
   | { type: 'tenderWithdraw'; player: PlayerId; tender: string }

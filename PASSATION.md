@@ -397,6 +397,21 @@ collectivité jouent le rôle des enchères du Monopoly.
   s'ouvre seule quand la version bêta change. **Pour publier une nouvelle bêta** : monter `version` dans `jeu/package.json` et ajouter une
   entrée en tête de `CHANGELOG`.
 
+- Fait : **projets sur plusieurs terrains plus simples** (retour « l'achat est compliqué et on manque d'informations »).
+  - **Offre groupée « tout ou rien »** (`bundleOffer`, `placeBundle` et `resolveMarket` dans `moteur/src/game/market.ts`) : une offre par
+    terrain, tranchées ensemble (même échéance exigée) ; si une seule n'est pas remportée (propriétaire qui refuse, concurrent qui
+    devance), aucune ne l'est, les sommes sont rendues (les frais de prospection restent perdus) et chaque parcelle abandonnée revient
+    à l'autre meilleur offrant. Si tout est remporté, les parcelles (et celles déjà possédées, `extra`) sont **assemblées d'office**
+    (`pendingMerges`, `mergePlots` factorisé). Retirer une offre du groupe retire tout le groupe.
+  - **Plan d'acquisition** dans la fiche multi-parcelles (`renderMulti`) : une ligne par parcelle (à vous / en vente jusqu'à / prospection
+    avec **chance d'acceptation** `acceptChance` / ↑ spéculateur / concurrents sur le terrain / ⚠ bloquée : appartient à un concurrent,
+    communale, opération en cours), prix prévu, ✕ pour retirer, total à bloquer (frais de prospection compris), prix de terrain
+    maximal de l'ensemble pour la marge visée, **niveau d'offre** standard (+8 %) ou sûr (au-dessus de tout seuil possible), chance
+    de remporter l'ensemble, simulation du projet avec « Meilleur projet », et **voisines à ajouter** en un clic (`neighboursOf`).
+  - Sur la fiche d'un terrain seul : encart « Projet sur plusieurs terrains » avec ses voisines et un bouton « + Ajouter » (active la
+    sélection multiple).
+  - Messages : fenêtres d'alerte « offre groupée remportée / annulée » ; onglet Marché : « offre groupée » et « Retirer le groupe ».
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,

@@ -7,6 +7,14 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.9.1',
+    title: 'Projets sur plusieurs terrains',
+    notes: [
+      'Offre groupée « tout ou rien » : si une parcelle échappe, rien n’est acheté ; si tout est remporté, les parcelles sont assemblées d’office',
+      'Plan d’acquisition : statut de chaque parcelle, prix prévu, chance d’acceptation, concurrents, parcelles bloquées, total à bloquer et prix maximal pour la marge visée',
+      'Niveau d’offre standard ou sûr, voisines à ajouter en un clic, simulation du projet sur l’ensemble',
+    ],
+  },  {
     version: '0.9',
     title: 'ZAC, densité, simulation',
     notes: [
