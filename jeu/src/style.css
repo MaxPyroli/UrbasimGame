@@ -352,3 +352,7 @@ button.primary:hover:not(:disabled) { box-shadow: 0 2px 10px color-mix(in srgb, 
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 .map-legend { max-width: min(430px, calc(100vw - 80px)); }
+.rules { margin: 6px 0 2px; }
+.brief { border-left: 4px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: 4px; padding: 6px 10px; margin: 6px 0; font-size: 13px; }
+.brief.ok { border-left-color: var(--good); background: color-mix(in srgb, var(--good) 8%, transparent); }
+.brief.ko { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 8%, transparent); }

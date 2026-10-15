@@ -8,6 +8,13 @@ export function withEvent(s: GameState, e: Omit<GameEvent, 'round'>): GameState 
   return { ...s, log: [...s.log, { round: s.round, ...e }] };
 }
 
+/** Nombre pseudo-aléatoire stable dans [0, 1] tiré d'un identifiant (même résultat à chaque partie). */
+export const hashFrac = (id: string) => {
+  let h = 0;
+  for (const ch of id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
+  return (h % 1000) / 999;
+};
+
 export const mapPlayer = (s: GameState, id: string, f: (p: Player) => Player): GameState => ({
   ...s,
   players: s.players.map((p) => (p.id === id ? f(p) : p)),

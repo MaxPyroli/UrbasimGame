@@ -137,6 +137,7 @@ function bid(state: GameState, playerId: string, profile: BotProfile): GameState
   for (const plot of s.plots) {
     if (plot.owner !== null || plot.municipal || offerOf(s, plot.id, playerId)) continue;
     const listed = !!plot.listing;
+    if (plot.speculator) continue; // un spéculateur ne vend pas au prix du marché : inutile de payer des frais de prospection
     const floor = minOfferPrice(plot);
     const plan = bestPlan(s, plot, listed ? floor : plot.askingPrice, profile);
     if (!plan || saturated(s, plan.lots, profile)) continue;

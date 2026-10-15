@@ -47,6 +47,8 @@ export interface GameConfig {
   prospectFeeMin: number;
   /** Un propriétaire non vendeur n'accepte que s'il obtient 0 à `reserveSpread` de plus que le prix affiché (selon le terrain). */
   reserveSpread: number;
+  /** Part des terrains dont le propriétaire spécule : prix affiché en hausse chaque trimestre, jamais mis en vente, exigeant en prospection. */
+  speculatorShare: number;
   /** Frais de structure de la société par trimestre, en part de la trésorerie de départ (équipe, loyers) : 0 = aucun. */
   structureCostRate: number;
   /** Frais de structure par trimestre en euros (calculé à la création de la partie). */
@@ -106,6 +108,10 @@ export interface Plot {
   /** Familles de zones du PLU qui touchent ce terrain (plusieurs après un assemblage à cheval) et code de la zone principale. */
   zones: ZoneFamily[];
   zoneCode?: string;
+  /** Propriétaire spéculateur : il ne vend pas aux enchères et fait monter son prix chaque trimestre. */
+  speculator?: boolean;
+  /** Hausse accumulée du prix affiché due à la spéculation (1 = aucune). */
+  speculation?: number;
   /** Densité du bâti environnant (absent = moyenne) : en tissu dense, on construit en limite et avec peu de retrait. */
   density?: Density;
   /** Terrain de la commune : il ne se vend que par appel d'offres (ni enchères ni prospection). */

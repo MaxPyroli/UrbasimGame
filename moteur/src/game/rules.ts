@@ -20,6 +20,7 @@ const BASE: Partial<GameConfig> = {
   municipalPlots: 6,
   tenderRounds: 3,
   tenderEvery: 3,
+  speculatorShare: 0.15,
 };
 
 export const DIFFICULTIES: Record<Difficulty, DifficultyPreset> = {

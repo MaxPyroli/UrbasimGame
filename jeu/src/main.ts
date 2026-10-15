@@ -50,6 +50,7 @@ import {
   ZONE_RULES,
   criteriaFor,
   ruleOf,
+  plotIssue,
   MAX_PRICE_POLICY,
   MIN_PRICE_POLICY,
   applyAction,
@@ -593,6 +594,7 @@ function computeRange() {
 
 /** Ce qui se construit ou a été construit sur un terrain, pour l'infobulle. */
 function buildingNote(p: Plot): string {
+  if (!p.owner && (p.speculation ?? 1) > 1.02) return `<br>↑ prix en hausse +${Math.round(((p.speculation ?? 1) - 1) * 100)} % (propriétaire spéculateur)`;
   const nameOf = (id: string) => esc(state.players.find((x) => x.id === id)?.name ?? id);
   const run = p.projectId ? state.projects.find((r) => r.id === p.projectId) : undefined;
   if (run) return `<br><b>${esc(run.id)}</b> · ${nameOf(run.owner)} · ${PHASE_LABEL[run.phase].toLowerCase()} · ${Math.round(run.height)} m, ${Math.round(run.sdp)} m²`;
@@ -1152,39 +1154,102 @@ function renderSelection(): string {
   return renderSingle(plots[0]);
 }
 
+/** Identifiant du terrain virtuel de la simulation (jamais présent dans la partie). */
+const SIM_ID = 'simulation';
+/** Terrain virtuel de la simulation en cours : l'assemblage des parcelles sélectionnées, achetées ou non. */
+let simPlot: Plot | null = null;
+
+/**
+ * Terrain virtuel issu de l'assemblage de parcelles, pour simuler un projet avant d'acheter. Son prix est celui des parcelles
+ * libres (prix affiché) plus ce que j'ai payé pour les miennes.
+ */
+function virtualPlot(plots: Plot[]): Plot | string {
+  if (plots.some((p) => p.municipal || p.obligation)) return 'une parcelle communale ne s’assemble pas : elle se remporte par appel d’offres.';
+  if (plots.some((p) => p.projectId)) return 'une opération est déjà en cours sur l’une de ces parcelles.';
+  const m = mergeParcels(plots.map((p) => p.parcel));
+  if (!m.ok) return m.error;
+  const big = plots.slice().sort((a, b) => areaOf(b) - areaOf(a))[0];
+  const rate = state.config.bilanParams.acquisitionFeeRate;
+  const totalArea = plots.reduce((s, p) => s + areaOf(p), 0);
+  const land = plots.reduce((s, p) => s + (p.owner === ME ? p.paid / (1 + rate) : p.askingPrice), 0);
+  const v: Plot = {
+    ...big,
+    id: SIM_ID,
+    label: `Simulation · ${plots.length} parcelles`,
+    parts: undefined,
+    listing: undefined,
+    municipal: undefined,
+    obligation: undefined,
+    built: undefined,
+    issue: undefined,
+    parcel: m.parcel,
+    owner: null,
+    zones: [...new Set(plots.flatMap((p) => p.zones))],
+    existingSdp: plots.reduce((s, p) => s + p.existingSdp, 0),
+    existingHeight: Math.max(...plots.map((p) => p.existingHeight)),
+    locationFactor: plots.reduce((s, p) => s + p.locationFactor * areaOf(p), 0) / totalArea,
+    area: m.area,
+    askingPrice: Math.round(land),
+    basePrice: Math.round(land),
+    paid: 0,
+    projectId: null,
+  };
+  const issue = plotIssue(m.parcel, state.config, v.locationFactor, ruleOf(v));
+  if (issue) v.issue = issue;
+  areaCache.set(m.parcel, m.area);
+  return v;
+}
+
 function renderMulti(plots: Plot[]): string {
+  simPlot = null;
   drawOverlay(null);
   const area = plots.reduce((s, p) => s + areaOf(p), 0);
   const free = plots.every((p) => p.owner === null);
   const cost = plots.reduce((s, p) => s + buyCost(p), 0);
-  // Diagnostic en direct : pourquoi l'assemblage est (im)possible.
-  let verdict = '';
-  let canMerge = false;
+  // Diagnostic en direct : pourquoi l'assemblage est (im)possible, et ce qu'il reste à acheter.
   const notMine = plots.filter((p) => p.owner !== ME);
   const busy = plots.filter((p) => p.projectId);
-  if (notMine.length) {
-    verdict = `<div class="check bad">Il faut posséder toutes les parcelles : achetez ${notMine.map((p) => esc(shortLabel(p))).join(', ')} (${eur(notMine.reduce((s, p) => s + buyCost(p), 0))}).</div>`;
-  } else if (busy.length) {
-    verdict = `<div class="check bad">Une opération est en cours sur ${busy.map((p) => esc(shortLabel(p))).join(', ')} : elle doit d’abord se terminer.</div>`;
-  } else {
-    const r = mergeParcels(plots.map((p) => p.parcel));
-    if (r.ok) {
-      canMerge = true;
-      verdict = `<div class="check good">Assemblage possible : un terrain de ${Math.round(r.area)} m²${r.parcel.streetEdges.length ? '' : ' <b>sans accès à la rue</b> (à compléter avec une parcelle qui donne sur la rue)'}.</div>`;
-    } else {
-      verdict = `<div class="check bad">Assemblage impossible : ${esc(r.error)}.</div>`;
-    }
-  }
+  const sim = virtualPlot(plots);
+  const geometry = typeof sim === 'string' ? `<div class="check bad">Assemblage impossible : ${esc(sim.replace(/\.$/, ''))}.</div>` : `<div class="check good">Assemblage possible : un terrain de ${Math.round(sim.area)} m²${sim.parcel.streetEdges.length ? '' : ' <b>sans accès à la rue</b> (à compléter avec une parcelle qui donne sur la rue)'}.</div>`;
+  const ownership = notMine.length
+    ? `<div class="check warn">Pour l’assembler pour de bon, il faut posséder toutes les parcelles : achetez ${notMine.map((p) => esc(shortLabel(p))).join(', ')} (${eur(notMine.reduce((s, p) => s + buyCost(p), 0))}).</div>`
+    : busy.length
+      ? `<div class="check bad">Une opération est en cours sur ${busy.map((p) => esc(shortLabel(p))).join(', ')} : elle doit d’abord se terminer.</div>`
+      : '';
+  const canMerge = typeof sim !== 'string' && notMine.length === 0 && busy.length === 0;
   const sold = plots.some((p) => p.owner && p.owner !== ME);
+  // Offres groupées sur les terrains libres de la sélection (mode enchères).
+  const rate = state.config.bilanParams.acquisitionFeeRate;
+  const targets = state.config.landMarket === 'auction' ? plots.filter((p) => !p.owner && !p.municipal && p.issue !== 'zone' && !offerOf(state, p.id, ME)) : [];
+  const groupHtml = targets.length > 1
+    ? (() => {
+        const total = targets.reduce((s, p) => s + Math.round(defaultBid(p) * (1 + rate)) + (p.listing ? 0 : prospectFee(state, defaultBid(p))), 0);
+        const fees = targets.reduce((s, p) => s + (p.listing ? 0 : prospectFee(state, defaultBid(p))), 0);
+        return `<h2>Offres groupées</h2><div class="muted" style="font-size:12px">Une offre sur chacun des ${targets.length} terrains libres, un peu au-dessus du prix de départ (+5 %) ou du prix affiché (+8 %). Total bloqué : <b>${eur(total)}</b>${fees ? ` dont ${eur(fees)} de frais de prospection (perdus si refus)` : ''}. ${targets.some((p) => p.speculator && (p.speculation ?? 1) > 1.02) ? 'Certains propriétaires semblent spéculer : leur prix grimpe, une offre à +8 % peut être refusée.' : ''}</div>
+          <div class="row"><button id="prospectAll" ${total > me().cash ? 'disabled' : ''}>Déposer ${targets.length} offres · ${eur(total)}</button></div>${total > me().cash ? `<div class="check bad">Il vous manque ${eur(total - me().cash)}.</div>` : ''}`;
+      })()
+    : '';
+  let simHtml = '';
+  if (typeof sim !== 'string') {
+    simPlot = sim;
+    const body = sim.issue
+      ? `<div class="notice" style="--nc:#7b3fa0"><b>Encore trop juste</b> ${esc(ISSUE_MESSAGE[sim.issue])}</div>`
+      : projectForm(sim, false);
+    simHtml = `<h2>Simulation du projet assemblé</h2>
+      <div class="muted" style="font-size:12px">Sans rien acheter : le bilan suppose ${eur(sim.askingPrice)} de terrain (prix affiché des parcelles libres, prix payé pour les vôtres), frais de notaire en plus pour les parcelles à acheter.</div>${body}`;
+    if (sim.issue) drawOverlay(null);
+  }
   return `<div class="head"><b>${plots.length} parcelles</b> <span class="muted">· ${Math.round(area)} m² · ${eur(cost)} frais compris</span></div>
     <div class="muted" style="font-size:12px;margin:4px 0">${plots.map((p) => `${esc(shortLabel(p))} (${p.owner === ME ? 'à vous' : p.owner ? esc(state.players.find((x) => x.id === p.owner)!.name) : 'libre'})`).join(' · ')}</div>
-    ${verdict}
+    ${geometry}${ownership}
+    ${groupHtml}
     <div class="row">
       <button id="merge" class="primary" ${canMerge ? '' : 'disabled'}>Assembler en un terrain</button>
       <button id="buyAll" ${free && !sold ? '' : 'disabled'} title="Achète toutes les parcelles libres de la sélection">Tout acheter</button>
       <button id="clear">Annuler</button>
     </div>
-    <p class="muted" style="font-size:12px">Les parcelles doivent se toucher sur au moins 1,5 m. Assembler permet de construire plus gros, et de rendre constructibles des parcelles trop petites ou enclavées.</p>`;
+    <p class="muted" style="font-size:12px">Les parcelles doivent se toucher sur au moins 1,5 m. Assembler permet de construire plus gros, et de rendre constructibles des parcelles trop petites ou enclavées.</p>
+    ${simHtml}`;
 }
 
 function statusPill(p: Plot): string {
@@ -1213,6 +1278,7 @@ function renderSingle(p: Plot): string {
       ${fact('Bâti existant', p.existingSdp ? `${p.existingSdp} m²${p.existingHeight ? ` · ${Math.round(p.existingHeight)} m` : ''}` : 'aucun')}
     </div>`;
 
+  if (!run) html += plotBrief(p, mine);
   if (run) {
     drawOverlay(null);
     return html + `<h2>Opération ${esc(run.id)}</h2>` + operationCard(run.id) + details(p);
@@ -1587,7 +1653,7 @@ function auctionPanel(p: Plot): string {
   const left = p.listing ? p.listing.until - state.round : 0;
   const head = listed
     ? `<div class="notice" style="--nc:#c98200"><b>En vente</b> · offres ouvertes jusqu’à ${quarterLabel(p.listing!.until - 1)} (encore ${left} trimestre${left > 1 ? 's' : ''}) · ${n} offre${n > 1 ? 's' : ''} déposée${n > 1 ? 's' : ''}<div class="muted" style="font-size:12px">Offres sous pli fermé : le plus offrant l’emporte.</div></div>`
-    : `<div class="notice" style="--nc:var(--accent)"><b>Pas en vente</b> · vous pouvez prospecter le propriétaire : réponse à la fin du trimestre, frais de prospection non remboursés. ${n ? `${n} offre${n > 1 ? 's' : ''} déjà déposée${n > 1 ? 's' : ''} ce trimestre.` : ''}<div class="muted" style="font-size:12px">Il n’accepte que s’il est satisfait du prix ; si deux promoteurs prospectent, le plus offrant l’emporte.</div></div>`;
+    : `${(p.speculation ?? 1) > 1.02 ? `<div class="notice" style="--nc:var(--warn)"><b>↑ Prix en hausse (+${Math.round(((p.speculation ?? 1) - 1) * 100)} %)</b> Son prix grimpe plus vite que le marché : ce propriétaire spécule. Il ne mettra pas son terrain en vente et exigera plus que le prix affiché.</div>` : ''}<div class="notice" style="--nc:var(--accent)"><b>Pas en vente</b> · vous pouvez prospecter le propriétaire : réponse à la fin du trimestre, frais de prospection non remboursés. ${n ? `${n} offre${n > 1 ? 's' : ''} déjà déposée${n > 1 ? 's' : ''} ce trimestre.` : ''}<div class="muted" style="font-size:12px">Il n’accepte que s’il est satisfait du prix ; si deux promoteurs prospectent, le plus offrant l’emporte.</div></div>`;
   return `${head}
     <label class="f col">${mine ? 'Votre offre' : listed ? 'Votre offre' : 'Prix proposé'}<input type="number" id="bid" step="1000" min="${min}" value="${draft}"></label>
     <div class="muted" style="font-size:12px">Minimum ${eur(min)} · bloque ${eur(reserved)} notaire compris${fee ? ` · frais de prospection ${eur(fee)}` : ''}${mine ? ` · déjà bloqué ${eur(mine.reserved)}` : ''}</div>
@@ -1602,7 +1668,11 @@ function details(p: Plot): string {
 }
 
 /** Prix de terrain pris pour le bilan d'un terrain pas encore acquis : l'offre en préparation, sinon le prix affiché. */
+/** Offre proposée par défaut : un peu au-dessus du prix de départ ou du prix affiché. */
+const defaultBid = (p: Plot) => bidDraft[p.id] ?? offerOf(state, p.id, ME)?.price ?? (p.listing ? Math.round((p.listing.minPrice * 1.05) / 1000) * 1000 : Math.round((p.askingPrice * 1.08) / 1000) * 1000);
+
 function landDraft(p: Plot): number {
+  if (p.id === SIM_ID) return simPlot?.askingPrice ?? p.askingPrice;
   if (state.config.landMarket !== 'auction') return p.askingPrice;
   return bidDraft[p.id] ?? offerOf(state, p.id, ME)?.price ?? (p.listing ? Math.round((p.listing.minPrice * 1.05) / 1000) * 1000 : Math.round((p.askingPrice * 1.08) / 1000) * 1000);
 }
@@ -1630,9 +1700,19 @@ function planBilan(p: Plot, proj: ReturnType<typeof computeProject>, landPrice: 
 }
 
 /** Cherche le projet le plus rentable sans erreur (R+0 à R+8, avec ou sans attique, stationnement automatique). */
-function bestForm(p: Plot, owned: boolean): { levels: number; attic: boolean; margin: number } | null {
+interface BestPlan {
+  levels: number;
+  attic: boolean;
+  margin: number;
+  marginRate: number;
+  /** Prix de terrain maximal pour la marge visée. */
+  maxLand: number;
+  dwellings: number;
+  sdp: number;
+}
+function bestForm(p: Plot, owned: boolean): BestPlan | null {
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : landDraft(p);
-  let best: { levels: number; attic: boolean; margin: number } | null = null;
+  let best: BestPlan | null = null;
   const ob = owned ? p.obligation : undefined;
   for (let levels = 0; levels <= 8; levels++) {
     for (const attic of [false, true]) {
@@ -1640,10 +1720,52 @@ function bestForm(p: Plot, owned: boolean): { levels: number; attic: boolean; ma
       const proj = computeProject(p.parcel, plotCriteria(p, { ...criteria(), levels, attic, parkingStrategy: 'auto' }, owned));
       if (!proj.footprint || proj.checks.some((c) => c.status === 'error')) continue;
       const b = planBilan(p, proj, landPrice, owned);
-      if (!best || b.margin > best.margin) best = { levels, attic, margin: b.margin };
+      if (!best || b.margin > best.margin) best = { levels, attic, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal };
     }
   }
   return best;
+}
+
+const briefCache = new Map<string, BestPlan | null>();
+/** Meilleur projet d'un terrain, mémorisé pour la durée d'un trimestre (le calcul teste une vingtaine de variantes). */
+function bestBrief(p: Plot, owned: boolean): BestPlan | null {
+  const key = `${p.id}|${state.round}|${owned}|${landDraft(p)}|${form.placement}|${form.shape}|${form.depth}`;
+  if (!briefCache.has(key)) {
+    if (briefCache.size > 200) briefCache.clear();
+    briefCache.set(key, bestForm(p, owned));
+  }
+  return briefCache.get(key)!;
+}
+
+/** Résumé de lecture immédiate d'un terrain : règles, meilleur projet, prix par rapport au quartier. */
+function plotBrief(p: Plot, owned: boolean): string {
+  const rule = ruleOf(p);
+  const area = areaOf(p);
+  const chip = (t: string, cls = '') => `<span class="chip ${cls}">${t}</span>`;
+  const rules = rule && rule.buildable
+    ? [
+        chip(`R+${rule.maxLevels} max`),
+        chip(`emprise ${Math.round(rule.maxCoverage * 100)} %`),
+        chip(rule.setbackFond || rule.setbackLateral ? `retraits ${[rule.setbackFond ? `fond ${rule.setbackFond} m` : '', rule.setbackLateral ? `côtés ${rule.setbackLateral} m` : ''].filter(Boolean).join(', ')}` : 'en limite possible'),
+        chip(rule.alignment === 'rue' ? 'alignement sur rue' : 'implantation libre'),
+        p.density === 'dense' ? chip('tissu dense') : p.density === 'diffuse' ? chip('tissu aéré') : '',
+      ].join('')
+    : '';
+  // Prix au m² comparé au prix moyen des terrains libres du quartier.
+  const free = state.plots.filter((x) => !x.owner && !x.issue && !x.municipal);
+  const ppms = free.map((x) => x.askingPrice / areaOf(x)).sort((x, y) => x - y);
+  const avg = ppms.length ? ppms[Math.floor(ppms.length / 2)] : 0;
+  const ppm = (p.owner && p.paid ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : p.askingPrice) / area;
+  const rel = avg > 0 ? Math.round((ppm / avg - 1) * 100) : 0;
+  const price = avg > 0 && !p.issue && Math.abs(rel) >= 5 ? `<span class="muted"> · ${Math.abs(rel)} % ${rel > 0 ? 'plus cher' : 'moins cher'} que la médiane des terrains libres (${Math.round(avg)} €/m²)</span>` : '';
+  let best = '';
+  if (!p.issue && !p.projectId && !p.municipal) {
+    const b = bestBrief(p, owned);
+    best = b
+      ? `<div class="brief ${b.margin >= 0 ? 'ok' : 'ko'}"><b>Meilleur projet</b> : R+${b.levels}${b.attic ? ' + attique' : ''}, ${b.dwellings} logements · marge <b class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)}</b> (${pct(b.marginRate)} du CA) · le terrain pourrait valoir jusqu’à ${eur(b.maxLand)}${price}</div>`
+      : `<div class="brief ko"><b>Aucun projet rentable</b> avec les réglages actuels sur ce terrain seul.${price}</div>`;
+  } else if (price) best = `<div class="brief"><span class="muted">Prix :</span>${price}</div>`;
+  return `${rules ? `<div class="rules">${rules}</div>` : ''}${best}`;
 }
 
 /** Les règles de la zone du PLU, en clair. */
@@ -1834,6 +1956,24 @@ function bindSelection() {
       renderAll();
     }
   });
+  on('prospectAll', () => {
+    const rate = state.config.bilanParams.acquisitionFeeRate;
+    void rate;
+    let ok = 0;
+    let failed = 0;
+    for (const id of selected) {
+      const p = plotById(id);
+      if (!p || p.owner || p.municipal || p.issue === 'zone' || offerOf(state, id, ME)) continue;
+      const r = applyAction(state, { type: 'offer', player: ME, plot: id, price: defaultBid(p) });
+      if (r.ok) {
+        state = r.state;
+        ok++;
+      } else failed++;
+    }
+    save();
+    toast(`${ok} offre${ok > 1 ? 's' : ''} déposée${ok > 1 ? 's' : ''}${failed ? ` · ${failed} refusée${failed > 1 ? 's' : ''} (fonds ou règles)` : ''} : réponse à la fin du trimestre (ou à l’échéance de la mise en vente)`, failed > 0 && ok === 0);
+    renderAll();
+  });
   on('clear', () => ((selected = new Set()), renderAll()));
   const bidInput = side.querySelector<HTMLInputElement>('#bid');
   if (bidInput) bidInput.onchange = () => ((bidDraft[first] = Math.max(0, Math.round(+bidInput.value || 0))), renderAll());
@@ -1872,8 +2012,8 @@ function bindSelection() {
   const bestBtn = side.querySelector<HTMLButtonElement>('#best');
   if (bestBtn)
     bestBtn.onclick = () => {
-      const p = plotById([...selected][0]);
-      const found = p ? bestForm(p, p.owner === ME) : null;
+      const p = simPlot ?? plotById([...selected][0]);
+      const found = p ? bestForm(p, p.id !== SIM_ID && p.owner === ME) : null;
       if (!found) return toast('Aucun projet réalisable sur ce terrain avec ces réglages : essayez un autre mode de stationnement ou assemblez-le.', true);
       form.levels = found.levels;
       form.attic = found.attic;

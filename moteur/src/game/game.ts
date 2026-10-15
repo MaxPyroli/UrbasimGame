@@ -14,7 +14,7 @@ import {
 import { marketAt } from './location';
 import { adaptToDensity, applyRule, combineRules, type ZoneRule } from './plu';
 import { mergeParcels } from './merge';
-import { charge, credit, eur, mapPlayer, mapPlot, mapProject, withEvent } from './ledger';
+import { charge, credit, eur, hashFrac, mapPlayer, mapPlot, mapProject, withEvent } from './ledger';
 import { committedCash, dropOffers, listPlots, listingCount, placeOffer, resolveMarket, withdrawOffer } from './market';
 import { dropTenderBids, committedTenderCash, enforceObligations, openTender, pickMunicipalIds, programmeParams, placeTenderBid, resolveTenders, shouldOpenTender, withdrawTenderBid } from './tender';
 import { SOCIAL_PRICE_RATIO } from '../engine';
@@ -45,6 +45,7 @@ export const DEFAULT_CONFIG: GameConfig = {
   prospectFeeRate: 0.004,
   prospectFeeMin: 3000,
   reserveSpread: 0.2,
+  speculatorShare: 0,
   structureCostRate: 0,
   structureCost: 0,
   debtSpread: 0.03,
@@ -250,6 +251,8 @@ export function createGame(g: NewGame): GameState {
     const ids = new Set(pickMunicipalIds(plots, config.municipalPlots));
     for (const p of plots) if (ids.has(p.id)) p.municipal = true;
   }
+  // Quelques propriétaires spéculent : ils retiennent leur terrain et en font monter le prix.
+  for (const p of plots) if (!p.municipal && !p.issue && hashFrac(`${p.id}#spec`) < config.speculatorShare) p.speculator = true;
   // Trésorerie de départ : 2,5 fois le prix médian d'un terrain constructible (les petites parcelles à assembler ne comptent pas).
   const buildable = plots.filter((p) => !p.issue);
   const asks = (buildable.length ? buildable : plots).map((p) => p.basePrice).sort((a, b) => a - b);
@@ -285,7 +288,7 @@ function reprice(s: GameState): GameState {
   const k = s.marketIndex * s.landHeat;
   return {
     ...s,
-    plots: s.plots.map((p) => (p.projectId ? p : { ...p, askingPrice: Math.max(MIN_PLOT_PRICE, Math.round((p.basePrice * k) / 1000) * 1000) })),
+    plots: s.plots.map((p) => (p.projectId ? p : { ...p, askingPrice: Math.max(MIN_PLOT_PRICE, Math.round((p.basePrice * k * (p.speculation ?? 1)) / 1000) * 1000) })),
   };
 }
 
@@ -606,6 +609,8 @@ export function advanceRound(state: GameState): GameState {
     marketIndex: clamp(idx, 0.6, 1.5),
     interestRate: clamp(rate, config.minRate, config.maxRate),
     landHeat: 1 + (s.landHeat - 1) * (1 - config.landHeatDecay),
+    // Les spéculateurs relèvent leur prix chaque trimestre (jusqu'à +80 %).
+    plots: s.plots.map((p) => (p.speculator && p.owner === null ? { ...p, speculation: Math.min(1.8, (p.speculation ?? 1) * 1.025) } : p)),
     demandShock: s.demandShock * 0.75,
   };
   s = rollEvent(s);

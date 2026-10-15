@@ -1,4 +1,4 @@
-import { eur, mapPlayer, mapPlot, withEvent } from './ledger';
+import { eur, hashFrac, mapPlayer, mapPlot, withEvent } from './ledger';
 import { nextRandom } from './rng';
 import type { GameState, Offer, Plot } from './types';
 
@@ -8,14 +8,8 @@ import type { GameState, Offer, Plot } from './types';
  * la somme est bloquée sur la trésorerie, et en cas de concurrence le plus offrant l'emporte (à égalité, le premier arrivé).
  */
 
-const hashFrac = (id: string) => {
-  let h = 0;
-  for (const ch of id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
-  return (h % 1000) / 999;
-};
-
 /** Ce qu'un propriétaire non vendeur exige, en multiple du prix affiché (propre à chaque terrain, caché au joueur). */
-export const reserveFactor = (plot: Pick<Plot, 'id'>, spread: number) => 1 + spread * hashFrac(`${plot.id}#reserve`);
+export const reserveFactor = (plot: Pick<Plot, 'id' | 'speculator'>, spread: number) => (1 + spread * hashFrac(`${plot.id}#reserve`)) * (plot.speculator ? 1.2 : 1);
 
 export const offersOn = (s: GameState, plotId: string) => s.offers.filter((o) => o.plot === plotId);
 export const offerOf = (s: GameState, plotId: string, playerId: string) => s.offers.find((o) => o.plot === plotId && o.player === playerId);
@@ -103,7 +97,7 @@ export function resolveMarket(state: GameState): GameState {
     } else {
       for (const o of ranked) {
         refund(o);
-        humanEvent(o, plot.listing ? `Aucune offre acceptée sur ${label}` : `Prospection de ${label} : le propriétaire n’est pas vendeur à ${eur(o.price)}, essayez plus haut`);
+        humanEvent(o, plot.listing ? `Aucune offre acceptée sur ${label}` : plot.speculator ? `Prospection de ${label} : le propriétaire spécule, il refuse ${eur(o.price)} et attend nettement plus (son prix monte chaque trimestre)` : `Prospection de ${label} : le propriétaire n’est pas vendeur à ${eur(o.price)}, essayez plus haut`);
       }
       if (plot.listing) s = mapPlot(s, plot.id, (p) => ({ ...p, listing: undefined }));
     }
@@ -115,7 +109,7 @@ export function resolveMarket(state: GameState): GameState {
 /** Met en vente `count` terrains libres tirés au hasard (dans l'état : rejouable). */
 export function listPlots(state: GameState, count: number): GameState {
   let s = state;
-  const pool = s.plots.filter((p) => p.owner === null && !p.municipal && !p.listing && !p.projectId && p.issue !== 'zone' && p.issue !== 'delaisse' && offersOn(s, p.id).length === 0);
+  const pool = s.plots.filter((p) => p.owner === null && !p.municipal && !p.listing && !p.projectId && p.issue !== 'zone' && p.issue !== 'delaisse' && !p.speculator && offersOn(s, p.id).length === 0);
   const picked: string[] = [];
   const n = Math.min(count, pool.length);
   for (let k = 0; k < n; k++) {
