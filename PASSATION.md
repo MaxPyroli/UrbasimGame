@@ -325,6 +325,17 @@ collectivité jouent le rôle des enchères du Monopoly.
   Infobulle du terrain : opération, promoteur, étape, hauteur, surface. Limites : pas de volume 3D, bâti partiellement
   chevauchant un terrain non démoli, emprise recalculée à partir des critères du projet.
 
+- Fait : **affichage de la carte** : fond de plan sobre CARTO (clair ou sombre selon le thème, `light_all` / `dark_all`) à la place
+  d'OpenStreetMap, pour que parcelles et bâtiments ressortent ; **pictogrammes d'équipements** (M métro, T tram, G gare, mairie,
+  école/supérieur, parc, hôpital : pastilles SVG colorées, majeurs dès le zoom 14, tous dès le 16, case « équipements » dans la
+  barre de la carte) ; contours de parcelles plus fins ; légende, barre d'outils, contrôles et infobulles aux couleurs du thème.
+  Reste à faire : parcs et espaces verts dessinés, routes hiérarchisées dans la version sans fond de plan, libellés de rues, 3D.
+- Fait : **installation (PWA)** : `jeu/public/manifest.webmanifest`, icônes (`jeu/public/icons`, générées par un script Playwright
+  à partir du logo des quatre immeubles), `jeu/public/sw.js` (page : réseau d'abord ; fichiers du jeu : cache d'abord, mis en
+  cache dès l'installation, même hors ligne dès la première visite ; fonds de carte : cache de secours, 400 tuiles). Bouton
+  « Installer l'application » sur l'écran d'accueil et dans le menu (Chrome, Edge, Android : invite native ; iPhone et iPad :
+  explication du menu Partager). Pas de service worker dans la version « page unique » (artefact Claude).
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,
@@ -345,7 +356,7 @@ collectivité jouent le rôle des enchères du Monopoly.
   distance entre bâtiments) et effets sur le bilan (stationnement, vue, éclairement, valeur des logements).
 - **Vue 3D des bâtiments** (pour bien plus tard) : visualiser les immeubles en volume, existants et construits par les
   joueurs (les hauteurs sont déjà dans les données et dans les projets).
-- **Un affichage plus joli et plus lisible** : routes, parcelles, bâtiments, parcs, équipements avec des icônes (gare,
+- **Un affichage plus joli et plus lisible** (premier passage fait, voir plus haut ; reste parcs, routes, libellés) : routes, parcelles, bâtiments, parcs, équipements avec des icônes (gare,
   école, mairie, commerces…), hiérarchie visuelle claire, thèmes.
 
 ## 5 quater. Multijoueur pair-à-pair (souhait, sans serveur à gérer)

@@ -245,7 +245,15 @@ const map = L.map('map', { zoomControl: true, preferCanvas: false });
 /** Sans fond de plan (page hébergée où les images externes sont bloquées) : on dessine les voies du quartier. */
 const NO_TILES = import.meta.env.VITE_NO_TILES === '1';
 if (!NO_TILES) {
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, maxNativeZoom: 19, attribution: '© contributeurs OpenStreetMap' }).addTo(map);
+  // Fond de plan sobre (clair ou sombre selon le thème) pour que parcelles et bâtiments ressortent.
+  const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  const baseUrl = (dark: boolean) => `https://{s}.basemaps.cartocdn.com/${dark ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`;
+  let base = L.tileLayer(baseUrl(darkQuery.matches), { maxZoom: 20, maxNativeZoom: 19, subdomains: 'abcd', attribution: '© contributeurs OpenStreetMap · © CARTO' }).addTo(map);
+  darkQuery.addEventListener('change', (e) => {
+    base.remove();
+    base = L.tileLayer(baseUrl(e.matches), { maxZoom: 20, maxNativeZoom: 19, subdomains: 'abcd', attribution: '© contributeurs OpenStreetMap · © CARTO' }).addTo(map);
+    base.bringToBack();
+  });
 } else {
   map.createPane('routes');
   map.getPane('routes')!.style.zIndex = '300';
@@ -294,7 +302,8 @@ function plotStyle(p: Plot): L.PathOptions {
   const faded = freePlot && !affordable(p) && !small;
   const base: L.PathOptions = {
     color: sel ? '#000' : listed ? '#c98200' : zoneBlocked && freePlot ? '#777' : small && freePlot ? '#7b3fa0' : col ?? (view === 'hauteur' ? '#2b6cb0' : '#7a6b4f'),
-    weight: sel ? 3 : p.projectId ? 2.5 : listed ? 3 : small ? 1.8 : view === 'hauteur' ? 1.5 : 1,
+    weight: sel ? 3 : p.projectId ? 2.5 : listed ? 2.5 : small ? 1.2 : view === 'hauteur' ? 1.2 : 1,
+    opacity: small && freePlot ? 0.75 : 1,
     fillColor: col ?? (listed && view !== 'prix' && view !== 'lieu' ? '#f6d27a' : zoneBlocked ? '#bdbdbd' : small ? '#cdb6e6' : lieu ? lieuColor(p.locationFactor) : free),
     // Vue « hauteur » : les parcelles libres restent transparentes pour laisser voir le bâti.
     fillOpacity: col ? (p.projectId ? 0.16 : view === 'hauteur' || view === 'zonage' ? 0.35 : 0.55) : listed ? 0.45 : zoneBlocked ? 0.35 : small ? 0.5 : view === 'hauteur' || view === 'zonage' ? 0 : lieu ? 0.8 : 0.45,
@@ -325,13 +334,46 @@ function lieuColor(f: number): string {
   const t = Math.min(1, (f - 1) / (LIEU_RANGE[1] - 1));
   return `hsl(${32 - 20 * t} ${70 + 15 * t}% ${86 - 38 * t}%)`;
 }
-const POI_COLORS: Record<string, string> = { metro: '#0b5fa5', gare: '#0b5fa5', tram: '#2f9e8f', mairie: '#8e24aa', ecole: '#e6a817', superieur: '#e6a817', parc: '#2e8b57', sante: '#d62839' };
-const poiLayer = L.layerGroup();
-for (const poi of district.pois) {
-  L.circleMarker([poi.lat, poi.lon], { radius: poi.kind === 'metro' || poi.kind === 'gare' || poi.kind === 'mairie' ? 8 : 5, color: '#fff', weight: 1.5, fillColor: POI_COLORS[poi.kind] ?? '#555', fillOpacity: 1 })
-    .bindTooltip(`${esc(LOCATION_RULES[poi.kind].label)} : ${esc(poi.name)}`)
-    .addTo(poiLayer);
+const POI_COLORS: Record<string, string> = { metro: '#0b5fa5', gare: '#0b5fa5', tram: '#2f9e8f', mairie: '#8e24aa', ecole: '#d98e04', superieur: '#d98e04', parc: '#2e8b57', sante: '#d62839' };
+/** Pictogrammes des équipements (SVG blanc sur pastille de couleur). */
+const POI_GLYPH: Record<string, string> = {
+  metro: '<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="800" font-family="system-ui,sans-serif" fill="#fff">M</text>',
+  gare: '<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="800" font-family="system-ui,sans-serif" fill="#fff">G</text>',
+  tram: '<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="800" font-family="system-ui,sans-serif" fill="#fff">T</text>',
+  mairie: '<path d="M12 5 4.5 9.5h15L12 5Zm-6.5 6h2v6h-2v-6Zm4.5 0h2v6h-2v-6Zm4.5 0h2v6h-2v-6ZM4.5 18h15v1.8h-15V18Z" fill="#fff"/>',
+  ecole: '<path d="m12 5-8 4 8 4 6.2-3.1V15h1.8V9l-8-4Zm-4.5 8.2v2.6c0 1.2 2 2.2 4.5 2.2s4.5-1 4.5-2.2v-2.6L12 15l-4.5-1.8Z" fill="#fff"/>',
+  superieur: '<path d="m12 5-8 4 8 4 6.2-3.1V15h1.8V9l-8-4Zm-4.5 8.2v2.6c0 1.2 2 2.2 4.5 2.2s4.5-1 4.5-2.2v-2.6L12 15l-4.5-1.8Z" fill="#fff"/>',
+  parc: '<path d="M12 4.5a4.4 4.4 0 0 0-4.3 5.3A3.6 3.6 0 0 0 8.4 17H11v2.5h2V17h2.6a3.6 3.6 0 0 0 .7-7.2A4.4 4.4 0 0 0 12 4.5Z" fill="#fff"/>',
+  sante: '<path d="M10.2 5h3.6v5.2H19v3.6h-5.2V19h-3.6v-5.2H5v-3.6h5.2V5Z" fill="#fff"/>',
+};
+/** Équipements majeurs visibles dès un zoom moyen ; les autres (écoles, parcs…) seulement de près. */
+const MAJOR_POI = new Set(['metro', 'gare', 'tram', 'mairie', 'sante']);
+function poiIcon(kind: string, big: boolean): L.DivIcon {
+  const s = big ? 26 : 20;
+  return L.divIcon({
+    className: 'poi',
+    iconSize: [s, s],
+    iconAnchor: [s / 2, s / 2],
+    html: `<svg viewBox="0 0 24 24" width="${s}" height="${s}" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="${POI_COLORS[kind] ?? '#555'}" stroke="#fff" stroke-width="1.6"/>${POI_GLYPH[kind] ?? ''}</svg>`,
+  });
 }
+const poiLayer = L.layerGroup();
+const poiMarkers = district.pois.map((poi) => {
+  const marker = L.marker([poi.lat, poi.lon], { icon: poiIcon(poi.kind, MAJOR_POI.has(poi.kind)), keyboard: false, zIndexOffset: MAJOR_POI.has(poi.kind) ? 500 : 0 }).bindTooltip(`${esc(LOCATION_RULES[poi.kind].label)} : ${esc(poi.name)}`, { direction: 'top', offset: [0, -8] });
+  return { poi, marker };
+});
+let showPois = true;
+/** Les équipements apparaissent selon le zoom : majeurs d'abord, tous de près. */
+function syncPois() {
+  const z = map.getZoom();
+  for (const { poi, marker } of poiMarkers) {
+    const visible = showPois && (view === 'lieu' || z >= (MAJOR_POI.has(poi.kind) ? 14 : 16));
+    if (visible && !poiLayer.hasLayer(marker)) poiLayer.addLayer(marker);
+    else if (!visible && poiLayer.hasLayer(marker)) poiLayer.removeLayer(marker);
+  }
+}
+poiLayer.addTo(map);
+map.on('zoomend', syncPois);
 
 map.createPane('zones');
 map.getPane('zones')!.style.zIndex = '330';
@@ -462,7 +504,7 @@ function updateMapLegend() {
   }
   // Repères communs à toutes les vues : propriétaires et symboles.
   const owners = [`<span><i class="swatch" style="background:${colorOf(ME)}"></i>vous</span>`, ...state.players.filter((p) => p.bot).map((p) => `<span><i class="swatch" style="background:${colorOf(p.id)}"></i>${esc(shortName(p.name))}</span>`)].join(' ');
-  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#f6d27a;border:2px solid #c98200"></i>en vente</span> <span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span><i class="swatch" style="background:#7fd1d3;border:1px dashed #0f8b8d"></i>terrain communal</span> <span><i class="swatch" style="background:#fff;border:2.5px solid #1f6feb"></i>bâtiment construit (contour = promoteur ; pointillé = en chantier)</span></div>`;
+  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#f6d27a;border:2px solid #c98200"></i>en vente</span> <span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span><i class="swatch" style="background:#7fd1d3;border:1px dashed #0f8b8d"></i>terrain communal</span> <span><i class="swatch" style="background:#fff;border:2.5px solid #1f6feb"></i>bâtiment construit (contour = promoteur ; pointillé = en chantier)</span> <span>pastilles : équipements (survol = nom)</span></div>`;
   // Repliable (fermée par défaut sur petit écran) : le titre devient la ligne cliquable.
   const title = el.querySelector('b');
   const heading = title ? title.outerHTML : '<b>Légende</b>';
@@ -478,11 +520,13 @@ mapTools.onAdd = () => {
   const el = L.DomUtil.create('div', 'maptools');
   el.innerHTML = `<label>Carte <select id="view"><option value="hauteur">Hauteur du bâti</option><option value="zonage">Règles d’urbanisme</option><option value="lieu">Valeur du lieu</option><option value="prix">Prix des terrains</option></select></label>
     <label>Terrains libres <select id="pfilter"><option value="tous">tous</option><option value="vente">en vente</option><option value="abordables">à ma portée</option><option value="assembler">à assembler</option></select></label>
-    <label title="Ou Maj+clic sur la carte"><input type="checkbox" id="multi"/> sélection multiple</label>`;
+    <label title="Ou Maj+clic sur la carte"><input type="checkbox" id="multi"/> sélection multiple</label>
+    <label title="Stations, écoles, parcs, hôpital, mairie"><input type="checkbox" id="pois" checked/> équipements</label>`;
   L.DomEvent.disableClickPropagation(el);
   const q = <T extends HTMLElement>(id: string) => el.querySelector<T>(`#${id}`)!;
   q<HTMLSelectElement>('view').onchange = (e) => ((view = (e.target as HTMLSelectElement).value as typeof view), applyView(), renderAll());
   q<HTMLSelectElement>('pfilter').onchange = (e) => ((plotFilter = (e.target as HTMLSelectElement).value as typeof plotFilter), renderAll());
+  q<HTMLInputElement>('pois').onchange = (e) => ((showPois = (e.target as HTMLInputElement).checked), syncPois());
   q<HTMLInputElement>('multi').onchange = (e) => (multi = (e.target as HTMLInputElement).checked);
   return el;
 };
@@ -490,8 +534,7 @@ mapTools.onAdd = () => {
 function applyView() {
   if (view === 'hauteur') buildingsLayer.addTo(map);
   else buildingsLayer.remove();
-  if (view === 'lieu') poiLayer.addTo(map);
-  else poiLayer.remove();
+  syncPois();
   if (view === 'zonage') zonesLayer.addTo(map);
   else zonesLayer.remove();
   updateMapLegend();
@@ -822,6 +865,63 @@ function openEndScreen() {
   );
 }
 
+// ---------------------------------------------------------------- installation (PWA)
+
+/** Événement du navigateur qui permet de proposer l'installation (Chrome, Edge, Android). */
+interface InstallPrompt extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+let installPrompt: InstallPrompt | null = null;
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+/** Peut-on proposer d'installer le jeu ? (pas déjà installé, pas dans la version hébergée sans fichiers) */
+const canInstall = () => !NO_TILES && !isStandalone() && (installPrompt !== null || isIos());
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e as InstallPrompt;
+  if (!$('home').hidden) showHome();
+  renderTop();
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  toast('Urbasim est installé : retrouvez-le parmi vos applications');
+  if (!$('home').hidden) showHome();
+  renderTop();
+});
+
+/** Installe le jeu ; sur iPhone et iPad, il faut passer par le menu Partager de Safari. */
+async function installApp() {
+  if (installPrompt) {
+    const p = installPrompt;
+    installPrompt = null;
+    await p.prompt();
+    const choice = await p.userChoice;
+    if (choice.outcome === 'dismissed') toast('Installation annulée : vous pourrez la relancer depuis l’accueil');
+    renderTop();
+    if (!$('home').hidden) showHome();
+    return;
+  }
+  openModal(
+    `<h2 class="mh">Installer Urbasim</h2>
+     <div class="tuto"><p>Sur iPhone et iPad : touchez <b>Partager</b> (le carré avec une flèche) dans Safari, puis <b>« Sur l’écran d’accueil »</b>.</p>
+     <p class="muted">Le jeu s’ouvrira alors en plein écran, comme une application, et restera utilisable même sans réseau (la carte seulement dans les zones déjà vues).</p></div>
+     <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="in-ok" type="button" class="primary">Compris</button></div>`,
+    (root) => (root.querySelector<HTMLButtonElement>('#in-ok')!.onclick = closeModal),
+  );
+}
+
+// Service worker : jeu utilisable hors ligne et installable. Pas dans la page unique hébergée (sans fichiers annexes).
+if ('serviceWorker' in navigator && import.meta.env.PROD && !NO_TILES) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {
+      /* service worker indisponible (navigation privée, http) : le jeu fonctionne quand même */
+    });
+  });
+}
+
 // ---------------------------------------------------------------- écran d'accueil
 
 function hideHome() {
@@ -852,6 +952,7 @@ function showHome() {
         ${resume ? `<button id="hm-continue" class="primary big">${state.over ? 'Voir les résultats' : 'Continuer la partie'}</button>` : ''}
         <button id="hm-new" class="${resume ? '' : 'primary '}big">Nouvelle partie</button>
         <button id="hm-howto" class="big">Mode d’emploi</button>
+        ${canInstall() ? '<button id="hm-install" class="big install">📲 Installer l’application</button>' : ''}
       </div>
       <div class="home-place"><div><small>Lieu de la partie</small><b>${esc(district.name)}</b></div><span class="soon" title="Plus tard, vous choisirez la ville et le quartier">autres lieux bientôt</span></div>
       <div class="home-beta"><b>Version bêta</b> : le jeu évolue vite, des choses bougent ou cassent, et les prix, coûts et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.
@@ -874,6 +975,8 @@ function showHome() {
     };
   q('hm-new')!.onclick = () => openIdentity('new');
   q('hm-howto')!.onclick = () => openTutorial();
+  const inst = q('hm-install');
+  if (inst) inst.onclick = installApp;
   (cont ?? q('hm-new'))!.focus();
 }
 
@@ -907,11 +1010,13 @@ function renderTop() {
     <button id="end" class="primary">${state.over ? 'Résultats' : me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
     <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">▶▶</button>
     <button id="bell" class="bell" title="Notifications et échéances" aria-label="Notifications">🔔${unreadCount() ? `<span class="badge hot">${unreadCount()}</span>` : urgentWatch() ? '<span class="badge hot">!</span>' : ''}</button>
-    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button><button id="howto">Mode d’emploi</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
+    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button>${canInstall() ? '<button id="install-btn">Installer l’application</button>' : ''}<button id="howto">Mode d’emploi</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
   $('end').onclick = () => (state.over ? openEndScreen() : endTurn());
   $('ff').onclick = fastForward;
   $('bell').onclick = openNotif;
   $('home-btn').onclick = () => (closeMenu(), showHome());
+  const ib = document.getElementById('install-btn');
+  if (ib) ib.onclick = () => (closeMenu(), installApp());
   $('howto').onclick = () => (closeMenu(), openTutorial());
   $('company').onclick = () => (closeMenu(), openIdentity('edit'));
   const nb = $('new');
@@ -1727,7 +1832,7 @@ function renderAll() {
   renderSide();
 }
 
-$('credits').textContent = district.credits.join(' · ') + (NO_TILES ? ' · Voies : IGN, BD TOPO® (Licence Ouverte 2.0)' : ' · Fond de carte : © contributeurs OpenStreetMap') + ' · Prix et coûts : ordres de grandeur, pas une expertise.';
+$('credits').textContent = district.credits.join(' · ') + (NO_TILES ? ' · Voies : IGN, BD TOPO® (Licence Ouverte 2.0)' : ' · Fond de carte : © contributeurs OpenStreetMap, © CARTO') + ' · Prix et coûts : ordres de grandeur, pas une expertise.';
 mapLegend.addTo(map);
 mapTools.addTo(map);
 fitDistrict();
