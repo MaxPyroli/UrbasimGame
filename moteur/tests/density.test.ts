@@ -73,3 +73,24 @@ describe('emprises plus réalistes', () => {
     expect(project.footprint!.length).toBeGreaterThanOrEqual(4);
   });
 });
+
+describe('implantation du bâtiment', () => {
+  it('en centre-ville et en tissu dense, le PLU impose l’alignement sur la rue', () => {
+    expect(ruleOf({ zones: ['centre'] })!.alignment).toBe('rue');
+    expect(ruleOf({ zones: ['mixte'] })!.alignment).toBe('libre');
+    expect(ruleOf({ zones: ['mixte'], density: 'dense' })!.alignment).toBe('rue');
+    expect(criteriaFor({ zones: ['mixte'], density: 'dense' }, { ...DEFAULT_CRITERIA, placement: 'fond' }).placement).toBe('rue');
+    expect(criteriaFor({ zones: ['mixte'] }, { ...DEFAULT_CRITERIA, placement: 'fond' }).placement).toBe('fond');
+  });
+
+  it('on peut choisir le fond du terrain quand la zone le permet', () => {
+    const parcel = rect(20, 40);
+    const rue = computeProject(parcel, { ...DEFAULT_CRITERIA, placement: 'rue', setbackFond: 0, maxDepth: 12 });
+    const fond = computeProject(parcel, { ...DEFAULT_CRITERIA, placement: 'fond', setbackFond: 0, maxDepth: 12 });
+    expect(rue.placement).toBe('rue');
+    expect(fond.placement).toBe('fond');
+    const yRue = Math.min(...rue.footprint!.map((p) => p[1]));
+    const yFond = Math.min(...fond.footprint!.map((p) => p[1]));
+    expect(yFond).toBeGreaterThan(yRue + 10);
+  });
+});

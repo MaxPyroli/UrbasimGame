@@ -10,7 +10,9 @@ import {
   computeBilan,
   computeProject,
   type Criteria,
+  type FootprintShape,
   type ParkingStrategy,
+  type Placement,
 } from '../../moteur/src/engine';
 import {
   ISSUE_MESSAGE,
@@ -140,7 +142,7 @@ const SEEN_KEY = 'urbasim-seen-v1';
 let seenLog = Math.max(0, Math.round(+(localStorage_get(SEEN_KEY) ?? 0)) || 0);
 type NotifFilter = 'tout' | 'alea' | 'commune' | 'operation' | 'terrain';
 let notifFilter: NotifFilter = 'tout';
-let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number } = { levels: 3, attic: false, parking: 'auto', depth: 12 };
+let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number; placement: Placement; shape: FootprintShape } = { levels: 3, attic: false, parking: 'auto', depth: 12, placement: 'auto', shape: 'adapte' };
 
 function save() {
   try {
@@ -171,7 +173,7 @@ function act(a: Action): boolean {
 const me = () => state.players.find((p) => p.id === ME)!;
 const plotById = (id: string) => state.plots.find((p) => p.id === id);
 const quarterLabel = (round: number) => `T${(round % 4) + 1} ${2027 + Math.floor(round / 4)}`;
-const criteria = (): Criteria => ({ ...DEFAULT_CRITERIA, levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth });
+const criteria = (): Criteria => ({ ...DEFAULT_CRITERIA, levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth, placement: form.placement, footprintShape: form.shape });
 
 /** Passe un trimestre sans rien afficher ; retourne les nouvelles du journal qui concernent le joueur. */
 function advanceOne(): { mine: string[]; phases: string } {
@@ -495,7 +497,7 @@ function drawBuildings() {
       fillOpacity: st.opacity,
     }).addTo(builtLayer);
     // En chantier : hachures de la couleur du promoteur par-dessus.
-    if (phase === 'chantier') L.polygon(ring, { pane: 'bati2', renderer: builtRenderer, interactive: false, stroke: false, fillColor: hatchFill(col), fillOpacity: 0.95 }).addTo(builtLayer);
+    if (phase === 'chantier') L.polygon(ring, { pane: 'bati2', renderer: builtRenderer, interactive: false, stroke: false, className: 'chantier-hatch', fillColor: hatchFill(col), fillOpacity: 0.95 }).addTo(builtLayer);
   };
   for (const p of developed) {
     const run = p.projectId ? state.projects.find((r) => r.id === p.projectId) : undefined;
@@ -1025,15 +1027,42 @@ function objectiveStat(worth: number): string {
   return `<div class="stat" title="Objectif : finir à ${eur(start * goal)} de patrimoine (×${goal.toFixed(1).replace('.', ',')} votre mise de départ)"><small>Objectif ×${goal.toFixed(1).replace('.', ',')}</small><b class="${reached ? 'good' : ''}">×${have.toFixed(2).replace('.', ',')}</b><span class="goalbar"><i style="width:${pctDone}%" class="${reached ? 'ok' : ''}"></i></span></div>`;
 }
 
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const prevStat: Record<string, number> = {};
+
+/** Fait défiler un montant de son ancienne à sa nouvelle valeur, avec un éclair vert (gain) ou rouge (perte). */
+function tweenStat(key: string, el: HTMLElement | null, value: number) {
+  const from = prevStat[key];
+  prevStat[key] = value;
+  if (!el || from === undefined || Math.round(from) === Math.round(value) || reducedMotion) return;
+  el.classList.add(value > from ? 'flash-up' : 'flash-down');
+  const start = performance.now();
+  const step = (now: number) => {
+    const t = Math.min(1, (now - start) / 700);
+    el.textContent = eur(from + (value - from) * (1 - Math.pow(1 - t, 3)));
+    if (t < 1) requestAnimationFrame(step);
+    else el.classList.remove('flash-up', 'flash-down');
+  };
+  requestAnimationFrame(step);
+}
+
+/** Petite pulsation d'un élément (changement de trimestre). */
+function pulse(el: HTMLElement | null) {
+  if (!el || reducedMotion) return;
+  el.classList.remove('pulse');
+  void el.offsetWidth;
+  el.classList.add('pulse');
+}
+
 function renderTop() {
   const w = netWorth(state, ME);
   $('top').innerHTML = `
     <h1>Urbasim</h1>
     <div class="company" title="${esc(me().slogan ?? '')}"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><span class="cname">${esc(me().name)}</span></div>
     <div class="stats">
-    <div class="stat" title="Avancement de la partie"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b><span class="goalbar"><i style="width:${Math.min(100, (state.round / state.config.rounds) * 100)}%"></i></span></div>
-    <div class="stat"><small>Trésorerie</small><b>${eur(me().cash)}</b></div>
-    <div class="stat" title="Trésorerie + terrains (au prix de reprise) + fonds propres engagés dans les opérations, moins les dettes"><small>Patrimoine</small><b>${eur(w)}</b></div>
+    <div class="stat" id="stat-round" title="Avancement de la partie"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b><span class="goalbar"><i style="width:${Math.min(100, (state.round / state.config.rounds) * 100)}%"></i></span></div>
+    <div class="stat"><small>Trésorerie</small><b id="stat-cash">${eur(me().cash)}</b></div>
+    <div class="stat" title="Trésorerie + terrains (au prix de reprise) + fonds propres engagés dans les opérations, moins les dettes"><small>Patrimoine</small><b id="stat-worth">${eur(w)}</b></div>
     ${objectiveStat(w)}
     ${me().bankrupt ? '<div class="stat"><small>Situation</small><b class="bad">FAILLITE</b></div>' : me().debt > 0 ? `<div class="stat" title="Charges impayées : elles portent intérêt et la banque ne finance plus rien tant qu'elles ne sont pas remboursées"><small>Découvert</small><b class="bad">−${eur(me().debt)}</b></div>` : ''}
     <div class="stat" title="Indice des prix de vente (100 = prix de départ) · taux du crédit promoteur · logements que les ménages achètent par trimestre dans le quartier, et logements en vente en ce moment (tous promoteurs)">
@@ -1045,6 +1074,10 @@ function renderTop() {
     <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">▶▶</button>
     <button id="bell" class="bell" title="Notifications et échéances" aria-label="Notifications">🔔${unreadCount() ? `<span class="badge hot">${unreadCount()}</span>` : urgentWatch() ? '<span class="badge hot">!</span>' : ''}</button>
     <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button>${canInstall() ? '<button id="install-btn">Installer l’application</button>' : ''}<button id="howto">Mode d’emploi</button><button id="credits-btn">Crédits et données</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
+  tweenStat('cash', document.getElementById('stat-cash'), me().cash);
+  tweenStat('worth', document.getElementById('stat-worth'), w);
+  if (prevStat.round !== undefined && prevStat.round !== state.round) pulse(document.getElementById('stat-round'));
+  prevStat.round = state.round;
   $('end').onclick = () => (state.over ? openEndScreen() : endTurn());
   $('ff').onclick = fastForward;
   $('bell').onclick = openNotif;
@@ -1081,6 +1114,7 @@ function tabs(): string {
   return `<div class="tabs">${t('terrain', 'Terrain')}${market}${commune}${t('operations', `Opérations${nOps ? ` <span class="badge">${nOps}</span>` : ''}`)}${t('journal', 'Journal')}${t('classement', 'Classement')}</div>`;
 }
 
+let lastPaneKey = '';
 function renderSide() {
   let body = '';
   if (tab === 'terrain') body = renderSelection();
@@ -1089,7 +1123,10 @@ function renderSide() {
   else if (tab === 'operations') body = renderOperations();
   else if (tab === 'journal') body = renderJournal();
   else body = renderRanking();
-  $('side').innerHTML = tabs() + body;
+  const key = `${tab}|${[...selected].join(',')}`;
+  const changed = key !== lastPaneKey;
+  lastPaneKey = key;
+  $('side').innerHTML = tabs() + `<div class="pane${changed ? ' enter' : ''}">${body}</div>`;
   $('side').querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => (b.onclick = () => ((tab = b.dataset.tab as typeof tab), renderAll())));
   bindSelection();
   if (tab === 'commune') bindTenders();
@@ -1620,7 +1657,7 @@ function zoneCard(p: Plot): string {
   const chip = (t: string) => `<span class="chip">${t}</span>`;
   return `<div><b>${code}${esc(rule.label)}${dens}</b>${several}
     <div class="muted" style="font-size:12px">${esc(rule.summary)}</div>
-    <div style="margin-top:4px">${chip(`Hauteur max <b>R+${rule.maxLevels}</b>`)}${chip(`Emprise <b>${Math.round(rule.maxCoverage * 100)} %</b>`)}${chip(`Pleine terre <b>${Math.round(rule.minOpenGround * 100)} %</b>`)}${rule.setbackFond || rule.setbackLateral ? chip(`Retraits <b>${rule.setbackFond ? `fond ${rule.setbackFond} m` : ''}${rule.setbackFond && rule.setbackLateral ? ', ' : ''}${rule.setbackLateral ? `côtés ${rule.setbackLateral} m` : ''}</b>`) : chip('Construction en limite possible')}${chip(rule.use === 'bureaux' ? '<b>Bureaux</b> uniquement' : 'Logements, commerces')}</div>
+    <div style="margin-top:4px">${chip(`Hauteur max <b>R+${rule.maxLevels}</b>`)}${chip(`Emprise <b>${Math.round(rule.maxCoverage * 100)} %</b>`)}${chip(`Pleine terre <b>${Math.round(rule.minOpenGround * 100)} %</b>`)}${rule.setbackFond || rule.setbackLateral ? chip(`Retraits <b>${rule.setbackFond ? `fond ${rule.setbackFond} m` : ''}${rule.setbackFond && rule.setbackLateral ? ', ' : ''}${rule.setbackLateral ? `côtés ${rule.setbackLateral} m` : ''}</b>`) : chip('Construction en limite possible')}${chip(rule.use === 'bureaux' ? '<b>Bureaux</b> uniquement' : 'Logements, commerces')}${chip(rule.alignment === 'rue' ? '<b>Alignement sur rue</b> obligatoire' : 'Implantation libre')}</div>
     <div class="muted" style="font-size:11px;margin-top:4px">Règles simplifiées inspirées du type de zone, pas le règlement réel.</div></div>`;
 }
 
@@ -1644,6 +1681,9 @@ function projectForm(p: Plot, owned: boolean): string {
   const errors = proj.checks.filter((c) => c.status === 'error');
   const sel = (v: ParkingStrategy, l: string) => `<option value="${v}" ${form.parking === v ? 'selected' : ''}>${l}</option>`;
   const options = `<label class="f">Stationnement<select id="f-parking">${sel('auto', 'automatique')}${sel('sous-sol', 'sous-sol')}${sel('rdc', 'rez-de-chaussée')}${sel('surface', 'en surface')}${sel('hors-site', 'places achetées à proximité')}${sel('aucun', 'aucun')}</select></label>
+    <label class="f" title="Où poser le bâtiment sur le terrain : le long de la rue, en retrait au fond de la parcelle, ou la meilleure des deux">Implantation<select id="f-placement" ${rule?.alignment === 'rue' ? 'disabled' : ''}>${[['auto', 'automatique'], ['rue', 'le long de la rue'], ['fond', 'en retrait, au fond du terrain']].map(([v, l]) => `<option value="${v}" ${(rule?.alignment === 'rue' ? 'rue' : form.placement) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    ${rule?.alignment === 'rue' ? '<div class="muted" style="font-size:12px">Le PLU de cette zone impose l’alignement sur la rue.</div>' : ''}
+    <label class="f" title="Forme adaptée : suit le terrain (L sur un angle) ; rectangle : volume simple, plus lisible">Forme du bâtiment<select id="f-shape">${[['adapte', 'adaptée au terrain'], ['rectangle', 'rectangle simple']].map(([v, l]) => `<option value="${v}" ${form.shape === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f" title="Au-delà de 14 m de profondeur, l'éclairement naturel devient difficile">Profondeur max du bâtiment<select id="f-depth">${[10, 12, 15, 18, 22].map((d) => `<option value="${d}" ${form.depth === d ? 'selected' : ''}>${d} m</option>`).join('')}</select></label>`;
   let html = `<h2>Projet</h2>
     <div class="row" style="align-items:center">
@@ -1674,6 +1714,7 @@ function projectForm(p: Plot, owned: boolean): string {
   const rows = `<table>
       <tr><td>Surface de plancher</td><td>${Math.round(i.sdpTotal)} m² (${i.levelsCount} niv.)</td></tr>
       <tr><td>Logements</td><td>${i.dwellings} · SHAB ${Math.round(i.shab)} m²</td></tr>
+      <tr><td>Implantation</td><td>${proj.placement === 'fond' ? 'en fond de terrain' : 'le long de la rue'}</td></tr>
       <tr><td>Stationnement</td><td>${proj.parking.provided}/${proj.parking.required} places</td></tr>
       <tr><td>Chiffre d’affaires</td><td>${eur(b.revenue.total)}</td></tr>
       <tr><td>Terrain et frais</td><td>${eur(b.costs.land + b.costs.acquisitionFees)}</td></tr>
@@ -1850,6 +1891,10 @@ function bindSelection() {
   if (lv) lv.onchange = () => ((form.levels = +lv.value), renderAll());
   const at = side.querySelector<HTMLInputElement>('#f-attic');
   if (at) at.onchange = () => ((form.attic = at.checked), renderAll());
+  const plc = side.querySelector<HTMLSelectElement>('#f-placement');
+  if (plc) plc.onchange = () => ((form.placement = plc.value as Placement), renderAll());
+  const shp = side.querySelector<HTMLSelectElement>('#f-shape');
+  if (shp) shp.onchange = () => ((form.shape = shp.value as FootprintShape), renderAll());
   const pk = side.querySelector<HTMLSelectElement>('#f-parking');
   if (pk) pk.onchange = () => ((form.parking = pk.value as ParkingStrategy), renderAll());
   side.querySelectorAll<HTMLAnchorElement>('[data-goto]').forEach(
@@ -1869,6 +1914,7 @@ function renderAll() {
   renderTop();
   drawPlots();
   renderSide();
+  updateMapCard();
 }
 
 /** Fenêtre « Crédits et données » : sources et licences, hors de l'écran de jeu. */
@@ -1881,6 +1927,48 @@ function openCredits() {
     (root) => (root.querySelector<HTMLButtonElement>('#cr-ok')!.onclick = closeModal),
   );
 }
+/** Carte agrandie : le panneau latéral se masque, une fiche flottante résume le terrain choisi. */
+let mapExpanded = false;
+const mapFull = new L.Control({ position: 'topleft' });
+mapFull.onAdd = () => {
+  const el = L.DomUtil.create('div', 'leaflet-bar mapfull');
+  el.innerHTML = '<a href="#" id="mapfull-btn" role="button" title="Agrandir la carte" aria-label="Agrandir la carte">⤢</a>';
+  L.DomEvent.disableClickPropagation(el);
+  el.querySelector('a')!.onclick = (e) => (e.preventDefault(), setMapExpanded(!mapExpanded));
+  return el;
+};
+function setMapExpanded(on: boolean) {
+  mapExpanded = on;
+  $('app').classList.toggle('mapfull', on);
+  const btn = document.getElementById('mapfull-btn');
+  if (btn) {
+    btn.textContent = on ? '⤡' : '⤢';
+    btn.title = on ? 'Réduire la carte' : 'Agrandir la carte';
+  }
+  setTimeout(() => map.invalidateSize(), 60);
+  updateMapCard();
+}
+/** Fiche flottante du terrain choisi quand la carte est agrandie. */
+function updateMapCard() {
+  let card = document.getElementById('mapcard');
+  if (!mapExpanded || selected.size === 0) return card?.remove();
+  if (!card) {
+    card = document.createElement('div');
+    card.id = 'mapcard';
+    card.className = 'mapcard';
+    L.DomEvent.disableClickPropagation(card);
+    $('map').appendChild(card);
+  }
+  const plots = [...selected].map((id) => plotById(id)).filter((p): p is Plot => !!p);
+  if (!plots.length) return card.remove();
+  const p = plots[0];
+  card.innerHTML = plots.length > 1
+    ? `<b>${plots.length} parcelles</b> <span class="muted">· ${Math.round(plots.reduce((s, x) => s + areaOf(x), 0))} m²</span><div class="row"><button id="mc-open" class="primary">Ouvrir la fiche</button><button id="mc-close">✕</button></div>`
+    : `<div class="head"><b>${esc(shortLabel(p).replace(/ · \d+ m²$/, ''))}</b> ${statusPill(p)}</div><div class="muted">${Math.round(areaOf(p))} m² · ${eur(p.askingPrice)} · ${Math.round(p.askingPrice / areaOf(p))} €/m²${p.zones.length ? ` · ${esc(ruleOf(p)!.label)} R+${ruleOf(p)!.maxLevels}` : ''}</div><div class="row"><button id="mc-open" class="primary">Ouvrir la fiche</button><button id="mc-close">✕</button></div>`;
+  card.querySelector<HTMLButtonElement>('#mc-open')!.onclick = () => setMapExpanded(false);
+  card.querySelector<HTMLButtonElement>('#mc-close')!.onclick = () => ((selected = new Set()), renderAll());
+}
+mapFull.addTo(map);
 mapLegend.addTo(map);
 mapTools.addTo(map);
 fitDistrict();
