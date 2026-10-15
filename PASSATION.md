@@ -364,6 +364,28 @@ collectivité jouent le rôle des enchères du Monopoly.
 - **Un affichage plus joli et plus lisible** (premier passage fait, voir plus haut ; reste parcs, routes, libellés) : routes, parcelles, bâtiments, parcs, équipements avec des icônes (gare,
   école, mairie, commerces…), hiérarchie visuelle claire, thèmes.
 
+### Notes de la partie « finitions » (à traiter plus tard, sans y travailler maintenant)
+- **Animations un peu partout** : transitions de l'interface (panneaux, fenêtres, barres de progression), chantier qui avance sur
+  la carte, argent qui bouge, passage de trimestre.
+- **Carte en plein écran** : bouton pour masquer le panneau latéral et agrandir la carte (utile surtout sur mobile).
+- **Simuler un projet sur plusieurs parcelles** : tester un assemblage sans acheter les parcelles (bilan, hauteur, emprise) avant de
+  s'engager.
+- **ZAC plus développées** : quartiers entiers, plusieurs lots à attribuer, équipements publics inclus (écoles, voirie, parcs) avec
+  leur financement, phasage dans le temps ; à relier aux appels d'offres existants (`PROGRAMMES`).
+- **Faciliter la prospection de plusieurs terrains à la fois** : sélection multiple pour faire plusieurs offres, avec la
+  possibilité que certains propriétaires **spéculent** sur leur terrain (prix de réserve qui monte, refus d'offres raisonnables).
+- **Encore faciliter l'affichage, et donner les infos qu'on doit aujourd'hui aller chercher** : informations directement visibles
+  (règles applicables, prix au m², raison d'un blocage, rentabilité estimée) sans ouvrir des sections.
+- **Règles d'urbanisme parfois étranges** : en zone très dense (ultra-centre de Montreuil), un retrait latéral exigé rend tout projet
+  non rentable. À étudier : corriger par la forme du bâtiment sur le terrain (volumes en L ou en U, bâtiment en limite), ou revoir
+  les règles par **niveau de densité** (centre dense : construction en limite autorisée, pas de retrait latéral ; périphérie :
+  retraits), plutôt qu'une règle unique par famille de zone.
+- **Formes de bâtiments parfois bizarres et peu réalistes** : emprises en pointes, redans, côtés trop courts ; à nettoyer (simplifier,
+  rectifier, imposer une largeur et des angles minimaux).
+- **Petits bouts de parcelles inutilisables, même assemblés** : les étudier (délaissés, fonds de parcelle, trottoirs) sans tout
+  supprimer ; pistes : les marquer « délaissé » avec un prix très bas, les rendre cessibles à un voisin, ou les regrouper
+  automatiquement avec la parcelle voisine la plus logique.
+
 ## 5 quater. Multijoueur pair-à-pair (souhait, sans serveur à gérer)
 Le moteur est déjà adapté : état pur, sérialisable, déterministe, aléa dans l'état (graine). Pistes :
 - **Hôte faisant foi** (le plus simple) : un joueur héberge la partie, les autres lui envoient leurs actions via WebRTC
