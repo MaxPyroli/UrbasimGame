@@ -7,6 +7,11 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.11.1',
+    title: 'Calculs plus rapides',
+    notes: ['Le placement du bâtiment est réutilisé d’un niveau à l’autre : estimer un terrain, « Meilleur projet » et le tour des concurrents sont 2 à 4 fois plus rapides, avec exactement les mêmes résultats'],
+  },
+  {
     version: '0.11.0',
     title: 'Le marché réel et la répartition des logements',
     notes: [

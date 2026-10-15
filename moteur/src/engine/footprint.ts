@@ -315,7 +315,30 @@ const mirrorRing = (r: Ring): Ring => r.map(([x, y]) => [x, -y] as Vec2).reverse
  * (on tranche depuis la rue), soit en fond de parcelle (même calcul dans le repère inversé), soit — en mode
  * automatique — là où l'emprise est la plus grande, la rue l'emportant à égalité.
  */
+/**
+ * Mémoire du placement : estimer un terrain à plusieurs hauteurs redemande presque toujours le même placement (la zone
+ * constructible et le plafond d'emprise ne dépendent pas du nombre de niveaux). Clé = contenu exact des entrées, donc le
+ * résultat est identique à un recalcul ; courte (les calculs d'un même terrain se suivent) pour rester légère.
+ */
+export const footprintCache = { enabled: true, hits: 0, misses: 0, max: 128, store: new Map<string, FootprintResult>() };
+const copyResult = (r: FootprintResult): FootprintResult => ({ ...r, ring: r.ring && r.ring.map((p) => [p[0], p[1]] as [number, number]), limitedBy: [...r.limitedBy] });
+
 export function generateFootprint(envelope: MultiPolygon, frame: Frame, opts: FootprintOptions): FootprintResult {
+  if (!footprintCache.enabled) return generateFootprintUncached(envelope, frame, opts);
+  const key = JSON.stringify([envelope, frame.origin, frame.u, frame.v, opts]);
+  const hit = footprintCache.store.get(key);
+  if (hit) {
+    footprintCache.hits++;
+    return copyResult(hit);
+  }
+  footprintCache.misses++;
+  const result = generateFootprintUncached(envelope, frame, opts);
+  footprintCache.store.set(key, copyResult(result));
+  if (footprintCache.store.size > footprintCache.max) footprintCache.store.delete(footprintCache.store.keys().next().value as string);
+  return result;
+}
+
+export function generateFootprintUncached(envelope: MultiPolygon, frame: Frame, opts: FootprintOptions): FootprintResult {
   if (envelope.length === 0) return { ring: null, limitedBy: ['retraits'], at: 'rue', reason: 'Les retraits laissent un terrain inconstructible.' };
   const env = frame.toMulti(envelope);
   const placement: Placement = opts.placement === 'fond' || opts.placement === 'auto' ? opts.placement : 'rue';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CRITERIA, LocalProjection, computeBilan, computeProject, MARKETS, type Parcel, type Vec2 } from '../src/engine';
+import { DEFAULT_CRITERIA, LocalProjection, computeBilan, computeProject, footprintCache, MARKETS, type Parcel, type Vec2 } from '../src/engine';
 import { ZONE_RULES, criteriaFor, ruleOf } from '../src/game';
 
 const O = new LocalProjection(2.35, 48.85);
@@ -130,5 +130,27 @@ describe('PLU et deuxième bâtiment', () => {
     expect(criteriaFor({ zones: ['renouvellement'] }, { ...want, maxBuildings: 9 }).maxBuildings).toBe(ZONE_RULES.renouvellement.maxBuildings);
     expect(c.buildingGap).toBeGreaterThanOrEqual(ZONE_RULES.mixte.buildingGap);
     expect(ruleOf({ zones: ['centre'] })!.maxBuildings).toBe(2);
+  });
+});
+
+describe('mémoire du placement', () => {
+  it('donne exactement les mêmes projets qu’un recalcul, et réutilise le placement d’un niveau à l’autre', () => {
+    const run = () => [0, 1, 2, 3, 4].map((levels) => JSON.stringify(computeProject(rect(24, 50), { ...base, levels, secondBuilding: true, maxBuildings: 3 })));
+    footprintCache.enabled = false;
+    const fresh = run();
+    footprintCache.enabled = true;
+    footprintCache.store.clear();
+    footprintCache.hits = 0;
+    const cached = run();
+    expect(cached).toEqual(fresh);
+    expect(footprintCache.hits).toBeGreaterThan(4);
+  });
+
+  it('un résultat réutilisé n’est pas partagé : le modifier ne change pas les suivants', () => {
+    footprintCache.store.clear();
+    const a = computeProject(rect(20, 40), base);
+    a.footprint![0][0] = 999;
+    const b = computeProject(rect(20, 40), base);
+    expect(b.footprint![0][0]).not.toBe(999);
   });
 });

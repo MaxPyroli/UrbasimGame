@@ -482,6 +482,12 @@ collectivité jouent le rôle des enchères du Monopoly.
   - **Idée de fond (carte ouverte)** : l'utilisateur choisit une commune, elle est téléchargée et préparée dans le navigateur (barre de progression, mise en cache) avant de jouer. Pistes
     d'allègement chiffrées : placement du bâtiment 35 % du coût d'un plan, bâtiments supplémentaires 14 %, recherche des délaissés ~620 ms par candidate.
 
+- Fait : **mémoire du placement** (version 0.11.1). `generateFootprint` (`engine/footprint.ts`) mémorise son résultat, clé = contenu exact des entrées (zone constructible, repère, options) :
+  estimer un terrain à plusieurs hauteurs redemande le même placement (la zone et le plafond d'emprise ne dépendent pas des niveaux ; le bâtiment arrière non plus tant que la hauteur reste sous 12 m).
+  Mémoire courte (128 entrées, `footprintCache`, désactivable pour comparer), résultats copiés à la lecture. Mesuré : ×2,7 (Sucy, 2 000 projets) à ×3,9 (Montreuil) avec des résultats **identiques**
+  (comparaison projet par projet, test dans `tests/rear.test.ts`). Recalcul des prix de Sucy : 4 min 23 s → 1 min 35 s (cartes inchangées) ; partie simulée sur Sucy 51 s → 25 s (même issue,
+  tour max 3,2 → 2,1 s). Restent : placement lui-même (`adaptedFootprint`, découpes de polygones), bâtiments supplémentaires, recherche des délaissés (~60 % du recalcul de Sucy).
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,
