@@ -389,6 +389,14 @@ collectivité jouent le rôle des enchères du Monopoly.
     et critères (`projectOf`), la prospection n'étudie qu'environ 15 % des terrains par trimestre ; première fin de trimestre de
     l'ordre de 3 à 5 s, indiquée par « Les concurrents jouent… ».
 
+- Fait : **numéro de version et de build** pour suivre les mises à jour. Version bêta `0.x` dans `jeu/package.json` (`version`, actuellement
+  0.9.0) ; **build = nombre de commits** de la branche (`git rev-list --count HEAD`, injecté par `jeu/vite.config.ts` en `__APP_BUILD__`,
+  avec `__APP_VERSION__`, `__APP_COMMIT__`, `__APP_DATE__` ; le workflow GitHub clone l'historique complet pour le calculer). Affichés dans
+  la barre du haut (« bêta 0.9 · #37 »), sur l'écran d'accueil, dans le menu ⋯ et dans la fenêtre « Version et nouveautés »
+  (`jeu/src/changelog.ts`). À chaque ouverture après une mise à jour : un message indique la nouvelle build, et la fenêtre des nouveautés
+  s'ouvre seule quand la version bêta change. **Pour publier une nouvelle bêta** : monter `version` dans `jeu/package.json` et ajouter une
+  entrée en tête de `CHANGELOG`.
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,

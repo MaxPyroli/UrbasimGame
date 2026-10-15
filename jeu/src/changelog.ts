@@ -1,0 +1,44 @@
+/** Nouveautés par version bêta (la plus récente en premier). Une entrée par version publiée. */
+export interface Release {
+  version: string;
+  title: string;
+  notes: string[];
+}
+
+export const CHANGELOG: Release[] = [
+  {
+    version: '0.9',
+    title: 'ZAC, densité, simulation',
+    notes: [
+      'ZAC : quartier de plusieurs lots attribués l’un après l’autre, équipements publics (école, square) financés par les promoteurs, qui font monter les prix une fois livrés',
+      'Règles d’urbanisme adaptées à la densité du quartier : en centre dense, construction en limite et alignement sur la rue',
+      'Choix de l’implantation du bâtiment (rue ou fond) et de sa forme ; emprises plus réalistes',
+      'Simulation d’un projet sur plusieurs parcelles avant d’acheter ; offres groupées ; propriétaires spéculateurs',
+      'Parcelles « délaissées » grisées ; résumé de lecture d’un terrain ; carte agrandie ; animations',
+    ],
+  },
+  {
+    version: '0.8',
+    title: 'Installation et notifications',
+    notes: [
+      'Écran d’accueil, installation de l’application, utilisable hors ligne',
+      'Notifications, fenêtres d’alerte sur les aléas, barres de progression des délais',
+      'Bâtiments des promoteurs sur la carte (hachurés en chantier), pictogrammes d’équipements',
+    ],
+  },
+  {
+    version: '0.7',
+    title: 'Appels d’offres de la commune',
+    notes: ['Terrains communaux attribués au meilleur projet : logements sociaux, qualité, délai', 'Cadres ZAC, PUP et quartier prioritaire avec leurs avantages'],
+  },
+  {
+    version: '0.6',
+    title: 'Enjeux',
+    notes: ['Enchères et prospection des terrains', 'Dettes, faillite, objectif de fin de partie et niveaux de difficulté'],
+  },
+  {
+    version: '0.5',
+    title: 'Première version jouable',
+    notes: ['Vraies parcelles de Montreuil, assemblage, PLU simplifié', 'Ventes sur plan, financement bancaire, concurrents ordinateur, société personnalisable'],
+  },
+];

@@ -79,6 +79,7 @@ import {
   type ProjectRun,
 } from '../../moteur/src/game';
 import { pointInRing } from '../../moteur/src/game/district';
+import { CHANGELOG } from './changelog';
 import districtData from '../../moteur/data/districts/montreuil-mairie.json';
 
 const district = districtData as unknown as District;
@@ -93,6 +94,10 @@ const eur = (n: number) => (Math.abs(n) >= 1e6 ? `${(n / 1e6).toFixed(2).replace
 const eurFull = (n: number) => `${Math.round(n).toLocaleString('fr-FR')} €`;
 const pct = (x: number) => `${(x * 100).toFixed(1).replace('.', ',')} %`;
 const TUTO_KEY = 'urbasim-tuto-v1';
+/** Version bêta (« 0.9 »), numéro de build (nombre de mises à jour publiées) et date de construction. */
+const VERSION = __APP_VERSION__.replace(/\.0$/, '');
+const BUILD = __APP_BUILD__;
+const BUILD_KEY = 'urbasim-build-v1';
 
 // ---------------------------------------------------------------- état
 
@@ -1065,7 +1070,7 @@ function showHome() {
       </div>`
     : '';
   h.innerHTML = `<div class="home-inner">
-      <div class="home-brand"><div class="home-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></div><h1>Urbasim <span class="beta">bêta</span></h1><p class="home-tag">Le Monopoly de l’immobilier réel.<br>Achetez des terrains sur la vraie carte de ${esc(district.name.split('–')[0].trim())}, construisez, vendez, et battez vos concurrents promoteurs.</p></div>
+      <div class="home-brand"><div class="home-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></div><h1>Urbasim <span class="beta">bêta ${esc(VERSION)}</span></h1><p class="home-tag">Le Monopoly de l’immobilier réel.<br>Achetez des terrains sur la vraie carte de ${esc(district.name.split('–')[0].trim())}, construisez, vendez, et battez vos concurrents promoteurs.</p></div>
       ${saveCard}
       <div class="home-actions">
         ${resume ? `<button id="hm-continue" class="primary big">${state.over ? 'Voir les résultats' : 'Continuer la partie'}</button>` : ''}
@@ -1081,7 +1086,7 @@ function showHome() {
         <li><b>Enchères</b> et <b>appels d’offres</b> de la commune (ZAC, PUP)</li>
         <li><b>Concurrents</b> ordinateur, aléas, dettes et faillite</li>
       </ul>
-      <div class="home-credits">Prototype en bêta · <a href="#" id="hm-credits">Crédits et données</a></div>
+      <div class="home-credits">Bêta ${esc(VERSION)} · build ${esc(BUILD)} · <a href="#" id="hm-version">Nouveautés</a> · <a href="#" id="hm-credits">Crédits et données</a></div>
     </div>`;
   h.hidden = false;
   const q = (id: string) => h.querySelector<HTMLButtonElement>(`#${id}`);
@@ -1095,6 +1100,7 @@ function showHome() {
   q('hm-new')!.onclick = () => openIdentity('new');
   q('hm-howto')!.onclick = () => openTutorial();
   h.querySelector<HTMLAnchorElement>('#hm-credits')!.onclick = (e) => (e.preventDefault(), openCredits());
+  h.querySelector<HTMLAnchorElement>('#hm-version')!.onclick = (e) => (e.preventDefault(), openVersion());
   const inst = q('hm-install');
   if (inst) inst.onclick = installApp;
   (cont ?? q('hm-new'))!.focus();
@@ -1143,7 +1149,7 @@ function pulse(el: HTMLElement | null) {
 function renderTop() {
   const w = netWorth(state, ME);
   $('top').innerHTML = `
-    <h1>Urbasim</h1>
+    <h1>Urbasim <button id="ver" class="ver" type="button" title="Version et nouveautés">bêta ${esc(VERSION)} · #${esc(BUILD)}</button></h1>
     <div class="company" title="${esc(me().slogan ?? '')}"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><span class="cname">${esc(me().name)}</span></div>
     <div class="stats">
     <div class="stat" id="stat-round" title="Avancement de la partie"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b><span class="goalbar"><i style="width:${Math.min(100, (state.round / state.config.rounds) * 100)}%"></i></span></div>
@@ -1159,7 +1165,7 @@ function renderTop() {
     <button id="end" class="primary">${state.over ? 'Résultats' : me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
     <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">▶▶</button>
     <button id="bell" class="bell" title="Notifications et échéances" aria-label="Notifications">🔔${unreadCount() ? `<span class="badge hot">${unreadCount()}</span>` : urgentWatch() ? '<span class="badge hot">!</span>' : ''}</button>
-    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button>${canInstall() ? '<button id="install-btn">Installer l’application</button>' : ''}<button id="howto">Mode d’emploi</button><button id="credits-btn">Crédits et données</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
+    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button>${canInstall() ? '<button id="install-btn">Installer l’application</button>' : ''}<button id="howto">Mode d’emploi</button><button id="version-btn">Version ${esc(VERSION)} · build ${esc(BUILD)}</button><button id="credits-btn">Crédits et données</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
   tweenStat('cash', document.getElementById('stat-cash'), me().cash);
   tweenStat('worth', document.getElementById('stat-worth'), w);
   if (prevStat.round !== undefined && prevStat.round !== state.round) pulse(document.getElementById('stat-round'));
@@ -1167,11 +1173,13 @@ function renderTop() {
   $('end').onclick = () => (state.over ? openEndScreen() : endTurn());
   $('ff').onclick = fastForward;
   $('bell').onclick = openNotif;
+  $('ver').onclick = openVersion;
   $('home-btn').onclick = () => (closeMenu(), showHome());
   const ib = document.getElementById('install-btn');
   if (ib) ib.onclick = () => (closeMenu(), installApp());
   $('howto').onclick = () => (closeMenu(), openTutorial());
   $('credits-btn').onclick = () => (closeMenu(), openCredits());
+  $('version-btn').onclick = () => (closeMenu(), openVersion());
   $('company').onclick = () => (closeMenu(), openIdentity('edit'));
   const nb = $('new');
   nb.onclick = () => {
@@ -2184,6 +2192,31 @@ function renderAll() {
   updateMapCard();
 }
 
+/** Fenêtre « Version et nouveautés » : numéro de bêta, build et ce qui a changé. */
+function openVersion() {
+  openModal(
+    `<h2 class="mh">Urbasim · bêta ${esc(VERSION)}</h2>
+     <p class="muted">Build <b>${esc(BUILD)}</b> · ${esc(__APP_DATE__)} · ${esc(__APP_COMMIT__)}<br>Le numéro de build monte à chaque mise à jour publiée : s’il change, une nouvelle version est en ligne.</p>
+     <div class="tuto">${CHANGELOG.map((r) => `<h3 class="rel">${esc(r.version)} · ${esc(r.title)}</h3><ul>${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`).join('')}</div>
+     <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="vr-ok" type="button" class="primary">Fermer</button></div>`,
+    (root) => (root.querySelector<HTMLButtonElement>('#vr-ok')!.onclick = closeModal),
+  );
+}
+
+/** Première ouverture après une mise à jour : on le dit, et on montre les nouveautés quand la version bêta change. */
+function announceUpdate() {
+  let last: string | null = null;
+  try {
+    last = localStorage.getItem(BUILD_KEY);
+    localStorage.setItem(BUILD_KEY, `${VERSION}|${BUILD}`);
+  } catch {
+    return;
+  }
+  if (!last || last === `${VERSION}|${BUILD}`) return;
+  if (last.split('|')[0] !== VERSION) openVersion();
+  else toast(`Mise à jour : bêta ${VERSION}, build ${BUILD} (menu ⋯ → Version et nouveautés)`);
+}
+
 /** Fenêtre « Crédits et données » : sources et licences, hors de l'écran de jeu. */
 function openCredits() {
   openModal(
@@ -2243,6 +2276,7 @@ applyView();
 (document.getElementById('view') as HTMLSelectElement).value = view;
 renderAll();
 showHome();
+announceUpdate();
 
 // Outils de test automatisé (serveur de développement uniquement).
 if (import.meta.env.DEV) {
