@@ -325,7 +325,7 @@ collectivité jouent le rôle des enchères du Monopoly.
   Infobulle du terrain : opération, promoteur, étape, hauteur, surface. Limites : pas de volume 3D, bâti partiellement
   chevauchant un terrain non démoli, emprise recalculée à partir des critères du projet.
 
-- Fait : **affichage de la carte** : fond de plan sobre CARTO (clair ou sombre selon le thème, `light_all` / `dark_all`) à la place
+- Fait : **affichage de la carte** : fond de plan OpenStreetMap adouci par un filtre CSS (CARTO abandonné : clé d'API exigée) (clair ou sombre selon le thème, `light_all` / `dark_all`) à la place
   d'OpenStreetMap, pour que parcelles et bâtiments ressortent ; **pictogrammes d'équipements** (M métro, T tram, G gare, mairie,
   école/supérieur, parc, hôpital : pastilles SVG colorées, majeurs dès le zoom 14, tous dès le 16, case « équipements » dans la
   barre de la carte) ; contours de parcelles plus fins ; légende, barre d'outils, contrôles et infobulles aux couleurs du thème.
@@ -335,6 +335,11 @@ collectivité jouent le rôle des enchères du Monopoly.
   cache dès l'installation, même hors ligne dès la première visite ; fonds de carte : cache de secours, 400 tuiles). Bouton
   « Installer l'application » sur l'écran d'accueil et dans le menu (Chrome, Edge, Android : invite native ; iPhone et iPad :
   explication du menu Partager). Pas de service worker dans la version « page unique » (artefact Claude).
+
+- Fait : **version mobile allégée** : pied de page des crédits supprimé (menu ⋯ → « Crédits et données », lien sur l'accueil,
+  attribution OpenStreetMap discrète sur la carte), barre du haut compacte sur téléphone (société et boutons sur une ligne,
+  indicateurs en bandeau défilant), outils de carte repliables (« Carte et filtres »), correction d'un débordement horizontal
+  de la page sur petit écran (fenêtres de création de société décalées).
 
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus

@@ -241,19 +241,15 @@ function fastForward() {
 
 // ---------------------------------------------------------------- carte
 
-const map = L.map('map', { zoomControl: true, preferCanvas: false });
+const map = L.map('map', { zoomControl: true, preferCanvas: false, attributionControl: false });
+// Attribution discrète : une seule ligne courte, le détail des sources est dans « Crédits et données ».
+L.control.attribution({ prefix: false }).addTo(map);
 /** Sans fond de plan (page hébergée où les images externes sont bloquées) : on dessine les voies du quartier. */
 const NO_TILES = import.meta.env.VITE_NO_TILES === '1';
 if (!NO_TILES) {
-  // Fond de plan sobre (clair ou sombre selon le thème) pour que parcelles et bâtiments ressortent.
-  const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
-  const baseUrl = (dark: boolean) => `https://{s}.basemaps.cartocdn.com/${dark ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`;
-  let base = L.tileLayer(baseUrl(darkQuery.matches), { maxZoom: 20, maxNativeZoom: 19, subdomains: 'abcd', attribution: '© contributeurs OpenStreetMap · © CARTO' }).addTo(map);
-  darkQuery.addEventListener('change', (e) => {
-    base.remove();
-    base = L.tileLayer(baseUrl(e.matches), { maxZoom: 20, maxNativeZoom: 19, subdomains: 'abcd', attribution: '© contributeurs OpenStreetMap · © CARTO' }).addTo(map);
-    base.bringToBack();
-  });
+  // Fond de plan OpenStreetMap, adouci par un filtre CSS (voir `.basemap` : désaturé, et inversé en thème sombre) pour que
+  // parcelles et bâtiments ressortent.
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 20, maxNativeZoom: 19, className: 'basemap', attribution: '© contributeurs OpenStreetMap' }).addTo(map);
 } else {
   map.createPane('routes');
   map.getPane('routes')!.style.zIndex = '300';
@@ -552,10 +548,10 @@ function updateMapLegend() {
 const mapTools = new L.Control({ position: 'topright' });
 mapTools.onAdd = () => {
   const el = L.DomUtil.create('div', 'maptools');
-  el.innerHTML = `<label>Carte <select id="view"><option value="hauteur">Hauteur du bâti</option><option value="zonage">Règles d’urbanisme</option><option value="lieu">Valeur du lieu</option><option value="prix">Prix des terrains</option></select></label>
+  el.innerHTML = `<details class="mt" ${window.innerWidth > 800 ? 'open' : ''}><summary>Carte et filtres</summary><label>Vue <select id="view"><option value="hauteur">Hauteur du bâti</option><option value="zonage">Règles d’urbanisme</option><option value="lieu">Valeur du lieu</option><option value="prix">Prix des terrains</option></select></label>
     <label>Terrains libres <select id="pfilter"><option value="tous">tous</option><option value="vente">en vente</option><option value="abordables">à ma portée</option><option value="assembler">à assembler</option></select></label>
     <label title="Ou Maj+clic sur la carte"><input type="checkbox" id="multi"/> sélection multiple</label>
-    <label title="Stations, écoles, parcs, hôpital, mairie"><input type="checkbox" id="pois" checked/> équipements</label>`;
+    <label title="Stations, écoles, parcs, hôpital, mairie"><input type="checkbox" id="pois" checked/> équipements</label></details>`;
   L.DomEvent.disableClickPropagation(el);
   const q = <T extends HTMLElement>(id: string) => el.querySelector<T>(`#${id}`)!;
   q<HTMLSelectElement>('view').onchange = (e) => ((view = (e.target as HTMLSelectElement).value as typeof view), applyView(), renderAll());
@@ -996,7 +992,7 @@ function showHome() {
         <li><b>Enchères</b> et <b>appels d’offres</b> de la commune (ZAC, PUP)</li>
         <li><b>Concurrents</b> ordinateur, aléas, dettes et faillite</li>
       </ul>
-      <div class="home-credits">Prototype · ${esc(district.credits.join(' · '))} · prix et coûts : ordres de grandeur</div>
+      <div class="home-credits">Prototype en bêta · <a href="#" id="hm-credits">Crédits et données</a></div>
     </div>`;
   h.hidden = false;
   const q = (id: string) => h.querySelector<HTMLButtonElement>(`#${id}`);
@@ -1009,6 +1005,7 @@ function showHome() {
     };
   q('hm-new')!.onclick = () => openIdentity('new');
   q('hm-howto')!.onclick = () => openTutorial();
+  h.querySelector<HTMLAnchorElement>('#hm-credits')!.onclick = (e) => (e.preventDefault(), openCredits());
   const inst = q('hm-install');
   if (inst) inst.onclick = installApp;
   (cont ?? q('hm-new'))!.focus();
@@ -1032,6 +1029,7 @@ function renderTop() {
   $('top').innerHTML = `
     <h1>Urbasim</h1>
     <div class="company" title="${esc(me().slogan ?? '')}"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><span class="cname">${esc(me().name)}</span></div>
+    <div class="stats">
     <div class="stat" title="Avancement de la partie"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b><span class="goalbar"><i style="width:${Math.min(100, (state.round / state.config.rounds) * 100)}%"></i></span></div>
     <div class="stat"><small>Trésorerie</small><b>${eur(me().cash)}</b></div>
     <div class="stat" title="Trésorerie + terrains (au prix de reprise) + fonds propres engagés dans les opérations, moins les dettes"><small>Patrimoine</small><b>${eur(w)}</b></div>
@@ -1040,11 +1038,12 @@ function renderTop() {
     <div class="stat" title="Indice des prix de vente (100 = prix de départ) · taux du crédit promoteur · logements que les ménages achètent par trimestre dans le quartier, et logements en vente en ce moment (tous promoteurs)">
       <small>Marché</small><b><span class="${state.marketIndex >= 1 ? 'good' : 'bad'}">prix ${(state.marketIndex * 100).toFixed(0)}</span> · ${pct(state.interestRate)} · ${marketDemand(state).toFixed(0)}<span class="muted">/trim.</span> <span class="muted">(${unitsOnOffer(state)} en vente)</span></b>
     </div>
+    </div>
     <span class="spacer"></span>
     <button id="end" class="primary">${state.over ? 'Résultats' : me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
     <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">▶▶</button>
     <button id="bell" class="bell" title="Notifications et échéances" aria-label="Notifications">🔔${unreadCount() ? `<span class="badge hot">${unreadCount()}</span>` : urgentWatch() ? '<span class="badge hot">!</span>' : ''}</button>
-    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button>${canInstall() ? '<button id="install-btn">Installer l’application</button>' : ''}<button id="howto">Mode d’emploi</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
+    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button>${canInstall() ? '<button id="install-btn">Installer l’application</button>' : ''}<button id="howto">Mode d’emploi</button><button id="credits-btn">Crédits et données</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
   $('end').onclick = () => (state.over ? openEndScreen() : endTurn());
   $('ff').onclick = fastForward;
   $('bell').onclick = openNotif;
@@ -1052,6 +1051,7 @@ function renderTop() {
   const ib = document.getElementById('install-btn');
   if (ib) ib.onclick = () => (closeMenu(), installApp());
   $('howto').onclick = () => (closeMenu(), openTutorial());
+  $('credits-btn').onclick = () => (closeMenu(), openCredits());
   $('company').onclick = () => (closeMenu(), openIdentity('edit'));
   const nb = $('new');
   nb.onclick = () => {
@@ -1866,7 +1866,16 @@ function renderAll() {
   renderSide();
 }
 
-$('credits').textContent = district.credits.join(' · ') + (NO_TILES ? ' · Voies : IGN, BD TOPO® (Licence Ouverte 2.0)' : ' · Fond de carte : © contributeurs OpenStreetMap, © CARTO') + ' · Prix et coûts : ordres de grandeur, pas une expertise.';
+/** Fenêtre « Crédits et données » : sources et licences, hors de l'écran de jeu. */
+function openCredits() {
+  openModal(
+    `<h2 class="mh">Crédits et données</h2>
+     <div class="tuto"><ul>${district.credits.map((c) => `<li>${esc(c)}</li>`).join('')}<li>${NO_TILES ? 'Voies : IGN, BD TOPO® (Licence Ouverte 2.0)' : 'Fond de carte : © contributeurs OpenStreetMap (licence ODbL)'}</li></ul>
+     <p class="muted">Urbasim est un jeu en version bêta : les prix, les coûts et les règles d’urbanisme sont des ordres de grandeur, pas une expertise.</p></div>
+     <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="cr-ok" type="button" class="primary">Fermer</button></div>`,
+    (root) => (root.querySelector<HTMLButtonElement>('#cr-ok')!.onclick = closeModal),
+  );
+}
 mapLegend.addTo(map);
 mapTools.addTo(map);
 fitDistrict();
