@@ -325,8 +325,8 @@ collectivité jouent le rôle des enchères du Monopoly.
   Infobulle du terrain : opération, promoteur, étape, hauteur, surface. Limites : pas de volume 3D, bâti partiellement
   chevauchant un terrain non démoli, emprise recalculée à partir des critères du projet.
 
-- Fait : **affichage de la carte** : fond de plan OpenStreetMap adouci par un filtre CSS (CARTO abandonné : clé d'API exigée) (clair ou sombre selon le thème, `light_all` / `dark_all`) à la place
-  d'OpenStreetMap, pour que parcelles et bâtiments ressortent ; **pictogrammes d'équipements** (M métro, T tram, G gare, mairie,
+- Fait : **affichage de la carte** : fond de plan OpenStreetMap adouci par un filtre CSS (désaturé, inversé en thème
+  sombre : classe `.basemap`) pour que parcelles et bâtiments ressortent (CARTO essayé puis abandonné : ses tuiles exigent une clé d'API) ; **pictogrammes d'équipements** (M métro, T tram, G gare, mairie,
   école/supérieur, parc, hôpital : pastilles SVG colorées, majeurs dès le zoom 14, tous dès le 16, case « équipements » dans la
   barre de la carte) ; contours de parcelles plus fins ; légende, barre d'outils, contrôles et infobulles aux couleurs du thème.
   Reste à faire : parcs et espaces verts dessinés, routes hiérarchisées dans la version sans fond de plan, libellés de rues, 3D.
