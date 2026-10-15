@@ -412,6 +412,37 @@ map.createPane('bati2');
 map.getPane('bati2')!.style.zIndex = '360';
 map.getPane('bati2')!.style.pointerEvents = 'none';
 const builtLayer = L.layerGroup().addTo(map);
+/** Rendu SVG des bâtiments des promoteurs : on y glisse des motifs de hachures (un par couleur de promoteur). */
+const builtRenderer = L.svg({ pane: 'bati2' });
+builtRenderer.addTo(map);
+function hatchFill(color: string): string {
+  const svg = (builtRenderer as unknown as { _container?: SVGSVGElement })._container;
+  if (!svg) return color;
+  const id = `hatch-${color.replace(/[^a-z0-9]/gi, '')}`;
+  if (!svg.querySelector(`#${id}`)) {
+    let defs = svg.querySelector('defs');
+    if (!defs) {
+      defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+      svg.prepend(defs);
+    }
+    const pat = document.createElementNS('http://www.w3.org/2000/svg', 'pattern');
+    pat.setAttribute('id', id);
+    pat.setAttribute('patternUnits', 'userSpaceOnUse');
+    pat.setAttribute('width', '7');
+    pat.setAttribute('height', '7');
+    pat.setAttribute('patternTransform', 'rotate(45)');
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', '0');
+    line.setAttribute('y1', '0');
+    line.setAttribute('x2', '0');
+    line.setAttribute('y2', '7');
+    line.setAttribute('stroke', color);
+    line.setAttribute('stroke-width', '3');
+    pat.appendChild(line);
+    defs.appendChild(pat);
+  }
+  return `url(#${id})`;
+}
 const footprintCache = new Map<string, [number, number][] | null>();
 let hiddenKey = '';
 
@@ -432,7 +463,7 @@ function footprintOf(p: Plot, criteria: Criteria, key: string): [number, number]
 const PHASE_STYLE: Record<string, { opacity: number; dash?: string }> = {
   permis: { opacity: 0.22, dash: '3 3' },
   preventes: { opacity: 0.35, dash: '3 3' },
-  chantier: { opacity: 0.62, dash: '6 2' },
+  chantier: { opacity: 0.3 },
   livraison: { opacity: 0.88 },
 };
 
@@ -457,6 +488,7 @@ function drawBuildings() {
     const col = colorOf(owner);
     L.polygon(ring, {
       pane: 'bati2',
+      renderer: builtRenderer,
       interactive: false,
       color: col,
       weight: phase === 'livraison' ? 2 : 2.5,
@@ -465,6 +497,8 @@ function drawBuildings() {
       fillColor: view === 'hauteur' ? heightColor(height) : col,
       fillOpacity: st.opacity,
     }).addTo(builtLayer);
+    // En chantier : hachures de la couleur du promoteur par-dessus.
+    if (phase === 'chantier') L.polygon(ring, { pane: 'bati2', renderer: builtRenderer, interactive: false, stroke: false, fillColor: hatchFill(col), fillOpacity: 0.95 }).addTo(builtLayer);
   };
   for (const p of developed) {
     const run = p.projectId ? state.projects.find((r) => r.id === p.projectId) : undefined;
@@ -504,7 +538,7 @@ function updateMapLegend() {
   }
   // Repères communs à toutes les vues : propriétaires et symboles.
   const owners = [`<span><i class="swatch" style="background:${colorOf(ME)}"></i>vous</span>`, ...state.players.filter((p) => p.bot).map((p) => `<span><i class="swatch" style="background:${colorOf(p.id)}"></i>${esc(shortName(p.name))}</span>`)].join(' ');
-  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#f6d27a;border:2px solid #c98200"></i>en vente</span> <span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span><i class="swatch" style="background:#7fd1d3;border:1px dashed #0f8b8d"></i>terrain communal</span> <span><i class="swatch" style="background:#fff;border:2.5px solid #1f6feb"></i>bâtiment construit (contour = promoteur ; pointillé = en chantier)</span> <span>pastilles : équipements (survol = nom)</span></div>`;
+  el.innerHTML += `<div class="legend-common">${owners}<br><span><i class="swatch" style="background:#f6d27a;border:2px solid #c98200"></i>en vente</span> <span><i class="swatch" style="background:#cdb6e6;border:1px dashed #7b3fa0"></i>à assembler</span> <span><i class="swatch" style="background:#7fd1d3;border:1px dashed #0f8b8d"></i>terrain communal</span> <span><i class="swatch" style="background:#fff;border:2.5px solid #1f6feb"></i>bâtiment construit (contour = promoteur ; hachuré = en chantier ; pointillé = en préparation)</span> <span>pastilles : équipements (survol = nom)</span></div>`;
   // Repliable (fermée par défaut sur petit écran) : le titre devient la ligne cliquable.
   const title = el.querySelector('b');
   const heading = title ? title.outerHTML : '<b>Légende</b>';

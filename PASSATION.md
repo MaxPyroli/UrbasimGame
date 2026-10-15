@@ -320,7 +320,7 @@ collectivité jouent le rôle des enchères du Monopoly.
 - Fait : **bâtiments des promoteurs sur la carte** (`drawBuildings` dans `jeu/src/main.ts`, `Plot.built` côté moteur). Une opération
   lancée remplace le bâti d'origine du terrain (les bâtiments dont le centre tombe dans le terrain disparaissent) par son
   emprise réelle (`computeProject`), colorée par hauteur (vue « Hauteur ») ou par promoteur (autres vues), avec le contour de la
-  couleur du promoteur. Opacité selon l'étape (permis, préventes : pointillé et léger ; chantier : plus dense ; livré : plein).
+  couleur du promoteur. Opacité selon l'étape (permis, préventes : pointillé et léger ; chantier : hachuré, motif SVG de la couleur du promoteur ; livré : plein).
   À la livraison, le bâtiment reste sur la carte (`Plot.built`, conservé par l'assemblage) jusqu'à la prochaine démolition.
   Infobulle du terrain : opération, promoteur, étape, hauteur, surface. Limites : pas de volume 3D, bâti partiellement
   chevauchant un terrain non démoli, emprise recalculée à partir des critères du projet.
