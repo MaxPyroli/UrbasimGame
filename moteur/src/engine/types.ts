@@ -62,10 +62,12 @@ export interface Criteria {
   maxFAR: number | null;
   footprintShape: FootprintShape;
   placement: Placement;
-  /** Deuxième bâtiment au fond du terrain (si le terrain est assez profond et que le PLU l'autorise). */
+  /** Plusieurs bâtiments sur le terrain quand il y a la place et que le PLU l'autorise (le promoteur occupe l'espace). */
   secondBuilding: boolean;
-  /** Niveaux (R+x) du bâtiment arrière, en général plus bas que celui sur rue. */
-  secondLevels: number;
+  /** Nombre maximal de bâtiments sur le terrain. */
+  maxBuildings: number;
+  /** Niveaux (R+x) des bâtiments autres que celui sur rue ; null = autant que celui sur rue. */
+  secondLevels: number | null;
   /** Distance minimale entre les deux bâtiments (m) ; au moins la moitié de la hauteur du bâtiment sur rue. */
   buildingGap: number;
 
@@ -130,7 +132,7 @@ export interface FootprintEdge {
 
 export interface LevelPlan {
   /** Bâtiment : 1 = sur rue (ou unique), 2 = bâtiment arrière. */
-  building?: 1 | 2;
+  building?: number;
   id: string;
   label: string;
   kind: 'rdc' | 'etage' | 'attique';
@@ -214,6 +216,8 @@ export interface Project {
   footprint: Ring | null;
   /** Emprise du bâtiment arrière (deuxième bâtiment), null s'il n'y en a pas. */
   rearFootprint: Ring | null;
+  /** Troisième bâtiment et suivants (grands terrains). */
+  extraFootprints: Ring[];
   /** Accès au bâtiment arrière : allée de 3,5 m le long du bâtiment sur rue, ou porche qui le traverse. */
   rearAccess: 'allee' | 'porche' | null;
   /** Entrée du parking (porte, allée, rampe), null sans parking en sous-sol ni en rez-de-chaussée. */

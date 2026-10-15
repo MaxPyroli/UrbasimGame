@@ -425,6 +425,41 @@ collectivité jouent le rôle des enchères du Monopoly.
     une liste d'anneaux). Les bots ne l'utilisent pas encore (piste). Tests : `moteur/tests/rear.test.ts`.
   - Pas de nouveau `reprice` nécessaire : l'option est désactivée par défaut, les prix et délaissés ne changent pas.
 
+- Fait : **bâtiments multiples automatiques, carte de Sucy-en-Brie, correction des voies** (version 0.10.0).
+  - **Plusieurs bâtiments, automatique** : `PROMOTER_CRITERIA` (`moteur/src/engine/defaults.ts`) = `DEFAULT_CRITERIA` + `secondBuilding: true` ; utilisé par le
+    jeu (interface, concurrents, appels d'offres, estimation des terrains). `DEFAULT_CRITERIA` garde un seul bâtiment (tests du moteur). `buildSecondary`
+    (`engine/rear.ts`) pose d'abord le bâtiment arrière (allée ou porche), puis, dans l'espace libre (enveloppe moins les emprises déjà posées agrandies
+    de la distance entre bâtiments), jusqu'à `maxBuildings` bâtiments (critère, plafonné par le PLU : 4 renouvellement, 3 mixte/activités, 2 centre,
+    1 préservation). Niveaux des bâtiments de fond : `secondLevels` (null = autant que celui sur rue). La densité (COS) fait renoncer aux derniers bâtiments.
+    `Project.extraFootprints` = troisième bâtiment et suivants. Interface : case « plusieurs bâtiments si possible » (cochée) + « fond R+ auto » ;
+    « Meilleur projet » compare avec un seul bâtiment (`BestPlan.buildings/single`).
+  - **Robustesse** : `computeProject` ne lève plus d'exception (la bibliothèque de découpage échoue sur certains contours) : nouvel essai sans bâtiments
+    supplémentaires, puis projet infaisable expliqué.
+  - **Voies** : `withRoadClip` (`game/district.ts`) retire des parcelles ce qui est sous la chaussée (couloir de demi-largeur 5/3,5/2,5 m selon l'importance
+    BD TOPO), recalcule le côté sur rue, écarte les « parcelles » dont plus de 60 % est sous une voie (voirie). Appelé par `npm run reprice`. Montreuil :
+    13 rognées, 11 écartées ; Sucy : 646 rognées, 110 écartées.
+  - **Carte de Sucy-en-Brie, commune entière** (`moteur/data/districts/sucy-en-brie.json`, ~7 100 parcelles, 21 600 bâtiments) : `npm run commune --
+    sucy-en-brie "Sucy-en-Brie" 94071 grande-couronne` (`fetchCommune` : parcelles par code INSEE, bâti/voies/zonage/équipements par carreaux de 1 km,
+    dédoublonnés). Nouveau marché `grande-couronne` (`MARKETS`, banlieue éloignée : logement 4 800 €/m² habitable, terrain 520 €/m² de SDP). Limite de
+    taille de parcelle montée à 8 000 m² (`MAX_PARCEL_AREA`). Parcelles en bord de commune : les voisines d'autres communes manquent, donc leur côté sur rue
+    peut être surestimé.
+  - **Recalcul des prix en parallèle** : `npm run reprice -- <id>` répartit l'analyse (0,2 s/parcelle) et la recherche des délaissés sur tous les cœurs
+    (`analyseParcel`, `priceParcels`, `wastelandIds`). À relancer pour chaque carte quand les règles changent. `npm run simulate -- <id> [difficulté] [graines]`
+    joue des parties complètes (humain inactif + 3 ordinateurs) et mesure temps et équilibre.
+  - **Jeu multi-cartes** : `jeu/src/districts.ts` (registre, choix mémorisé, chargement) ; les cartes sont servies/copiées par un plugin Vite
+    (`/data/districts/<id>.json?v=<build>`), intégrées compressées (gzip + base64) dans la version autonome ; changer de carte recharge la page ; une sauvegarde
+    par carte (`urbasim-save-v5` pour Montreuil, `-<id>` pour les autres) ; les parcelles inchangées ne sont pas enregistrées (rechargées depuis la carte).
+    Police du jeu : Alte Haas Grotesk Regular/Bold (`jeu/src/assets/fonts`, `@font-face` dans `style.css`, intégrée en base64 dans la version autonome).
+  - **Performance sur une commune entière** (Sucy, 7 154 parcelles) : tour des concurrents de 22–54 s à 3–5 s (première fois), fin de trimestre dans le jeu de 80 s à ~5 s.
+    Trois causes traitées : `largestRectangle` (`engine/footprint.ts`) rasterise par balayage de lignes au lieu de 4 tests point-dans-polygone par cellule
+    (×20 à ×40 sur les grands terrains, résultats identiques) ; les ordinateurs étudient au plus 30 ventes + ~30 terrains non vendeurs par trimestre
+    (`MAX_LISTED_STUDIED`, `MAX_PROSPECTS_STUDIED` dans `game/bot.ts` ; sans effet sur Montreuil) et ignorent les terrains hors de leur portée ;
+    ils ne calculent plus les niveaux au-delà de la hauteur du PLU. Simulations (humain inactif + 3 ordinateurs, difficulté normale) : Sucy ×0,8 pour
+    l'humain, ordinateurs ×0,4 à ×2,3, aucune faillite, 20–24 terrains livrés ; Montreuil inchangé (×0,8 ; ×0,5 à ×2,0).
+  - Pistes : le recalcul des prix de Sucy prend ~30 min sur 4 cœurs (dont ~20 min pour les délaissés) ; fiche d'un très grand terrain : 1 à 2 s ;
+    densité : 95 % des parcelles de Sucy sont « diffuses » (seuils calés sur Montreuil) ; règle PLU propre aux pavillons à affiner ; difficulté « difficile » non resimulée.
+    Affichage allégé pour les grandes cartes : rendu canvas, bâti d'origine créé à la demande (vue « hauteur »), infobulles à la demande, styles mis en cache.
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,

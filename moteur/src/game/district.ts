@@ -2,18 +2,22 @@ import {
   FLOOR_FALLBACK,
   LocalProjection,
   bbox,
+  capsule,
   cleanRing,
+  difference,
   distToSegment,
   intersection,
+  largestPolygon,
   multiArea,
   ringArea,
   toMulti,
+  union,
   type ContextBuilding,
   type LonLat,
   type MarketId,
   type Ring,
 } from '../engine';
-import { DEFAULT_CONFIG, appraise, defaultAskingPrice, plotIssue, ruleOf, type PlotSeed } from './game';
+import { DEFAULT_CONFIG, SMALL_PLOT_AREA, appraise, askingPriceFrom, plotIssue, ruleOf, type PlotSeed } from './game';
 import { mergeParcels } from './merge';
 import { ZONE_RULES, adaptToDensity } from './plu';
 import type { Density, PlotIssue, ZoneFamily } from './types';
@@ -108,6 +112,8 @@ export interface DistrictSource {
   zones?: DistrictZone[];
   credits: string[];
   fetchedAt: string;
+  /** Commune entière : les parcelles ne sont pas limitées au rayon (le cadastre ne donne déjà que la commune). */
+  unclipped?: boolean;
 }
 
 /** Point dans un contour [lon, lat] (lancer de rayon). */
@@ -122,7 +128,7 @@ export function pointInRing(x: number, y: number, ring: [number, number][]): boo
 }
 
 export const MIN_PARCEL_AREA = 20;
-export const MAX_PARCEL_AREA = 3000;
+export const MAX_PARCEL_AREA = 8000;
 /** Deux arêtes à moins de cette distance (m) sont considérées comme mitoyennes. */
 const SHARED_TOLERANCE = 0.6;
 
@@ -197,7 +203,7 @@ export function buildDistrict(src: DistrictSource): District {
     if (area < MIN_PARCEL_AREA || area > MAX_PARCEL_AREA) return;
     const cx = it.ring.reduce((s, q) => s + q[0], 0) / it.ring.length;
     const cy = it.ring.reduce((s, q) => s + q[1], 0) / it.ring.length;
-    if (Math.hypot(cx, cy) > src.radius) return;
+    if (!src.unclipped && Math.hypot(cx, cy) > src.radius) return;
 
     const neighbours = items.filter((o, j) => j !== i && o.id !== it.id && near(i, j));
     const streetEdges: number[] = [];
@@ -257,10 +263,94 @@ export function buildDistrict(src: DistrictSource): District {
     const loc = b.outer.map((q) => proj.toLocal(q));
     const cx = loc.reduce((t, q) => t + q[0], 0) / loc.length;
     const cy = loc.reduce((t, q) => t + q[1], 0) / loc.length;
-    if (Math.hypot(cx, cy) > src.radius + 15) continue;
+    if (!src.unclipped && Math.hypot(cx, cy) > src.radius + 15) continue;
     buildings.push({ ring: b.outer.map((q) => [Math.round(q.lon * 1e6) / 1e6, Math.round(q.lat * 1e6) / 1e6]), height: Math.round(b.height * 10) / 10, estimated: b.estimated });
   }
   return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, buildings, pois: src.pois, ...(src.roads ? { roads: src.roads } : {}), ...(src.zones ? { zones: src.zones } : {}), credits: src.credits, fetchedAt: src.fetchedAt };
+}
+
+/** Demi-largeur (m) de l'emprise de chaussée qu'on retire des parcelles, selon l'importance de la voie (1 = axe majeur). */
+const roadHalfWidth = (importance: number) => (importance <= 2 ? 5 : importance <= 4 ? 3.5 : 2.5);
+/** Au-delà de cette part de leur surface sous la chaussée, les « parcelles » sont de la voirie : on les écarte. */
+const ROAD_PARCEL_SHARE = 0.6;
+
+/**
+ * Retire des parcelles ce qui est sous une voie (BD TOPO) : certaines parcelles cadastrales englobent la chaussée, et le jeu
+ * y construirait en pleine rue. La partie sous la voie est retranchée (la parcelle garde sa plus grande portion et son côté
+ * sur rue est recalculé) ; celles qui sont surtout de la voirie sont écartées. Idempotent.
+ */
+export function withRoadClip(d: District): { district: District; clipped: number; dropped: number } {
+  if (!d.roads?.length) return { district: d, clipped: 0, dropped: 0 };
+  const proj = new LocalProjection(d.center.lon, d.center.lat);
+  const segs = d.roads.flatMap((r) => {
+    const pts = r.line.map(([lon, lat]) => proj.toLocal({ lon, lat }));
+    const h = roadHalfWidth(r.importance);
+    return pts.slice(1).map((b, i) => ({ a: pts[i], b, h, x0: Math.min(pts[i][0], b[0]) - h, x1: Math.max(pts[i][0], b[0]) + h, y0: Math.min(pts[i][1], b[1]) - h, y1: Math.max(pts[i][1], b[1]) + h }));
+  });
+  type Item = { p: DistrictParcel; ring: Ring; changed: boolean; dropped: boolean };
+  const items: Item[] = d.parcels.map((p) => ({ p, ring: p.ring.map((q) => proj.toLocal(q)), changed: false, dropped: false }));
+  let clipped = 0;
+  let dropped = 0;
+  for (const it of items) {
+    const b = bbox(it.ring);
+    const near = segs.filter((s) => !(s.x1 < b.minX || s.x0 > b.maxX || s.y1 < b.minY || s.y0 > b.maxY));
+    if (near.length === 0) continue;
+    try {
+      const area = ringArea(it.ring);
+      const [first, ...others] = near.map((s) => toMulti(capsule(s.a, s.b, s.h, 4)));
+      const corridor = union(first, ...others);
+      const lost = multiArea(intersection(toMulti(it.ring), corridor));
+      if (lost < 8 || lost / area < 0.03) continue;
+      if (lost / area > ROAD_PARCEL_SHARE) {
+        it.dropped = true;
+        dropped++;
+        continue;
+      }
+      const rest = largestPolygon(difference(toMulti(it.ring), corridor));
+      const ring = rest ? cleanRing(rest[0], 0.05) : null;
+      if (!ring || ringArea(ring) < MIN_PARCEL_AREA) {
+        it.dropped = true;
+        dropped++;
+        continue;
+      }
+      it.ring = ring;
+      it.changed = true;
+      clipped++;
+    } catch {
+      /* géométrie dégénérée : la parcelle reste telle quelle */
+    }
+  }
+  // Côté sur rue : à recalculer pour les parcelles rognées et celles qui touchaient une voirie écartée.
+  const kept = items.filter((it) => !it.dropped);
+  const boxes = kept.map((it) => bbox(it.ring));
+  const droppedBoxes = items.filter((it) => it.dropped).map((it) => bbox(it.ring));
+  const m = SHARED_TOLERANCE + 0.5;
+  const overlaps = (a: ReturnType<typeof bbox>, c: ReturnType<typeof bbox>) => !(a.maxX + m < c.minX || c.maxX + m < a.minX || a.maxY + m < c.minY || c.maxY + m < a.minY);
+  const parcels: DistrictParcel[] = kept.map((it, i) => {
+    const touchesDropped = droppedBoxes.some((db) => overlaps(boxes[i], db));
+    if (!it.changed && !touchesDropped) return it.p;
+    const streetEdges: number[] = [];
+    const neighbours = kept.filter((_, j) => j !== i && overlaps(boxes[i], boxes[j]));
+    it.ring.forEach((a, k) => {
+      const c = it.ring[(k + 1) % it.ring.length];
+      const mid: [number, number] = [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2];
+      const shared = neighbours.some((n) => n.ring.some((q, u) => distToSegment(mid, q, n.ring[(u + 1) % n.ring.length]) < SHARED_TOLERANCE));
+      if (!shared) streetEdges.push(k);
+    });
+    if (!it.changed) return { ...it.p, streetEdges };
+    const area = Math.round(ringArea(it.ring));
+    return {
+      ...it.p,
+      ring: it.ring.map((q) => {
+        const ll = proj.toLonLat(q);
+        return { lon: Math.round(ll.lon * 1e7) / 1e7, lat: Math.round(ll.lat * 1e7) / 1e7 };
+      }),
+      streetEdges,
+      area,
+      label: it.p.label.replace(/ · \d+ m²$/, ` · ${area} m²`),
+    };
+  });
+  return { district: { ...d, parcels }, clipped, dropped };
 }
 
 /** Rayon (m) sur lequel on mesure la densité du bâti autour d'une parcelle, et seuils de part d'emprise bâtie. */
@@ -322,7 +412,16 @@ export function districtToSeeds(d: District): PlotSeed[] {
  * avec qui les assembler, ou un gain de valeur inférieur à leur propre prix plancher). Elles restent dans le jeu, mais ne sont
  * ni mises en vente ni convoitées par les concurrents. Calcul long, mémorisé dans l'instantané.
  */
-export function withWasteland(d: District): District {
+export function withWasteland(d: District, appraised?: number[], uselessIds?: Set<string>): District {
+  const useless = uselessIds ?? wastelandIds(d, appraised);
+  return { ...d, parcels: d.parcels.map((p) => (useless.has(p.id) ? { ...p, issue: 'delaisse' as const } : p)) };
+}
+
+/** Indices des parcelles non constructibles seules (candidates aux délaissés) : ce sont les seules qui demandent le calcul. */
+export const wastelandCandidates = (d: District): number[] => d.parcels.flatMap((p, i) => (p.issue && p.issue !== 'zone' ? [i] : []));
+
+/** Identifiants des délaissés parmi les parcelles d'indices `only` (toutes les candidates par défaut) ; parallélisable par indices. */
+export function wastelandIds(d: District, appraised?: number[], only?: number[]): Set<string> {
   const config = { ...DEFAULT_CONFIG, market: MARKETS[d.market] };
   const kx = 111320 * Math.cos((d.center.lat * Math.PI) / 180);
   const ky = 110540;
@@ -332,10 +431,21 @@ export function withWasteland(d: District): District {
     const cy = p.ring.reduce((t, q) => t + q.lat, 0) / p.ring.length;
     return { p, parcel, cx, cy, rule: parcelRule(p) };
   });
-  const alone = info.map((a) => (a.p.issue ? 0 : appraise(a.parcel, a.p.existingSdp, config, a.p.locationFactor, a.rule).best));
+  // Estimation de chaque parcelle seule, à la demande (celles des voisines de candidates uniquement).
+  const aloneCache = new Map<number, number>();
+  const alone = (j: number) => {
+    let v = aloneCache.get(j);
+    if (v === undefined) {
+      const a = info[j];
+      v = a.p.issue ? 0 : appraised ? appraised[j] : appraise(a.parcel, a.p.existingSdp, config, a.p.locationFactor, a.rule).best;
+      aloneCache.set(j, v);
+    }
+    return v;
+  };
   const useless = new Set<string>();
-  info.forEach((a, i) => {
-    if (!a.p.issue || a.p.issue === 'zone') return;
+  for (const i of only ?? wastelandCandidates(d)) {
+    const a = info[i];
+    if (!a.p.issue || a.p.issue === 'zone') continue;
     let gain = 0;
     let neighbours = 0;
     for (let j = 0; j < info.length; j++) {
@@ -347,17 +457,56 @@ export function withWasteland(d: District): District {
       const zones = [...new Set([...(a.p.zone ? [a.p.zone] : []), ...(b.p.zone ? [b.p.zone] : [])])];
       const rule = ruleOf({ zones, density: b.p.density });
       if (plotIssue(m.parcel, config, b.p.locationFactor, rule)) continue;
-      gain = Math.max(gain, appraise(m.parcel, a.p.existingSdp + b.p.existingSdp, config, b.p.locationFactor, rule).best - alone[j]);
+      gain = Math.max(gain, appraise(m.parcel, a.p.existingSdp + b.p.existingSdp, config, b.p.locationFactor, rule).best - alone(j));
     }
     const floor = 0.6 * a.p.area * config.market.landPerSdp * a.p.locationFactor;
     if (neighbours === 0 || gain < floor) useless.add(a.p.id);
-  });
-  return { ...d, parcels: d.parcels.map((p) => (useless.has(p.id) ? { ...p, issue: 'delaisse' as const } : p)) };
+  }
+  return useless;
 }
 
-/** Analyse chaque parcelle une fois pour toutes : prix de référence et constructibilité seule (long : ~10 s) ; mémorisés dans l'instantané (configuration par défaut du marché du quartier). */
-export function withBasePrices(source: District): District {
+/** Résultat de l'analyse d'une parcelle : ce que son meilleur projet peut payer, et pourquoi elle n'est pas constructible seule. */
+export interface ParcelAnalysis {
+  best: number;
+  issue: PlotIssue | null;
+}
+
+/** Analyse une parcelle (longue : ~0,2 s) ; indépendante des autres, donc parallélisable. */
+export function analyseParcel(p: DistrictParcel, market: MarketId): ParcelAnalysis {
+  const config = { ...DEFAULT_CONFIG, market: MARKETS[market] };
+  const parcel = { ring: p.ring, streetEdges: p.streetEdges };
+  const rule = parcelRule(p);
+  // Contrôle géométrique d'abord (rapide), puis une seule estimation : elle sert à la fois au prix et au verdict « rentable seule ».
+  const structural = plotIssue(parcel, undefined, p.locationFactor, rule);
+  if (structural) return { best: 0, issue: structural };
+  const best = appraise(parcel, p.existingSdp, config, p.locationFactor, rule).best;
+  // La démolition ne peut qu'abaisser l'estimation : si elle est positive avec le bâti existant, le terrain est rentable seul.
+  if (best <= 0 && appraise(parcel, 0, config, p.locationFactor, rule).best <= 0) return { best, issue: p.area < SMALL_PLOT_AREA ? 'trop-petite' : 'inconstructible' };
+  return { best, issue: null };
+}
+
+/**
+ * Analyse chaque parcelle une fois pour toutes : prix de référence et constructibilité seule (long : ~0,2 s par parcelle) ;
+ * mémorisés dans l'instantané (configuration par défaut du marché du quartier). `analyses` permet de fournir des résultats
+ * calculés ailleurs (en parallèle) pour les parcelles de `withDensity(source)`, dans l'ordre.
+ */
+export function withBasePrices(source: District, analyses?: ParcelAnalysis[]): District {
+  const { priced, appraised } = priceParcels(source, analyses);
+  return withWasteland(priced, appraised);
+}
+
+/** Première étape de `withBasePrices` : densité, prix de référence et constructibilité seule (sans la recherche des délaissés). */
+export function priceParcels(source: District, analyses?: ParcelAnalysis[]): { priced: District; appraised: number[] } {
   const d = withDensity(source);
   const config = { ...DEFAULT_CONFIG, market: MARKETS[d.market] };
-  return withWasteland({ ...d, parcels: d.parcels.map((p) => ({ ...p, basePrice: defaultAskingPrice(p.id, { ring: p.ring, streetEdges: p.streetEdges }, p.existingSdp, config, p.locationFactor, parcelRule(p)), issue: plotIssue({ ring: p.ring, streetEdges: p.streetEdges }, config, p.locationFactor, parcelRule(p)) ?? null })) });
+  const all = analyses ?? d.parcels.map((p) => analyseParcel(p, d.market));
+  const priced = {
+    ...d,
+    parcels: d.parcels.map((p, i) => ({
+      ...p,
+      basePrice: askingPriceFrom(p.id, all[i].best, p.area, config, p.locationFactor),
+      issue: all[i].issue,
+    })),
+  };
+  return { priced, appraised: all.map((a) => a.best) };
 }

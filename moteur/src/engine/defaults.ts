@@ -49,7 +49,8 @@ export const DEFAULT_CRITERIA: Criteria = {
   footprintShape: 'adapte',
   placement: 'auto',
   secondBuilding: false,
-  secondLevels: 2,
+  maxBuildings: 3,
+  secondLevels: null,
   buildingGap: 6,
 
   groundFloorUse: 'logement',
@@ -62,3 +63,6 @@ export const DEFAULT_CRITERIA: Criteria = {
   parkingStrategy: 'auto',
   maxBasementLevels: 2,
 };
+
+/** Critères d'un promoteur dans le jeu : il occupe le terrain au mieux, avec plusieurs bâtiments quand il y a la place et que le PLU le permet. */
+export const PROMOTER_CRITERIA: Criteria = { ...DEFAULT_CRITERIA, secondBuilding: true };

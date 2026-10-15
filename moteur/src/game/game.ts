@@ -1,6 +1,6 @@
 import {
   DEFAULT_BILAN_PARAMS,
-  DEFAULT_CRITERIA,
+  PROMOTER_CRITERIA,
   MARKETS,
   buildDuration,
   computeBilan,
@@ -120,14 +120,14 @@ export const criteriaFor = (plot: Pick<Plot, 'zones'> & { density?: Density }, b
 };
 
 /** Surface en dessous de laquelle un terrain sans projet réalisable est dit « trop petit » plutôt qu'« inconstructible ». */
-const SMALL_PLOT_AREA = 150;
+export const SMALL_PLOT_AREA = 150;
 
 /** Un terrain est-il constructible seul ? Retourne la raison sinon (façade sur rue absente, trop petit, retraits). */
 export function plotIssue(parcel: Parcel, config?: GameConfig, locationFactor = 1, rule: ZoneRule | null = null): PlotIssue | undefined {
   if (rule && !rule.buildable) return 'zone';
   if (parcel.streetEdges.length === 0) return 'enclavee';
   const ok = [1, 3].some((levels) => {
-    const base: Criteria = { ...DEFAULT_CRITERIA, levels };
+    const base: Criteria = { ...PROMOTER_CRITERIA, levels };
     const pr = computeProject(parcel, rule ? applyRule(base, rule) : base);
     return pr.footprint !== null && pr.checks.every((c) => c.status !== 'error');
   });
@@ -162,7 +162,7 @@ export function appraise(parcel: Parcel, existingSdp: number, config: GameConfig
   if (parcel.streetEdges.length === 0 || (rule && !rule.buildable)) return { best: 0, area };
   let best = 0;
   for (let levels = 0; levels <= 5; levels++) for (const attic of [false, true]) {
-    const base: Criteria = { ...DEFAULT_CRITERIA, levels, attic };
+    const base: Criteria = { ...PROMOTER_CRITERIA, levels, attic };
     const project = computeProject(parcel, rule ? applyRule(base, rule) : base);
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
     const b = computeBilan({ project, market, landPrice: 0, existingSdp, params: { ...config.bilanParams, targetMargin: config.askMargin } });
@@ -176,8 +176,13 @@ export function appraise(parcel: Parcel, existingSdp: number, config: GameConfig
  * terrain (attentes du vendeur) : certains sont de bonnes affaires, d'autres trop chers.
  */
 export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1, rule: ZoneRule | null = null): number {
-  const market = marketAt(config.market, locationFactor);
   const { best, area } = appraise(parcel, existingSdp, config, locationFactor, rule);
+  return askingPriceFrom(id, best, area, config, locationFactor);
+}
+
+/** Prix de départ à partir de l'estimation `appraise` déjà calculée (évite de la refaire). */
+export function askingPriceFrom(id: string, best: number, area: number, config: GameConfig, locationFactor = 1): number {
+  const market = marketAt(config.market, locationFactor);
   let h = 0;
   for (const ch of id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
   const factor = 0.9 + 0.6 * ((h % 1000) / 999);
@@ -207,7 +212,7 @@ export function tenderWorth(
   const prog = spec.programme;
   let best = { value: 0, levels: 0, attic: false };
   for (let levels = 0; levels <= spec.maxLevels; levels++) for (const attic of levels >= 2 && levels < spec.maxLevels ? [false, true] : [false]) {
-    const base: Criteria = { ...DEFAULT_CRITERIA, levels, attic, ...(spec.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) };
+    const base: Criteria = { ...PROMOTER_CRITERIA, levels, attic, ...(spec.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) };
     const project = computeProject(plot.parcel, criteriaFor(plot, base, prog.bonusLevels));
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
     const b = computeBilan({ project, market: currentMarket(s, plot), landPrice: 0, existingSdp: plot.existingSdp, params: { ...programmeParams(currentParams(s), prog), targetMargin }, socialShare, quality, salesPremium: prog.salesPremium });

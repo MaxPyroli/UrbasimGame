@@ -1,5 +1,5 @@
-import { DEFAULT_CRITERIA, computeBilan, computeProject, type Bilan, type Criteria, type Parcel, type Project } from '../engine';
-import { MAX_PRICE_POLICY, MIN_PRICE_POLICY, applyAction, criteriaFor, currentMarket, currentParams } from './game';
+import { DEFAULT_CRITERIA, PROMOTER_CRITERIA, computeBilan, computeProject, type Bilan, type Criteria, type Parcel, type Project } from '../engine';
+import { MAX_PRICE_POLICY, MIN_PRICE_POLICY, applyAction, criteriaFor, currentMarket, currentParams, ruleOf } from './game';
 import { buildDuration } from '../engine';
 import { minOfferPrice, offerOf } from './market';
 import { MAX_SOCIAL_SHARE, openTenders, programmeParams, scoreBid, tenderBidOf } from './tender';
@@ -56,7 +56,7 @@ function projectOf(parcel: Parcel, criteria: Criteria): Project {
 
 function projectFor(plot: Plot, levels: number, attic: boolean): { criteria: Criteria; project: Project } {
   const ob = plot.obligation;
-  const criteria: Criteria = criteriaFor(plot, { ...DEFAULT_CRITERIA, levels, attic, ...(ob?.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) }, ob?.programme.bonusLevels ?? 0);
+  const criteria: Criteria = criteriaFor(plot, { ...PROMOTER_CRITERIA, levels, attic, ...(ob?.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) }, ob?.programme.bonusLevels ?? 0);
   return { criteria, project: projectOf(plot.parcel, criteria) };
 }
 
@@ -64,7 +64,10 @@ function projectFor(plot: Plot, levels: number, attic: boolean): { criteria: Cri
 export function bestPlan(state: GameState, plot: Plot, landPrice: number, profile: BotProfile): Plan | null {
   let best: Plan | null = null;
   if (plot.issue) return null;
-  const cap = plot.obligation ? plot.obligation.maxLevels : Infinity;
+  const rule = ruleOf(plot);
+  // Au-delà de la hauteur du PLU (et du bonus d'un appel d'offres), le projet est refusé : inutile de le calculer.
+  const zoneCap = rule ? rule.maxLevels + (plot.obligation?.programme.bonusLevels ?? 0) : Infinity;
+  const cap = Math.min(plot.obligation ? plot.obligation.maxLevels : Infinity, zoneCap);
   for (let levels = 0; levels <= Math.min(profile.maxLevels, cap); levels++) {
     for (const attic of levels >= 2 && levels + 1 <= cap ? [false, true] : [false]) {
       const { criteria, project } = projectFor(plot, levels, attic);
@@ -121,6 +124,10 @@ function tryLaunch(state: GameState, player: Player, profile: BotProfile): GameS
   return s;
 }
 
+/** Terrains étudiés par un ordinateur et par trimestre : ventes en cours, et échantillon de terrains non vendeurs. */
+const MAX_LISTED_STUDIED = 30;
+const MAX_PROSPECTS_STUDIED = 30;
+
 const hashFrac = (id: string) => {
   let h = 0;
   for (const ch of id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
@@ -138,12 +145,22 @@ function bid(state: GameState, playerId: string, profile: BotProfile): GameState
   const rate = s.config.bilanParams.acquisitionFeeRate;
   type Cand = { plot: Plot; plan: Plan; price: number; score: number };
   const cands: Cand[] = [];
-  for (const plot of s.plots) {
-    if (plot.owner !== null || plot.municipal || offerOf(s, plot.id, playerId)) continue;
+  // Le calcul d'un projet est long : le bot n'étudie qu'un nombre borné de terrains par trimestre (ventes en cours d'abord,
+  // puis un échantillon de terrains non vendeurs). Sur une petite carte les plafonds ne jouent presque jamais ; sur une
+  // commune entière, ils gardent le tour des concurrents rapide.
+  const cash = me().cash;
+  const eligible = s.plots.filter((plot) => {
+    if (plot.owner !== null || plot.municipal || plot.issue || plot.speculator || offerOf(s, plot.id, playerId)) return false;
+    // Un terrain hors de portée de sa trésorerie (prix et frais) est inutile à étudier.
+    return (plot.listing ? minOfferPrice(plot) : plot.askingPrice * 1.04) * (1 + rate) <= cash * 0.7;
+  });
+  const order = (plot: Plot) => hashFrac(`${plot.id}:${s.round}:${playerId}`);
+  const listedPool = eligible.filter((plot) => plot.listing).sort((a, b) => order(a) - order(b)).slice(0, MAX_LISTED_STUDIED);
+  const others = eligible.filter((plot) => !plot.listing);
+  const share = Math.min(0.15, MAX_PROSPECTS_STUDIED / Math.max(1, others.length));
+  const pool = [...listedPool, ...others.filter((plot) => order(plot) <= share)];
+  for (const plot of pool) {
     const listed = !!plot.listing;
-    if (plot.speculator) continue; // un spéculateur ne vend pas au prix du marché : inutile de payer des frais de prospection
-    // Prospection : le bot n'étudie qu'une partie des terrains non vendeurs à chaque trimestre (le calcul est long).
-    if (!listed && (hashFrac(`${plot.id}:${s.round}:${playerId}`) > 0.15 || plot.askingPrice * 1.04 * (1 + rate) > me().cash * 0.7)) continue;
     const floor = minOfferPrice(plot);
     const plan = bestPlan(s, plot, listed ? floor : plot.askingPrice, profile);
     if (!plan || saturated(s, plan.lots, profile)) continue;
@@ -190,7 +207,7 @@ function tenderTurn(state: GameState, playerId: string, profile: BotProfile): Ga
     let best: { price: number; share: number; quality: 0 | 1 | 2; delivery: number; score: number; equity: number } | null = null;
     for (let levels = 0; levels <= Math.min(profile.maxLevels, spec.maxLevels); levels++) {
       for (const attic of levels >= 2 && levels < spec.maxLevels ? [false, true] : [false]) {
-        const base = { ...DEFAULT_CRITERIA, levels, attic, groundFloorUse: spec.groundCommerce ? ('commerce' as const) : DEFAULT_CRITERIA.groundFloorUse };
+        const base = { ...PROMOTER_CRITERIA, levels, attic, groundFloorUse: spec.groundCommerce ? ('commerce' as const) : DEFAULT_CRITERIA.groundFloorUse };
         const criteria = criteriaFor(plot, base, spec.programme.bonusLevels);
         const project = projectOf(plot.parcel, criteria);
         if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;

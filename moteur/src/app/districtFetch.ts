@@ -63,6 +63,81 @@ export async function fetchDistrict(opts: { name: string; center: LonLat; radius
   });
 }
 
+/** Toutes les parcelles cadastrales d'une commune (code INSEE), par pages. */
+export async function fetchCadastreCommune(insee: string): Promise<{ type: 'FeatureCollection'; features: any[] }> {
+  const features: any[] = [];
+  for (let start = 0; start < 60 * PAGE; start += PAGE) {
+    const j = await getJson(`${API}?code_insee=${insee}&_limit=${PAGE}&_start=${start}`);
+    const got: any[] = j.features ?? [];
+    features.push(...got);
+    if (got.length < PAGE) break;
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+/** Rectangle englobant (lon/lat) d'une commune, d'après le contour de l'API Carto cadastre. */
+export async function fetchCommuneBounds(insee: string): Promise<{ minLon: number; maxLon: number; minLat: number; maxLat: number }> {
+  const j = await getJson(`https://apicarto.ign.fr/api/cadastre/commune?code_insee=${insee}`);
+  let minLon = 180, maxLon = -180, minLat = 90, maxLat = -90;
+  for (const f of j.features ?? []) {
+    const polys: number[][][][] = f.geometry?.type === 'MultiPolygon' ? f.geometry.coordinates : [f.geometry?.coordinates];
+    for (const poly of polys) for (const q of poly?.[0] ?? []) {
+      minLon = Math.min(minLon, q[0]); maxLon = Math.max(maxLon, q[0]);
+      minLat = Math.min(minLat, q[1]); maxLat = Math.max(maxLat, q[1]);
+    }
+  }
+  return { minLon, maxLon, minLat, maxLat };
+}
+
+/**
+ * Télécharge toute une commune : parcelles par code INSEE, puis bâti, voies, équipements et zonage par carreaux d'environ
+ * 1 km (les services plafonnent le nombre d'objets par requête). Les objets à cheval sur deux carreaux sont dédoublonnés.
+ */
+export async function fetchCommune(opts: { name: string; insee: string; market: MarketId; log?: (m: string) => void }): Promise<District> {
+  const log = opts.log ?? (() => {});
+  const bounds = await fetchCommuneBounds(opts.insee);
+  const center = { lon: (bounds.minLon + bounds.maxLon) / 2, lat: (bounds.minLat + bounds.maxLat) / 2 };
+  const kx = 111320 * Math.cos((center.lat * Math.PI) / 180);
+  const widthM = (bounds.maxLon - bounds.minLon) * kx;
+  const heightM = (bounds.maxLat - bounds.minLat) * 110574;
+  const radius = Math.ceil(Math.hypot(widthM, heightM) / 2 / 50) * 50;
+  const cadastre = await fetchCadastreCommune(opts.insee);
+  log(`${cadastre.features.length} parcelles`);
+  const TILE = 1000;
+  const tiles: LonLat[] = [];
+  for (let x = TILE / 2; x < widthM + TILE / 2; x += TILE)
+    for (let y = TILE / 2; y < heightM + TILE / 2; y += TILE) tiles.push({ lon: bounds.minLon + x / kx, lat: bounds.minLat + y / 110574 });
+  const bMap = new Map<string, ContextBuilding>();
+  const poiMap = new Map<string, Poi>();
+  const roadMap = new Map<string, DistrictRoad>();
+  const zoneMap = new Map<string, DistrictZone>();
+  let n = 0;
+  for (const t of tiles) {
+    const b = await fetchNearbyBuildings(t.lon, t.lat, TILE / 2 + 20);
+    for (const x of b.buildings) bMap.set(x.id, x);
+    for (const r of await fetchRoads(t, TILE / 2)) roadMap.set(`${r.line[0]}|${r.line[r.line.length - 1]}|${r.line.length}`, r);
+    for (const z of await fetchZones(t, TILE / 2)) zoneMap.set(`${z.code}|${z.label}|${z.rings[0][0]}|${z.rings.length}`, z);
+    log(`carreau ${++n}/${tiles.length} : ${bMap.size} bâtiments, ${roadMap.size} voies, ${zoneMap.size} zones`);
+  }
+  for (const t of tiles) for (const p of await fetchPois(t, TILE / 2 - 700 > 0 ? TILE / 2 - 700 : 0)) poiMap.set(`${p.kind}|${p.lon}|${p.lat}`, p);
+  const fetchedAt = new Date().toISOString().slice(0, 10);
+  const buildings = [...bMap.values()];
+  return buildDistrict({
+    name: opts.name,
+    center,
+    radius,
+    market: opts.market,
+    cadastre,
+    buildings,
+    pois: [...poiMap.values()],
+    roads: [...roadMap.values()],
+    zones: [...zoneMap.values()],
+    unclipped: true,
+    credits: ['Parcelles : IGN / DGFiP, cadastre Etalab (Licence Ouverte 2.0)', buildingsCredit(buildings, fetchedAt), 'Équipements : IGN, BD TOPO® (Licence Ouverte 2.0)', 'Zonage : Géoportail de l’Urbanisme (PLU, Licence Ouverte 2.0)'],
+    fetchedAt,
+  });
+}
+
 const WFS = 'https://data.geopf.fr/wfs/ows';
 const POI_MARGIN = 700;
 

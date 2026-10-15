@@ -7,6 +7,17 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.10.0',
+    title: 'Sucy-en-Brie et bâtiments multiples',
+    notes: [
+      'Nouvelle carte : Sucy-en-Brie, toute la ville (plus de 7 000 parcelles), banlieue éloignée du Val-de-Marne avec de grands terrains et des prix plus bas. Choix de la carte sur l’écran d’accueil, une sauvegarde par carte',
+      'Les promoteurs (vous, les concurrents, les appels d’offres) occupent maintenant le terrain au mieux : un ou plusieurs bâtiments, derrière celui sur rue ou à côté, dès que le PLU le permet et qu’il y a la place. Plus de case à cocher : c’est automatique, et « Meilleur projet » compare avec un seul bâtiment',
+      'Les parcelles ne débordent plus sur la chaussée : la partie sous les voies est retirée, les « parcelles » qui sont surtout de la voirie sont écartées',
+      'PLU : jusqu’à 4 bâtiments en renouvellement urbain, 3 en zone mixte ou d’activités, 2 en centre, 1 en préservation',
+      'Plus de fluidité sur les grandes cartes (affichage allégé, infobulles à la demande, sauvegarde compacte) ; les prix de référence ont été recalculés',
+    ],
+  },
+  {
     version: '0.9.2',
     title: 'Deux bâtiments sur un terrain',
     notes: [

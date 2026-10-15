@@ -16,7 +16,7 @@ import {
 import { buildEnvelope, classifyFootprintEdges, computeEdges, inwardNormal, makeFrame, primaryStreetEdge } from './layout';
 import { computeParkingAccess } from './access';
 import { computeParking, requiredParking } from './parking';
-import { buildRear, type RearBuilding } from './rear';
+import { buildSecondary, secondaryLevels, type RearBuilding } from './rear';
 import { buildingHeight, computeProgram, effectiveGroundUse } from './program';
 import type {
   Assumptions,
@@ -62,6 +62,7 @@ export function emptyProject(origin: LonLat, parcelRing: Ring, c: Criteria): Pro
     envelope: [],
     footprint: null,
     rearFootprint: null,
+    extraFootprints: [],
     rearAccess: null,
     parkingAccess: null,
     placement: 'rue',
@@ -118,7 +119,31 @@ export function maxLevelsUnderHeight(c: Criteria): number | null {
   return rest < 0 ? -1 : Math.floor(rest / c.floorHeight + 1e-9);
 }
 
+/**
+ * Étude d'un projet sur un terrain. Ne lève jamais d'exception : sur une géométrie dégénérée (la bibliothèque de découpage
+ * peut échouer sur certains contours de cadastre), on réessaie sans bâtiments supplémentaires, puis on rend un projet
+ * infaisable avec l'explication.
+ */
 export function computeProject(parcel: Parcel, criteria: Criteria, assumptions: Assumptions = DEFAULT_ASSUMPTIONS): Project {
+  try {
+    return computeProjectCore(parcel, criteria, assumptions);
+  } catch {
+    if (criteria.secondBuilding) {
+      try {
+        return computeProjectCore(parcel, { ...criteria, secondBuilding: false }, assumptions);
+      } catch {
+        /* même échec : projet infaisable ci-dessous */
+      }
+    }
+    const origin = parcelCenter(parcel.ring);
+    const proj = new LocalProjection(origin.lon, origin.lat);
+    const project = emptyProject(origin, parcel.ring.map((p) => proj.toLocal(p)), criteria);
+    project.checks = [{ id: 'footprint', label: 'Contour du terrain', status: 'error', detail: 'Contour trop irrégulier pour être étudié : essayez de l’assembler avec une voisine.' }];
+    return project;
+  }
+}
+
+function computeProjectCore(parcel: Parcel, criteria: Criteria, assumptions: Assumptions): Project {
   const c = criteria;
   const a = assumptions;
   const origin = parcelCenter(parcel.ring);
@@ -200,31 +225,32 @@ export function computeProject(parcel: Parcel, criteria: Criteria, assumptions: 
   }
 
   // Deuxième bâtiment au fond du terrain (si demandé et possible) : il doit tenir sous le plafond d'emprise et de densité.
-  let rear: RearBuilding | null = null;
+  let secondary: RearBuilding[] = [];
   let rearReason: string | null = null;
-  if (c.secondBuilding) {
+  if (c.secondBuilding && c.maxBuildings >= 2) {
     const remaining = capCES !== null ? capCES - ringArea(footprint) : null;
-    const attempt = buildRear({ envelope, parcel: ring, frame, front: footprint, frontHeight: height, edges, criteria: c, assumptions: a, areaCap: remaining });
-    rear = attempt.rear;
+    const attempt = buildSecondary({ envelope, parcel: ring, frame, front: footprint, frontHeight: height, edges, criteria: c, assumptions: a, areaCap: remaining, maxBuildings: c.maxBuildings });
+    secondary = attempt.buildings;
     rearReason = attempt.reason ?? null;
-    if (rear && c.maxFAR !== null) {
+    if (secondary.length > 0 && c.maxFAR !== null) {
+      // Densité maximale : on renonce aux derniers bâtiments posés jusqu'à la respecter.
+      const sdpOf = (list: RearBuilding[]) => list.reduce((s, b) => s + b.program.levels.reduce((t, l) => t + l.sdp, 0), 0);
       const sdpFront = built.program.levels.reduce((s, l) => s + l.sdp, 0);
-      const sdpRear = rear.program.levels.reduce((s, l) => s + l.sdp, 0);
-      if (sdpFront + sdpRear > c.maxFAR * parcelArea + 0.5) {
-        rear = null;
-        rearReason = `la densité maximale (${c.maxFAR}) est déjà atteinte par le bâtiment sur rue`;
-      }
+      while (secondary.length > 0 && sdpFront + sdpOf(secondary) > c.maxFAR * parcelArea + 0.5) secondary = secondary.slice(0, -1);
+      if (secondary.length === 0) rearReason = `la densité maximale (${c.maxFAR}) est déjà atteinte par le bâtiment sur rue`;
     }
   }
-  const rearLevels = rear?.program.levels ?? [];
-  const rearDwellings = rear?.program.dwellings ?? [];
-  const fpRear = rear ? ringArea(rear.ring) : 0;
+  const rear = secondary[0] ?? null;
+  const rearLevels = secondary.flatMap((b) => b.program.levels);
+  const rearDwellings = secondary.flatMap((b) => b.program.dwellings);
+  const fpRear = secondary.reduce((s, b) => s + ringArea(b.ring), 0);
+  const porchArea = rear?.porchArea ?? 0;
 
   // Stationnement : le sous-sol retire de la surface au RDC (rampe), ce qui peut changer le nombre de logements.
   const compute = (rampLoss: number) => {
     const b = buildProgram(rampLoss, footprint!);
     // Un porche vers le bâtiment arrière coupe le rez-de-chaussée du bâtiment sur rue.
-    const front = rear && rear.porchArea > 0 ? { ...b, program: { ...b.program, levels: b.program.levels.map((l, i) => (i === 0 ? { ...l, sdp: Math.max(0, l.sdp - rear!.porchArea), usable: Math.max(0, l.usable - rear!.porchArea) } : l)) } } : b;
+    const front = porchArea > 0 ? { ...b, program: { ...b.program, levels: b.program.levels.map((l, i) => (i === 0 ? { ...l, sdp: Math.max(0, l.sdp - porchArea), usable: Math.max(0, l.usable - porchArea) } : l)) } } : b;
     const allLevels = [...front.program.levels, ...rearLevels];
     const dw = front.program.dwellings.length + rearDwellings.length;
     const required = requiredParking(c, allLevels, dw);
@@ -235,7 +261,7 @@ export function computeProject(parcel: Parcel, criteria: Criteria, assumptions: 
       parcelArea,
       parcelMinWidth: project.parcelMinWidth,
       footprintArea: ringArea(footprint!) + fpRear,
-      groundCapacity: front.program.groundParkingCapacity + (rear?.program.groundParkingCapacity ?? 0),
+      groundCapacity: front.program.groundParkingCapacity + secondary.reduce((s, x) => s + x.program.groundParkingCapacity, 0),
     });
     return { b: front, parking };
   };
@@ -276,12 +302,12 @@ export function computeProject(parcel: Parcel, criteria: Criteria, assumptions: 
     levelsCount: program.levels.length,
     dwellings: allDwellings.length,
     avgDwellingArea: allDwellings.length > 0 ? shab / allDwellings.length : 0,
-    hasLift: program.hasLift || !!rear?.program.hasLift,
-    bikeRoom: program.bikeRoom + (rear?.program.bikeRoom ?? 0),
+    hasLift: program.hasLift || secondary.some((x) => x.program.hasLift),
+    bikeRoom: program.bikeRoom + secondary.reduce((s, x) => s + x.program.bikeRoom, 0),
     facadeWidth: bb.maxX - bb.minX,
     depth: bb.maxY - bb.minY,
-    glazedLength: program.glazedLength + (rear?.program.glazedLength ?? 0),
-    buildings: rear ? 2 : 1,
+    glazedLength: program.glazedLength + secondary.reduce((s, x) => s + x.program.glazedLength, 0),
+    buildings: 1 + secondary.length,
   };
 
   project.footprint = footprint;
@@ -303,20 +329,23 @@ export function computeProject(parcel: Parcel, criteria: Criteria, assumptions: 
   project.typologyCounts = typologyCounts;
   project.rearFootprint = rear?.ring ?? null;
   project.rearAccess = rear?.access ?? null;
+  project.extraFootprints = secondary.slice(1).map((b) => b.ring);
   project.parking = parking;
   project.indicators = indicators;
   project.limitedBy = limitedBy;
   project.checks = buildChecks(project, c, a);
-  if (c.secondBuilding) {
+  if (c.secondBuilding && c.maxBuildings >= 2) {
     if (rear) {
-      const rp = rear.program;
+      const dw = secondary.reduce((s, x) => s + x.program.dwellings.length, 0);
+      const gapM = Math.max(c.buildingGap, height / 2).toFixed(1);
+      const access = rear.access === 'allee' ? 'une allée de 3,5 m le long du bâtiment sur rue' : `un porche de 3,5 m qui traverse le rez-de-chaussée (${Math.round(rear.porchArea)} m² perdus)`;
       project.checks.push({
         id: 'rear',
-        label: 'Deuxième bâtiment',
+        label: secondary.length > 1 ? `${1 + secondary.length} bâtiments` : 'Deuxième bâtiment',
         status: 'info',
-        detail: `Au fond du terrain : R+${Math.max(0, Math.min(c.secondLevels, c.levels))}, ${rp.dwellings.length} logement${rp.dwellings.length > 1 ? 's' : ''}, à ${Math.max(c.buildingGap, height / 2).toFixed(1)} m du bâtiment sur rue. Accès par ${rear.access === 'allee' ? 'une allée de 3,5 m le long du bâtiment sur rue' : `un porche de 3,5 m qui traverse le rez-de-chaussée (${Math.round(rear.porchArea)} m² perdus)`} ; défense incendie à prévoir.`,
+        detail: `${secondary.length > 1 ? `${secondary.length} bâtiments derrière celui sur rue` : 'Un bâtiment derrière celui sur rue'} : R+${secondaryLevels(c)}, ${dw} logement${dw > 1 ? 's' : ''} en tout, à ${gapM} m au moins les uns des autres. Accès au fond par ${access} ; défense incendie à prévoir.`,
       });
-    } else project.checks.push({ id: 'rear', label: 'Deuxième bâtiment', status: 'warn', detail: `Pas de deuxième bâtiment : ${rearReason ?? 'pas de place'}.` });
+    } else project.checks.push({ id: 'rear', label: 'Un seul bâtiment', status: 'info', detail: `Pas d'autre bâtiment : ${rearReason ?? 'pas de place'}.` });
   }
   return project;
 }

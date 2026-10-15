@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { defineConfig } from 'vite';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { defineConfig, type Plugin } from 'vite';
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -15,10 +15,30 @@ const git = (cmd: string, fallback: string) => {
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version: string };
 
+const DATA = new URL('../moteur/data/districts/', import.meta.url);
+
+/** Instantanés des cartes (moteur/data/districts) : servis en développement, copiés dans la construction (chargés à la demande par le jeu). */
+const districts = (): Plugin => ({
+  name: 'urbasim-districts',
+  configureServer(server) {
+    server.middlewares.use((req, res, next) => {
+      const m = /^\/data\/districts\/([a-z0-9-]+)\.json/.exec(req.url ?? '');
+      if (!m || !existsSync(new URL(`${m[1]}.json`, DATA))) return next();
+      res.setHeader('Content-Type', 'application/json');
+      res.end(readFileSync(new URL(`${m[1]}.json`, DATA)));
+    });
+  },
+  generateBundle() {
+    for (const f of readdirSync(DATA).filter((n) => n.endsWith('.json'))) this.emitFile({ type: 'asset', fileName: `data/districts/${f}`, source: readFileSync(new URL(f, DATA)) });
+  },
+});
+
 export default defineConfig({
+  plugins: [districts()],
   base: './',
   server: { fs: { allow: ['..'] } },
-  build: { target: 'es2022' },
+  // Version autonome (VITE_NO_TILES) : tout est intégré à la page, polices comprises ; sinon fichiers séparés au-delà de 4 Ko.
+  build: { target: 'es2022', assetsInlineLimit: process.env.VITE_NO_TILES === '1' ? 10_000_000 : 4096 },
   define: {
     // Version bêta (package.json) ; numéro de build = nombre de commits (monte à chaque mise à jour) ; date de la construction.
     __APP_VERSION__: JSON.stringify(pkg.version),

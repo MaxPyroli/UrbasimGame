@@ -4,7 +4,7 @@ import { ZONE_RULES, criteriaFor, ruleOf } from '../src/game';
 
 const O = new LocalProjection(2.35, 48.85);
 const rect = (w: number, d: number): Parcel => ({ ring: ([[0, 0], [w, 0], [w, d], [0, d]] as Vec2[]).map((p) => O.toLonLat(p)), streetEdges: [0] });
-const base = { ...DEFAULT_CRITERIA, setbackFond: 3, setbackLateral: 0, maxDepth: 12, levels: 3, secondLevels: 2 };
+const base = { ...DEFAULT_CRITERIA, setbackFond: 3, setbackLateral: 0, maxDepth: 12, levels: 3, secondLevels: 2, maxBuildings: 2 };
 
 describe('deuxième bâtiment au fond du terrain', () => {
   it('sur un terrain profond, un bâtiment arrière s’ajoute au bâtiment sur rue', () => {
@@ -47,7 +47,7 @@ describe('deuxième bâtiment au fond du terrain', () => {
     const p = computeProject(rect(20, 24), { ...base, secondBuilding: true });
     expect(p.rearFootprint).toBeNull();
     const c = p.checks.find((x) => x.id === 'rear')!;
-    expect(c.status).toBe('warn');
+    expect(c.status).toBe('info');
     expect(c.detail).toMatch(/profond|petit/);
   });
 
@@ -85,6 +85,38 @@ describe('deuxième bâtiment au fond du terrain', () => {
   });
 });
 
+describe('plusieurs bâtiments automatiques', () => {
+  it('sans consigne de niveaux, les bâtiments de fond ont autant de niveaux que celui sur rue', () => {
+    const p = computeProject(rect(20, 60), { ...base, secondLevels: null, secondBuilding: true });
+    const count = (n: number) => p.levels.filter((l) => (l.building ?? 1) === n && l.use !== 'parking').length;
+    expect(count(2)).toBe(count(1));
+  });
+
+  it('sur un grand terrain, le promoteur pose un troisième bâtiment dans la place restante', () => {
+    const big = computeProject(rect(50, 110), { ...base, secondBuilding: true, maxBuildings: 3, maxDepth: 14 });
+    expect(big.indicators.buildings).toBe(3);
+    expect(big.extraFootprints).toHaveLength(1);
+    expect(big.levels.some((l) => l.building === 3)).toBe(true);
+    const two = computeProject(rect(50, 110), { ...base, secondBuilding: true, maxBuildings: 2, maxDepth: 14 });
+    expect(big.indicators.dwellings).toBeGreaterThan(two.indicators.dwellings);
+    // les bâtiments ne se touchent pas : distance minimale entre emprises
+    const rings = [big.footprint!, big.rearFootprint!, ...big.extraFootprints];
+    const box = (r: [number, number][]) => ({ x0: Math.min(...r.map((p) => p[0])), x1: Math.max(...r.map((p) => p[0])), y0: Math.min(...r.map((p) => p[1])), y1: Math.max(...r.map((p) => p[1])) });
+    for (let i = 0; i < rings.length; i++) for (let j = i + 1; j < rings.length; j++) {
+      const a = box(rings[i]);
+      const b = box(rings[j]);
+      const dx = Math.max(0, b.x0 - a.x1, a.x0 - b.x1);
+      const dy = Math.max(0, b.y0 - a.y1, a.y0 - b.y1);
+      expect(Math.hypot(dx, dy)).toBeGreaterThanOrEqual(5.9);
+    }
+  });
+
+  it('le plafond de bâtiments du critère est respecté', () => {
+    const p = computeProject(rect(50, 110), { ...base, secondBuilding: true, maxBuildings: 1 });
+    expect(p.indicators.buildings).toBe(1);
+  });
+});
+
 describe('PLU et deuxième bâtiment', () => {
   it('seules les zones qui l’autorisent le permettent ; le bâtiment arrière reste plus bas', () => {
     const want = { ...base, secondBuilding: true, secondLevels: 5 };
@@ -93,7 +125,9 @@ describe('PLU et deuxième bâtiment', () => {
     expect(criteriaFor({ zones: ['preservation'] }, want).secondBuilding).toBe(false);
     expect(criteriaFor({ zones: ['mixte', 'preservation'] }, want).secondBuilding).toBe(false);
     const c = criteriaFor({ zones: ['mixte'] }, want);
-    expect(c.secondLevels).toBeLessThanOrEqual(ZONE_RULES.mixte.maxLevels - 1);
+    expect(c.secondLevels).toBeLessThanOrEqual(ZONE_RULES.mixte.maxLevels);
+    expect(c.maxBuildings).toBe(Math.min(want.maxBuildings, ZONE_RULES.mixte.maxBuildings));
+    expect(criteriaFor({ zones: ['renouvellement'] }, { ...want, maxBuildings: 9 }).maxBuildings).toBe(ZONE_RULES.renouvellement.maxBuildings);
     expect(c.buildingGap).toBeGreaterThanOrEqual(ZONE_RULES.mixte.buildingGap);
     expect(ruleOf({ zones: ['centre'] })!.maxBuildings).toBe(2);
   });

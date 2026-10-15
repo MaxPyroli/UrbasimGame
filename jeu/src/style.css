@@ -1,3 +1,7 @@
+/* Police du jeu : Alte Haas Grotesk (Regular et Bold) */
+@font-face { font-family: 'Alte Haas Grotesk'; src: url('./assets/fonts/AlteHaasGrotesk-Regular.ttf') format('truetype'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Alte Haas Grotesk'; src: url('./assets/fonts/AlteHaasGrotesk-Bold.ttf') format('truetype'); font-weight: 700; font-style: normal; font-display: swap; }
+
 :root {
   --bg: #f6f5f1;
   --panel: #ffffff;
@@ -43,7 +47,7 @@
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 'Alte Haas Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
 #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
 #top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
 #top h1 { font-size: 16px; margin: 0; letter-spacing: 0.02em; }
@@ -384,3 +388,19 @@ ul.neigh li .muted { flex: 1; min-width: 140px; }
 button.add { padding: 1px 9px; font-size: 12px; border-radius: 12px; border-color: var(--accent); color: var(--accent); }
 #end { white-space: nowrap; }
 #top h1 { white-space: nowrap; }
+
+/* Chargement de la carte au démarrage (Sucy-en-Brie : plusieurs milliers de parcelles) */
+.boot { position: fixed; inset: 0; z-index: 5000; display: grid; place-content: center; gap: 12px; text-align: center; background: var(--bg, #14171c); color: var(--ink, #e8eaed); font-size: 16px; padding: 24px; }
+.boot[hidden] { display: none; }
+
+/* Choix de la carte sur l'écran d'accueil */
+.home-places { display: grid; gap: 8px; margin: 14px 0; text-align: left; }
+.home-places > small { text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.7; }
+.place { display: grid; gap: 4px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1.5px solid var(--line, #3a3f47); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.place:hover { border-color: var(--accent, #3b82f6); }
+.place.on { border-color: var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent); cursor: default; }
+.place-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.place-head i { font-style: normal; font-size: 11px; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, currentColor 14%, transparent); }
+.place-blurb { font-size: 13px; opacity: 0.85; }
+.place-facts { font-size: 12px; opacity: 0.6; }
+.home-places .soon { font-size: 12px; opacity: 0.6; }

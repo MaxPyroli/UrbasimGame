@@ -1,4 +1,4 @@
-import { Frame, bbox, intersection, minWidth, polygonArea, rectRing, ringArea, toMulti } from './geometry';
+import { Frame, bbox, difference, intersection, minWidth, polygonArea, rectRing, ringArea, toMulti } from './geometry';
 import { generateFootprint } from './footprint';
 import { classifyFootprintEdges } from './layout';
 import { computeProgram, type ProgramResult } from './program';
@@ -64,12 +64,53 @@ export function buildRear(input: RearInput): { rear: RearBuilding | null; reason
   const freeRight = Math.max(0, pb.maxX - frb.maxX);
   const access: 'allee' | 'porche' = Math.max(freeLeft, freeRight) >= ACCESS_WIDTH ? 'allee' : 'porche';
   const porchArea = access === 'porche' ? ACCESS_WIDTH * (frb.maxY - frb.minY) : 0;
-  const levels = Math.max(0, Math.min(c.secondLevels, c.levels));
-  const rc: Criteria = { ...c, levels, attic: false, groundFloorUse: c.upperUse === 'bureaux' ? 'commerce' : 'logement' };
-  const fpEdges = classifyFootprintEdges(gen.ring, edges);
-  const program = computeProgram({ footprint: gen.ring, footprintEdges: fpEdges, atticFootprint: null, criteria: rc, assumptions: a, rampLoss: 0 });
-  // Niveaux et logements du bâtiment arrière : identifiants distincts de ceux du bâtiment sur rue.
-  const levelsPlan = program.levels.map((l) => ({ ...l, building: 2 as const, id: `B2-${l.id}`, label: `Bât. arrière · ${l.label}` }));
-  const dwellings = program.dwellings.map((d) => ({ ...d, levelId: `B2-${d.levelId}` }));
-  return { rear: { ring: gen.ring, fpEdges, program: { ...program, levels: levelsPlan, dwellings }, access, porchArea } };
+  const { fpEdges, program } = secondaryProgram(gen.ring, 2, edges, c, a);
+  return { rear: { ring: gen.ring, fpEdges, program, access, porchArea } };
+}
+
+/** Niveaux (R+x) des bâtiments autres que celui sur rue. */
+export const secondaryLevels = (c: Criteria) => Math.max(0, c.secondLevels === null ? c.levels : Math.min(c.secondLevels, c.levels));
+
+/** Programme d'un bâtiment secondaire (n° 2, 3…) : identifiants distincts de ceux du bâtiment sur rue, pas d'attique. */
+function secondaryProgram(ring: Ring, n: number, edges: EdgeInfo[], c: Criteria, a: Assumptions): { fpEdges: FootprintEdge[]; program: ProgramResult } {
+  const rc: Criteria = { ...c, levels: secondaryLevels(c), attic: false, groundFloorUse: c.upperUse === 'bureaux' ? 'commerce' : 'logement' };
+  const fpEdges = classifyFootprintEdges(ring, edges);
+  const program = computeProgram({ footprint: ring, footprintEdges: fpEdges, atticFootprint: null, criteria: rc, assumptions: a, rampLoss: 0 });
+  const label = n === 2 ? 'Bât. arrière' : `Bât. ${n}`;
+  const levelsPlan = program.levels.map((l) => ({ ...l, building: n, id: `B${n}-${l.id}`, label: `${label} · ${l.label}` }));
+  const dwellings = program.dwellings.map((d) => ({ ...d, levelId: `B${n}-${d.levelId}` }));
+  return { fpEdges, program: { ...program, levels: levelsPlan, dwellings } };
+}
+
+/** Surface minimale d'un bâtiment supplémentaire (m²). */
+const MIN_EXTRA_AREA = 60;
+
+/**
+ * Tous les bâtiments autres que celui sur rue : d'abord le bâtiment arrière (accès par allée ou porche), puis, sur les grands
+ * terrains, d'autres bâtiments dans ce qui reste libre une fois laissée la distance réglementaire entre bâtiments.
+ */
+export function buildSecondary(input: RearInput & { maxBuildings: number }): { buildings: RearBuilding[]; reason?: string } {
+  const first = buildRear(input);
+  if (!first.rear) return { buildings: [], reason: first.reason };
+  const { frame, criteria: c, assumptions: a, edges } = input;
+  const buildings: RearBuilding[] = [first.rear];
+  const gap = Math.max(c.buildingGap, input.frontHeight / 2);
+  let used = ringArea(first.rear.ring);
+  for (let n = 3; n <= input.maxBuildings; n++) {
+    let free = frame.toMulti(input.envelope);
+    for (const r of [input.front, ...buildings.map((b) => b.ring)]) {
+      const b = bbox(frame.toRing(r));
+      free = difference(free, toMulti(rectRing(b.minX - gap, b.minY - gap, b.maxX + gap, b.maxY + gap)));
+    }
+    const usable = free.filter((p) => polygonArea(p) >= MIN_EXTRA_AREA);
+    const cap = input.areaCap === null ? null : input.areaCap - used;
+    if (usable.length === 0 || (cap !== null && cap < MIN_EXTRA_AREA)) break;
+    const local: MultiPolygon = usable.map((poly) => poly.map((r) => frame.fromRing(r)));
+    const gen = generateFootprint(local, frame, { shape: c.footprintShape, maxDepth: c.maxDepth, minWidth: c.minWidth, areaCap: cap, placement: 'auto' });
+    if (!gen.ring || ringArea(gen.ring) < MIN_EXTRA_AREA || minWidth(gen.ring) < c.minWidth) break;
+    const { fpEdges, program } = secondaryProgram(gen.ring, n, edges, c, a);
+    buildings.push({ ring: gen.ring, fpEdges, program, access: 'allee', porchArea: 0 });
+    used += ringArea(gen.ring);
+  }
+  return { buildings };
 }

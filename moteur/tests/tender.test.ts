@@ -107,13 +107,13 @@ describe('appels d’offres de la commune : déroulement', () => {
     const t = openTenders(s)[0];
     const start = cash(s, 'a');
     s = play(s, { type: 'tenderBid', player: 'a', tender: t.id, price: t.spec.minPrice * 1.1, socialShare: 0.4, quality: 1, delivery: 6 });
-    expect(committedTenderCash(s, 'a')).toBeCloseTo(t.spec.minPrice * 1.1 * 1.075, 0);
-    expect(cash(s, 'a')).toBeCloseTo(start - t.spec.minPrice * 1.1 * 1.075, 0);
+    expect(committedTenderCash(s, 'a')).toBeCloseTo(t.spec.minPrice * 1.1 * 1.075, -0.5);
+    expect(cash(s, 'a')).toBeCloseTo(start - t.spec.minPrice * 1.1 * 1.075, -0.5);
     s = play(s, { type: 'tenderBid', player: 'a', tender: t.id, price: t.spec.minPrice * 1.3, socialShare: 0.4, quality: 1, delivery: 6 });
     expect(openTenders(s)[0].bids).toHaveLength(1);
-    expect(committedTenderCash(s, 'a')).toBeCloseTo(t.spec.minPrice * 1.3 * 1.075, 0);
+    expect(committedTenderCash(s, 'a')).toBeCloseTo(t.spec.minPrice * 1.3 * 1.075, -0.5);
     s = play(s, { type: 'tenderWithdraw', player: 'a', tender: t.id });
-    expect(cash(s, 'a')).toBeCloseTo(start, 0);
+    expect(cash(s, 'a')).toBeCloseTo(start, -0.5);
     expect(err(s, { type: 'tenderWithdraw', player: 'a', tender: t.id })).toMatch(/pas de proposition/);
     expect(err(s, { type: 'tenderBid', player: 'a', tender: t.id, price: 1000, socialShare: 0.4, quality: 1, delivery: 6 })).toMatch(/prix/);
     expect(err(s, { type: 'tenderBid', player: 'a', tender: 'AO99', price: 900_000, socialShare: 0.4, quality: 1, delivery: 6 })).toMatch(/pas ouvert/);

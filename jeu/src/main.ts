@@ -2,7 +2,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 import {
-  DEFAULT_CRITERIA,
+  PROMOTER_CRITERIA,
   LocalProjection,
   MARKETS,
   QUALITY_COST,
@@ -11,6 +11,7 @@ import {
   computeProject,
   type Criteria,
   type FootprintShape,
+  type Parcel,
   type ParkingStrategy,
   type Placement,
 } from '../../moteur/src/engine';
@@ -80,11 +81,23 @@ import {
 } from '../../moteur/src/game';
 import { pointInRing } from '../../moteur/src/game/district';
 import { CHANGELOG } from './changelog';
-import districtData from '../../moteur/data/districts/montreuil-mairie.json';
+import { DISTRICTS, DEFAULT_DISTRICT, chooseDistrict, chosenDistrictId, loadDistrict } from './districts';
 
-const district = districtData as unknown as District;
+// Carte choisie sur l'écran d'accueil (changer de carte recharge la page) ; ses données sont chargées à la demande.
+const districtId = chosenDistrictId();
+let district: District;
+try {
+  district = await loadDistrict(districtId, __APP_BUILD__);
+} catch (e) {
+  const boot = document.getElementById('boot');
+  if (boot) boot.innerHTML = `<b>Impossible de charger la carte.</b><br>${e instanceof Error ? e.message : ''}<br><button id="boot-retry" type="button">Réessayer</button>${districtId !== DEFAULT_DISTRICT ? ' <button id="boot-default" type="button">Revenir à Montreuil</button>' : ''}`;
+  document.getElementById('boot-retry')?.addEventListener('click', () => location.reload());
+  document.getElementById('boot-default')?.addEventListener('click', () => (chooseDistrict(DEFAULT_DISTRICT), location.reload()));
+  throw e;
+}
 const ME = 'moi';
-const SAVE_KEY = 'urbasim-save-v5';
+/** Une sauvegarde par carte (celle de Montreuil garde son nom d'origine). */
+const SAVE_KEY = districtId === DEFAULT_DISTRICT ? 'urbasim-save-v5' : `urbasim-save-v5-${districtId}`;
 const FALLBACK_COLORS: Record<string, string> = { moi: PALETTE[0], prudent: PALETTE[1], equilibre: PALETTE[2], agressif: PALETTE[3] };
 const PROFILE_LABEL: Record<string, string> = { prudent: 'prudent', equilibre: 'équilibré', agressif: 'agressif' };
 
@@ -101,12 +114,18 @@ const BUILD_KEY = 'urbasim-build-v1';
 
 // ---------------------------------------------------------------- état
 
+/** Terrains de la carte, calculés une fois ; leurs parcelles ne sont pas enregistrées dans la sauvegarde (rechargées depuis la carte). */
+const seeds = districtToSeeds(district);
+const seedParcels = new Map(seeds.map((s) => [s.id, s.parcel]));
+/** Parcelles dont la forme est restée celle de la carte (identité d'objet) : elles se retirent de la sauvegarde. */
+const pristine = new Map<string, Parcel>(seedParcels);
+
 function newGame(identity: Identity, difficulty: Difficulty = 'normal', seed = Date.now() % 100000): GameState {
   const bots = botIdentities(seed, identity);
   const bot = (id: 'prudent' | 'equilibre' | 'agressif', i: number) => ({ id, name: bots[i].name, bot: true as const, profile: id, color: bots[i].color, slogan: bots[i].slogan });
   return createGame({
     players: [{ id: ME, name: identity.name, color: identity.color, slogan: identity.slogan }, bot('prudent', 0), bot('equilibre', 1), bot('agressif', 2)],
-    plots: districtToSeeds(district),
+    plots: seeds,
     config: { market: MARKETS[district.market], ...campaignConfig(difficulty) },
     seed,
   });
@@ -118,6 +137,15 @@ function load(): GameState | null {
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) {
       const s = JSON.parse(raw) as GameState;
+      if (Array.isArray(s?.plots)) {
+        // Parcelles absentes de la sauvegarde : on les reprend de la carte (sinon la sauvegarde est inutilisable).
+        for (const p of s.plots) {
+          if (p.parcel) continue;
+          const seed = seedParcels.get(p.id);
+          if (!seed) return null;
+          p.parcel = seed;
+        }
+      }
       if (s?.players?.some((p) => p.id === ME) && Array.isArray(s.plots) && typeof s.demandShock === 'number' && s.config?.salesDemand > 0 && s.plots.every((p) => Array.isArray(p.zones)) && Array.isArray(s.offers) && Array.isArray(s.tenders) && Array.isArray(s.zacs) && s.players.every((p) => typeof p.debt === 'number')) return s;
     }
   } catch {
@@ -161,11 +189,13 @@ const SEEN_KEY = 'urbasim-seen-v1';
 let seenLog = Math.max(0, Math.round(+(localStorage_get(SEEN_KEY) ?? 0)) || 0);
 type NotifFilter = 'tout' | 'alea' | 'commune' | 'operation' | 'terrain';
 let notifFilter: NotifFilter = 'tout';
-let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number; placement: Placement; shape: FootprintShape; second: boolean; secondLevels: number } = { levels: 3, attic: false, parking: 'auto', depth: 12, placement: 'auto', shape: 'adapte', second: false, secondLevels: 2 };
+let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number; placement: Placement; shape: FootprintShape; second: boolean; secondLevels: number | null } = { levels: 3, attic: false, parking: 'auto', depth: 12, placement: 'auto', shape: 'adapte', second: true, secondLevels: null };
 
 function save() {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+    // Les parcelles inchangées (des milliers sur une commune entière) ne sont pas enregistrées : la carte les fournit au chargement.
+    const slim = { ...state, plots: state.plots.map((p) => (pristine.get(p.id) === p.parcel ? { ...p, parcel: undefined } : p)) };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(slim));
   } catch {
     /* stockage plein ou refusé : on joue quand même */
   }
@@ -190,9 +220,15 @@ function act(a: Action): boolean {
 }
 
 const me = () => state.players.find((p) => p.id === ME)!;
-const plotById = (id: string) => state.plots.find((p) => p.id === id);
+const plotIndexCache = new WeakMap<Plot[], Map<string, Plot>>();
+/** Parcelle par identifiant (index mémorisé par état : des milliers de parcelles sur une commune entière). */
+const plotById = (id: string) => {
+  let idx = plotIndexCache.get(state.plots);
+  if (!idx) plotIndexCache.set(state.plots, (idx = new Map(state.plots.map((p) => [p.id, p]))));
+  return idx.get(id);
+};
 const quarterLabel = (round: number) => `T${(round % 4) + 1} ${2027 + Math.floor(round / 4)}`;
-const criteria = (): Criteria => ({ ...DEFAULT_CRITERIA, levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth, placement: form.placement, footprintShape: form.shape, secondBuilding: form.second, secondLevels: form.secondLevels });
+const criteria = (): Criteria => ({ ...PROMOTER_CRITERIA, levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth, placement: form.placement, footprintShape: form.shape, secondBuilding: form.second, secondLevels: form.secondLevels });
 
 /** Passe un trimestre sans rien afficher ; retourne les nouvelles du journal qui concernent le joueur. */
 function advanceOne(): { mine: string[]; phases: string } {
@@ -287,7 +323,7 @@ function runFastForward() {
 
 // ---------------------------------------------------------------- carte
 
-const map = L.map('map', { zoomControl: true, preferCanvas: false, attributionControl: false });
+const map = L.map('map', { zoomControl: true, preferCanvas: true, attributionControl: false });
 // Attribution discrète : une seule ligne courte, le détail des sources est dans « Crédits et données ».
 L.control.attribution({ prefix: false }).addTo(map);
 /** Sans fond de plan (page hébergée où les images externes sont bloquées) : on dessine les voies du quartier. */
@@ -301,8 +337,10 @@ if (!NO_TILES) {
   map.getPane('routes')!.style.zIndex = '300';
   map.getPane('routes')!.style.pointerEvents = 'none';
   const widths = [0, 8, 7, 5, 3.5, 2.5, 1.5];
+  // Rendu SVG pour les voies : leur couleur vient de la feuille de style (thème clair ou sombre).
+  const roadRenderer = L.svg({ pane: 'routes' });
   for (const r of [...(district.roads ?? [])].sort((a, b) => b.importance - a.importance)) {
-    L.polyline(r.line.map(([lon, lat]) => [lat, lon] as [number, number]), { pane: 'routes', interactive: false, className: 'road', weight: widths[r.importance] ?? 2, lineCap: 'round' }).addTo(map);
+    L.polyline(r.line.map(([lon, lat]) => [lat, lon] as [number, number]), { pane: 'routes', renderer: roadRenderer, interactive: false, className: 'road', weight: widths[r.importance] ?? 2, lineCap: 'round' }).addTo(map);
   }
 }
 const layers = new Map<string, L.Polygon>();
@@ -435,20 +473,26 @@ map.createPane('bati');
 map.getPane('bati')!.style.zIndex = '350';
 map.getPane('bati')!.style.pointerEvents = 'none';
 const buildingsLayer = L.layerGroup();
-/** Bâti d'origine, avec son centre : il disparaît de la carte quand une opération le démolit. */
+/** Bâti d'origine, avec son centre : il disparaît de la carte quand une opération le démolit. Créé à la première utilisation (des dizaines de milliers de bâtiments sur une commune entière). */
 const existingBuildings: { layer: L.Polygon; cx: number; cy: number; hidden: boolean }[] = [];
-for (const b of district.buildings) {
-  const layer = L.polygon(b.ring.map(([lon, lat]) => [lat, lon] as [number, number]), {
-    pane: 'bati',
-    interactive: false,
-    stroke: true,
-    color: '#3b2a1a',
-    weight: 0.5,
-    opacity: 0.6,
-    fillColor: heightColor(b.height),
-    fillOpacity: b.estimated ? 0.7 : 0.9,
-  }).addTo(buildingsLayer);
-  existingBuildings.push({ layer, cx: b.ring.reduce((t, q) => t + q[0], 0) / b.ring.length, cy: b.ring.reduce((t, q) => t + q[1], 0) / b.ring.length, hidden: false });
+let existingBuilt = false;
+function ensureExistingBuildings() {
+  if (existingBuilt) return;
+  existingBuilt = true;
+  for (const b of district.buildings) {
+    const layer = L.polygon(b.ring.map(([lon, lat]) => [lat, lon] as [number, number]), {
+      pane: 'bati',
+      interactive: false,
+      stroke: true,
+      color: '#3b2a1a',
+      weight: 0.5,
+      opacity: 0.6,
+      fillColor: heightColor(b.height),
+      fillOpacity: b.estimated ? 0.7 : 0.9,
+    });
+    existingBuildings.push({ layer, cx: b.ring.reduce((t, q) => t + q[0], 0) / b.ring.length, cy: b.ring.reduce((t, q) => t + q[1], 0) / b.ring.length, hidden: false });
+  }
+  hiddenKey = '\u0000';
 }
 
 // Bâtiments des promoteurs : opérations en cours et livrées, dessinés à l'emplacement réel de leur emprise.
@@ -539,7 +583,7 @@ function footprintOf(p: Plot, criteria: Criteria, key: string): [number, number]
     if (project.footprint) {
       const proj = new LocalProjection(project.origin.lon, project.origin.lat);
       const geo = (r: [number, number][]) => r.map((v) => proj.toLonLat(v)).map((q) => [q.lat, q.lon] as [number, number]);
-      rings = [geo(project.footprint), ...(project.rearFootprint ? [geo(project.rearFootprint)] : [])];
+      rings = [geo(project.footprint), ...(project.rearFootprint ? [geo(project.rearFootprint)] : []), ...project.extraFootprints.map(geo)];
     } else rings = null;
     footprintCache.set(key, rings);
   }
@@ -556,6 +600,11 @@ const PHASE_STYLE: Record<string, { opacity: number; dash?: string }> = {
 /** Les bâtiments des joueurs remplacent le bâti d'origine des terrains qu'ils développent. */
 function drawBuildings() {
   const developed = state.plots.filter((p) => p.projectId || p.built?.length);
+  if (existingBuilt) ensureHidden(developed);
+  drawDeveloped(developed);
+}
+
+function ensureHidden(developed: Plot[]) {
   // Bâti d'origine démoli : son centre tombe dans un terrain où une opération est lancée ou livrée.
   const key = developed.map((p) => `${p.id}:${p.projectId ?? 'b'}`).join('|');
   if (key !== hiddenKey) {
@@ -568,6 +617,9 @@ function drawBuildings() {
       b.hidden = gone;
     }
   }
+}
+
+function drawDeveloped(developed: Plot[]) {
   builtLayer.clearLayers();
   const add = (ring: [number, number][], owner: string, height: number, phase: string) => {
     const st = PHASE_STYLE[phase];
@@ -650,7 +702,12 @@ mapTools.onAdd = () => {
 };
 
 function applyView() {
-  if (view === 'hauteur') buildingsLayer.addTo(map);
+  if (view === 'hauteur') {
+    ensureExistingBuildings();
+    drawBuildings();
+    for (const b of existingBuildings) if (!b.hidden) buildingsLayer.addLayer(b.layer);
+    buildingsLayer.addTo(map);
+  }
   else buildingsLayer.remove();
   syncPois();
   if (view === 'zonage') zonesLayer.addTo(map);
@@ -686,6 +743,13 @@ function buildingNote(p: Plot): string {
   return b ? `<br>Livré par ${nameOf(b.owner)} · ${Math.round(b.height)} m, ${Math.round(b.sdp)} m²` : '';
 }
 
+const styleSig = new WeakMap<L.Polygon, string>();
+function plotTooltip(id: string): string {
+  const p = plotById(id);
+  if (!p) return '';
+  return `${esc(p.label ?? p.id)}${p.zones.length ? ` · ${esc(ruleOf(p)!.label)}` : ''}<br>${eur(p.askingPrice)} · situation ×${p.locationFactor.toFixed(2).replace('.', ',')}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : p.municipal ? ' · terrain communal (appel d’offres)' : ''}${buildingNote(p)}`;
+}
+
 function drawPlots() {
   computeRange();
   drawBuildings();
@@ -704,10 +768,16 @@ function drawPlots() {
         tab = 'terrain';
         renderAll();
       });
+      // Infobulle construite à l'affichage (et non à chaque redessin) : des milliers de parcelles sur une commune entière.
+      layer.bindTooltip(() => plotTooltip(id), { sticky: true });
       layers.set(p.id, layer);
     }
-    layer.setStyle(plotStyle(p));
-    layer.bindTooltip(`${esc(p.label ?? p.id)}${p.zones.length ? ` · ${esc(ruleOf(p)!.label)}` : ''}<br>${eur(p.askingPrice)} · situation ×${p.locationFactor.toFixed(2).replace('.', ',')}${p.existingHeight ? ` · bâti ${Math.round(p.existingHeight)} m` : ''}${p.owner ? ` · ${esc(state.players.find((x) => x.id === p.owner)?.name ?? '')}` : p.municipal ? ' · terrain communal (appel d’offres)' : ''}${buildingNote(p)}`, { sticky: true });
+    const style = plotStyle(p);
+    const sig = JSON.stringify(style);
+    if (styleSig.get(layer) !== sig) {
+      layer.setStyle(style);
+      styleSig.set(layer, sig);
+    }
   }
 }
 
@@ -720,6 +790,9 @@ function drawOverlay(project: ReturnType<typeof computeProject> | null) {
   if (project.rearFootprint) {
     const rear = project.rearFootprint.map((v) => proj.toLonLat(v)).map((q) => [q.lat, q.lon] as [number, number]);
     L.polygon(rear, { color: '#d9480f', weight: 2, dashArray: '5 3', fillColor: '#f6b04d', fillOpacity: 0.7, interactive: false }).addTo(overlay);
+  }
+  for (const extra of project.extraFootprints) {
+    L.polygon(extra.map((v) => proj.toLonLat(v)).map((q) => [q.lat, q.lon] as [number, number]), { color: '#d9480f', weight: 2, dashArray: '5 3', fillColor: '#f6b04d', fillOpacity: 0.7, interactive: false }).addTo(overlay);
   }
   if (project.parkingAccess) {
     /* l'accès du parking est détaillé dans le moteur ; la carte ne montre que l'emprise du bâtiment */
@@ -844,7 +917,7 @@ const TUTORIAL: { title: string; body: string }[] = [
       <p><b>Terrains en vente</b> (contour doré, onglet « Marché ») : les offres restent ouvertes deux trimestres, sous pli fermé. <b>Le plus offrant l’emporte</b> et les autres sont remboursés.</p>
       <p><b>Autres terrains</b> : vous pouvez prospecter le propriétaire. Il répond à la fin du trimestre, n’accepte que s’il est satisfait du prix, et les frais de prospection sont perdus. Si deux promoteurs se positionnent, le plus offrant gagne.</p>
       <p>Sélectionnez plusieurs terrains pour déposer <b>des offres groupées</b>. Méfiez-vous des terrains dont le <b>prix grimpe</b> plus vite que le marché : leur propriétaire <b>spécule</b>, ne les mettra pas en vente et refusera une offre ordinaire.</p>
-      <p>Quand le PLU le permet et que le terrain est profond, vous pouvez cocher <b>« deuxième bâtiment au fond »</b> : un second immeuble, plus bas, derrière celui sur rue, desservi par une allée ou un porche.</p>
+      <p>Le promoteur occupe le terrain au mieux : quand le PLU le permet et qu’il y a la place, le projet comprend <b>plusieurs bâtiments</b> (un sur rue, d’autres au fond ou à côté, séparés par un recul et desservis par une allée ou un porche). Vous pouvez décocher « plusieurs bâtiments si possible » pour n’en garder qu’un.</p>
       <p class="muted">Votre offre bloque l’argent (prix et frais de notaire) jusqu’au verdict. Les concurrents enchérissent aussi.</p>`,
   },
   {
@@ -1087,9 +1160,9 @@ function showHome() {
         <button id="hm-howto" class="big">Mode d’emploi</button>
         ${canInstall() ? '<button id="hm-install" class="big install">📲 Installer l’application</button>' : ''}
       </div>
-      <div class="home-place"><div><small>Lieu de la partie</small><b>${esc(district.name)}</b></div><span class="soon" title="Plus tard, vous choisirez la ville et le quartier">autres lieux bientôt</span></div>
+      <div class="home-places"><small>Lieu de la partie</small>${DISTRICTS.map((d) => `<button type="button" class="place${d.id === districtId ? ' on' : ''}" data-place="${d.id}" ${d.id === districtId ? 'aria-current="true"' : ''}><span class="place-head"><b>${esc(d.title)}</b><i>${esc(d.tag)}</i></span><span class="place-blurb">${esc(d.blurb)}</span><span class="place-facts">${esc(d.facts)}${d.id === districtId ? ' · carte actuelle' : ' · charger cette carte'}</span></button>`).join('')}<span class="soon">D’autres villes et quartiers de France viendront.</span></div>
       <div class="home-beta"><b>Version bêta</b> : le jeu évolue vite, des choses bougent ou cassent, et les prix, coûts et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.
-        <div class="home-soon"><b>À venir</b><ul><li>Choix du lieu : d’autres quartiers et villes de France</li><li>Mode multijoueur : jouer contre vos amis, sans serveur</li><li>Programmes et dispositifs (TVA 5,5 %, ZAC propres à un territoire)</li><li>Une carte plus belle et plus lisible, puis une vue 3D</li></ul></div></div>
+        <div class="home-soon"><b>À venir</b><ul><li>Plus de lieux : d’autres villes et quartiers de France</li><li>Mode multijoueur : jouer contre vos amis, sans serveur</li><li>Programmes et dispositifs (TVA 5,5 %, ZAC propres à un territoire)</li><li>Une carte plus belle et plus lisible, puis une vue 3D</li></ul></div></div>
       <ul class="home-points">
         <li><b>Vraies parcelles</b> du cadastre, PLU simplifié, bâti existant</li>
         <li><b>Enchères</b> et <b>appels d’offres</b> de la commune (ZAC, PUP)</li>
@@ -1112,6 +1185,14 @@ function showHome() {
   h.querySelector<HTMLAnchorElement>('#hm-version')!.onclick = (e) => (e.preventDefault(), openVersion());
   const inst = q('hm-install');
   if (inst) inst.onclick = installApp;
+  h.querySelectorAll<HTMLButtonElement>('[data-place]').forEach((b) => {
+    b.onclick = () => {
+      if (b.dataset.place === districtId) return;
+      chooseDistrict(b.dataset.place!);
+      b.querySelector('.place-facts')!.textContent = 'Chargement de la carte…';
+      location.reload();
+    };
+  });
   (cont ?? q('hm-new'))!.focus();
 }
 
@@ -1953,8 +2034,10 @@ interface BestPlan {
   maxLand: number;
   dwellings: number;
   sdp: number;
-  /** Niveaux (R+x) du bâtiment arrière si le meilleur projet en comporte un. */
-  secondLevels?: number;
+  /** Nombre de bâtiments du meilleur projet. */
+  buildings: number;
+  /** Vrai si le meilleur projet est un bâtiment unique alors que plusieurs étaient possibles. */
+  single?: boolean;
 }
 function bestForm(p: Plot, owned: boolean): BestPlan | null {
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : landDraft(p);
@@ -1966,17 +2049,17 @@ function bestForm(p: Plot, owned: boolean): BestPlan | null {
       const proj = computeProject(p.parcel, plotCriteria(p, { ...criteria(), levels, attic, parkingStrategy: 'auto' }, owned));
       if (!proj.footprint || proj.checks.some((c) => c.status === 'error')) continue;
       const b = planBilan(p, proj, landPrice, owned);
-      if (!best || b.margin > best.margin) best = { levels, attic, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal };
+      if (!best || b.margin > best.margin) best = { levels, attic, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal, buildings: proj.indicators.buildings };
     }
   }
-  // Un bâtiment arrière peut améliorer le meilleur projet quand le PLU l'autorise et que le terrain est assez profond.
-  const rule = ruleOf(p);
-  if (best && (!rule || rule.maxBuildings >= 2)) {
-    for (const secondLevels of [1, 2, 3]) {
-      const proj = computeProject(p.parcel, plotCriteria(p, { ...criteria(), levels: best.levels, attic: best.attic, parkingStrategy: 'auto', secondBuilding: true, secondLevels }, owned));
-      if (!proj.rearFootprint || proj.checks.some((c) => c.status === 'error')) continue;
+  // Plusieurs bâtiments ne sont pas toujours plus rentables (allée ou porche, distance entre bâtiments) : on compare avec un seul.
+  if (best && best.buildings > 1 && form.second) {
+    for (const levels of [best.levels - 1, best.levels, best.levels + 1]) {
+      if (levels < 0 || (ob && levels > ob.maxLevels)) continue;
+      const proj = computeProject(p.parcel, plotCriteria(p, { ...criteria(), levels, attic: levels === best.levels && best.attic, parkingStrategy: 'auto', secondBuilding: false }, owned));
+      if (!proj.footprint || proj.checks.some((c) => c.status === 'error')) continue;
       const b = planBilan(p, proj, landPrice, owned);
-      if (b.margin > best.margin) best = { levels: best.levels, attic: best.attic, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal, secondLevels };
+      if (b.margin > best.margin) best = { levels, attic: levels === best.levels && best.attic, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal, buildings: 1, single: true };
     }
   }
   return best;
@@ -2033,7 +2116,7 @@ function plotBrief(p: Plot, owned: boolean): string {
   if (!p.issue && !p.projectId && !p.municipal) {
     const b = bestBrief(p, owned);
     best = b
-      ? `<div class="brief ${b.margin >= 0 ? 'ok' : 'ko'}"><b>Meilleur projet</b> : R+${b.levels}${b.attic ? ' + attique' : ''}${b.secondLevels !== undefined ? ` + bâtiment arrière R+${b.secondLevels}` : ''}, ${b.dwellings} logements · marge <b class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)}</b> (${pct(b.marginRate)} du CA) · le terrain pourrait valoir jusqu’à ${eur(b.maxLand)}${price}</div>`
+      ? `<div class="brief ${b.margin >= 0 ? 'ok' : 'ko'}"><b>Meilleur projet</b> : R+${b.levels}${b.attic ? ' + attique' : ''}${b.buildings > 1 ? `, ${b.buildings} bâtiments` : ''}, ${b.dwellings} logements · marge <b class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)}</b> (${pct(b.marginRate)} du CA) · le terrain pourrait valoir jusqu’à ${eur(b.maxLand)}${price}</div>`
       : `<div class="brief ko"><b>Aucun projet rentable</b> avec les réglages actuels sur ce terrain seul.${price}</div>`;
   } else if (price) best = `<div class="brief"><span class="muted">Prix :</span>${price}</div>`;
   return `${rules ? `<div class="rules">${rules}</div>` : ''}${best}`;
@@ -2080,7 +2163,7 @@ function projectForm(p: Plot, owned: boolean): string {
     <label class="f" title="Au-delà de 14 m de profondeur, l'éclairement naturel devient difficile">Profondeur max du bâtiment<select id="f-depth">${[10, 12, 15, 18, 22].map((d) => `<option value="${d}" ${form.depth === d ? 'selected' : ''}>${d} m</option>`).join('')}</select></label>`;
   const canSecond = !rule || rule.maxBuildings >= 2;
   const secondControl = canSecond
-    ? `<div class="row" style="align-items:center;margin-top:0"><label class="f" style="margin:0" title="Un second bâtiment au fond du terrain, derrière celui sur rue : possible si le terrain est assez profond, avec une allée ou un porche d'accès"><input type="checkbox" id="f-second" ${form.second ? 'checked' : ''}/> deuxième bâtiment au fond</label>${form.second ? `<label class="f" style="margin:0">R+<select id="f-second-levels">${Array.from({ length: Math.max(1, Math.min(4, (rule ? rule.maxLevels : 5) - 1)) + 1 }, (_, i) => `<option ${i === form.secondLevels ? 'selected' : ''}>${i}</option>`).join('')}</select></label>` : ''}</div>`
+    ? `<div class="row" style="align-items:center;margin-top:0"><label class="f" style="margin:0" title="Le promoteur occupe le terrain au mieux : un ou plusieurs bâtiments derrière celui sur rue, si le terrain est assez profond ou grand et si le PLU l'autorise (allée ou porche d'accès, distance entre bâtiments)"><input type="checkbox" id="f-second" ${form.second ? 'checked' : ''}/> plusieurs bâtiments si possible</label>${form.second ? `<label class="f" style="margin:0" title="Hauteur des bâtiments de fond">fond R+<select id="f-second-levels"><option value="" ${form.secondLevels === null ? 'selected' : ''}>auto</option>${Array.from({ length: Math.min(6, rule ? rule.maxLevels : 5) + 1 }, (_, i) => `<option value="${i}" ${i === form.secondLevels ? 'selected' : ''}>${i}</option>`).join('')}</select></label>` : ''}</div>`
     : '<div class="muted" style="font-size:12px">Le PLU de cette zone n’autorise qu’un seul bâtiment par terrain.</div>';
   let html = `<h2>Projet</h2>
     <div class="row" style="align-items:center">
@@ -2311,10 +2394,9 @@ function bindSelection() {
       if (!found) return toast('Aucun projet réalisable sur ce terrain avec ces réglages : essayez un autre mode de stationnement ou assemblez-le.', true);
       form.levels = found.levels;
       form.attic = found.attic;
-      form.second = found.secondLevels !== undefined;
-      if (found.secondLevels !== undefined) form.secondLevels = found.secondLevels;
+      if (found.single) form.second = false;
       form.parking = 'auto';
-      toast(`Meilleur projet : R+${found.levels}${found.attic ? ' avec attique' : ''}${found.secondLevels !== undefined ? ` + bâtiment arrière R+${found.secondLevels}` : ''}, ${eur(found.margin)} de marge`);
+      toast(`Meilleur projet : R+${found.levels}${found.attic ? ' avec attique' : ''}${found.buildings > 1 ? `, ${found.buildings} bâtiments` : found.single ? ', un seul bâtiment' : ''}, ${eur(found.margin)} de marge`);
       renderAll();
     };
   const pf = side.querySelector<HTMLSelectElement>('#pfilter');
@@ -2330,7 +2412,7 @@ function bindSelection() {
   const sec = side.querySelector<HTMLInputElement>('#f-second');
   if (sec) sec.onchange = () => ((form.second = sec.checked), renderAll());
   const secLv = side.querySelector<HTMLSelectElement>('#f-second-levels');
-  if (secLv) secLv.onchange = () => ((form.secondLevels = +secLv.value), renderAll());
+  if (secLv) secLv.onchange = () => ((form.secondLevels = secLv.value === '' ? null : +secLv.value), renderAll());
   const plc = side.querySelector<HTMLSelectElement>('#f-placement');
   if (plc) plc.onchange = () => ((form.placement = plc.value as Placement), renderAll());
   const shp = side.querySelector<HTMLSelectElement>('#f-shape');
@@ -2386,7 +2468,7 @@ function announceUpdate() {
 function openCredits() {
   openModal(
     `<h2 class="mh">Crédits et données</h2>
-     <div class="tuto"><ul>${district.credits.map((c) => `<li>${esc(c)}</li>`).join('')}<li>${NO_TILES ? 'Voies : IGN, BD TOPO® (Licence Ouverte 2.0)' : 'Fond de carte : © contributeurs OpenStreetMap (licence ODbL)'}</li></ul>
+     <div class="tuto"><ul>${district.credits.map((c) => `<li>${esc(c)}</li>`).join('')}<li>Police : Alte Haas Grotesk</li><li>${NO_TILES ? 'Voies : IGN, BD TOPO® (Licence Ouverte 2.0)' : 'Fond de carte : © contributeurs OpenStreetMap (licence ODbL)'}</li></ul>
      <p class="muted">Urbasim est un jeu en version bêta : les prix, les coûts et les règles d’urbanisme sont des ordres de grandeur, pas une expertise.</p></div>
      <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="cr-ok" type="button" class="primary">Fermer</button></div>`,
     (root) => (root.querySelector<HTMLButtonElement>('#cr-ok')!.onclick = closeModal),
@@ -2442,6 +2524,7 @@ applyView();
 renderAll();
 showHome();
 announceUpdate();
+document.getElementById('boot')?.setAttribute('hidden', '');
 
 // Outils de test automatisé (serveur de développement uniquement).
 if (import.meta.env.DEV) {

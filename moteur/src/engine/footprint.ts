@@ -8,7 +8,6 @@ import {
   largestPolygon,
   minWidth,
   multiArea,
-  pointInRing,
   polygonArea,
   rectRing,
   ringArea,
@@ -112,15 +111,39 @@ function largestRectangle(comp: PolygonRings, opts: FootprintOptions): { ring: R
   const res = Math.max(0.25, Math.sqrt(((bb.maxX - bb.minX) * (bb.maxY - bb.minY)) / 2e6));
   const W = Math.max(1, Math.ceil((bb.maxX - bb.minX) / res));
   const H = Math.max(1, Math.ceil((bb.maxY - bb.minY) / res));
-  const inPoly = (x: number, y: number) =>
-    pointInRing([x, y], outer) && !comp.slice(1).some((h) => pointInRing([x, y], h));
+  // Trame par balayage : pour chaque ligne, abscisses où les contours (extérieur et cours) croisent la ligne ; une cellule est
+  // retenue si ses quatre coins sont à l'intérieur (parité du nombre de croisements à droite du point).
+  const crossings = (y: number): number[] => {
+    const xs: number[] = [];
+    for (const r of comp) {
+      for (let a = 0, b = r.length - 1; a < r.length; b = a++) {
+        const [xa, ya] = r[a];
+        const [xb, yb] = r[b];
+        if (ya > y !== yb > y) xs.push(((xb - xa) * (y - ya)) / (yb - ya) + xa);
+      }
+    }
+    return xs.sort((p, q) => p - q);
+  };
+  const insideAt = (xs: number[], x: number): boolean => {
+    let lo = 0;
+    let hi = xs.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (xs[mid] > x) hi = mid;
+      else lo = mid + 1;
+    }
+    return ((xs.length - lo) & 1) === 1;
+  };
   const cell: Uint8Array[] = [];
   for (let j = 0; j < H; j++) {
     const row = new Uint8Array(W);
+    const y0 = bb.minY + j * res;
+    const lowX = crossings(y0 + 0.01);
+    const highX = crossings(y0 + res - 0.01);
     for (let i = 0; i < W; i++) {
-      const x0 = bb.minX + i * res;
-      const y0 = bb.minY + j * res;
-      row[i] = inPoly(x0 + 0.01, y0 + 0.01) && inPoly(x0 + res - 0.01, y0 + 0.01) && inPoly(x0 + 0.01, y0 + res - 0.01) && inPoly(x0 + res - 0.01, y0 + res - 0.01) ? 1 : 0;
+      const xl = bb.minX + i * res + 0.01;
+      const xr = bb.minX + (i + 1) * res - 0.01;
+      row[i] = insideAt(lowX, xl) && insideAt(lowX, xr) && insideAt(highX, xl) && insideAt(highX, xr) ? 1 : 0;
     }
     cell.push(row);
   }
