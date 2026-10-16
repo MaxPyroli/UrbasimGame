@@ -526,6 +526,17 @@ collectivité jouent le rôle des enchères du Monopoly.
   de programme » attachées à une parcelle ou une zone, qui modifient le bilan (TVA/prix de vente plafonné, aides,
   contraintes de programme) et se combinent avec les appels d'offres.
 
+### À reprendre plus tard : PLU des quartiers pavillonnaires et ensembles de maisons (essai abandonné, rien de publié)
+- **Constat (mesuré le 16/10)** : à Sucy, 6 041 parcelles sur 7 154 sont en « UH : Habitat individuel », mais `zoneFamily` (`moteur/src/game/plu.ts`) ne reconnaît que quelques mots clés et les classe par défaut en « zone mixte »
+  (R+4, 60 % d'emprise) : un pavillon de 450 m² est estimé comme un terrain à immeuble (prix demandé médian 600 k€, 1 316 €/m² de terrain ; Sucy « super dur » en jeu). Même défaut ailleurs : Biarritz et Paris 11e entièrement en « mixte »,
+  Villeurbanne « habitat et activités économiques » classé en activités, Brie « habitat individuel » en mixte, Murat « patrimonial » en mixte.
+- **Piste testée (code mis de côté, non poussé)** : (1) `zoneFamily` plus fin (mots clés ordonnés : équipement, nature/zone verte, activités sauf mixité avec habitat, renouvellement, centre/« zone urbaine générale », pavillonnaire sauf front bâti/collectif/mixte,
+  préservation/patrimoine/sauvegardé, puis lettre du code quand le libellé est vide : UA centre, UD/UE/UH pavillonnaire, UY/UI activités) ; (2) nouvelle famille `pavillonnaire` (R+1 avec combles, 40 % d'emprise, 35 % de pleine terre, retraits 5 m fond / 3 m côtés, 8 maisons au plus, maisons seulement) ;
+  (3) `withZoneFamilies` pour recalculer les familles d'un instantané sans le retélécharger (appelé par `npm run reprice`) ; (4) type de logement `maison` : un logement par bâtiment, ni escalier ni ascenseur ni hall, emprise ≤ 75 m² (`HOUSE_MAX_AREA`, ≈ 125 m² habitables sur 2 niveaux),
+  volume carré (`compact` dans `largestRectangle`), 2 places par maison, construction ×0,9 et 12 k€ de viabilisation par lot, prix de vente ×`houseRatio` (maisons DVF / appartements : Sucy ≈ ×1,23, Montreuil ≈ ×1,05, à calculer dans `app/dvf.ts`), plusieurs maisons par terrain via `buildSecondary`.
+- **Reste à faire pour finir** : estimation des terrains et ordinateurs (`appraise`, `bestPlan`) à étendre aux maisons (aujourd'hui ils ne testent que des immeubles) ; sélecteur « immeuble / maisons » et « Meilleur projet » dans l'interface (imposé en zone pavillonnaire) ; `houseRatio` dans les statistiques DVF
+  (`npm run market`) ; recalcul de toutes les cartes (`npm run reprice`) ; simulations d'équilibre ; tests de rentabilité d'un petit ensemble de maisons à prix de terrain pavillonnaire (≈ 450 €/m²).
+
 ### Notes de la partie « clarté » (à traiter plus tard)
 - ~~Voir les bâtiments construits par les autres sur la carte~~ : fait (voir plus haut).
 - **Choix de l'implantation du bâtiment** : le joueur choisit de construire **le long de la route** (à l'alignement, en front
