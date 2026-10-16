@@ -537,6 +537,19 @@ collectivité jouent le rôle des enchères du Monopoly.
 - **Reste à faire pour finir** : estimation des terrains et ordinateurs (`appraise`, `bestPlan`) à étendre aux maisons (aujourd'hui ils ne testent que des immeubles) ; sélecteur « immeuble / maisons » et « Meilleur projet » dans l'interface (imposé en zone pavillonnaire) ; `houseRatio` dans les statistiques DVF
   (`npm run market`) ; recalcul de toutes les cartes (`npm run reprice`) ; simulations d'équilibre ; tests de rentabilité d'un petit ensemble de maisons à prix de terrain pavillonnaire (≈ 450 €/m²).
 
+### À faire plus tard : plusieurs types de logements pour les promoteurs (demande du 16/10)
+- **Idée** : aujourd'hui un projet est toujours un immeuble collectif (escalier, ascenseur, appartements T1 à T5). Proposer plusieurs **types de programme** pour s'adapter à tout type de terrain : immeuble collectif, **petit collectif**,
+  **résidentiel mitoyen** (maisons de ville en bande), ensemble de **maisons individuelles groupées** (lotissement), etc. Le « Meilleur projet » et les concurrents essaient tous les types permis et gardent le plus rentable.
+- **Types envisagés** (à affiner avec les données réelles) :
+  - *Immeuble collectif* (actuel) : R+3 à R+6, escalier et ascenseur, parkings en sous-sol ; terrains larges, zones denses.
+  - *Petit collectif* : R+1 à R+2, un escalier sans ascenseur, 6 à 12 logements, parking en surface ; terrains moyens (400 à 1 000 m²), zones mixtes et bordures de quartiers pavillonnaires.
+  - *Résidentiel mitoyen* (maisons de ville en bande) : maisons accolées de 5 à 7 m de large, R+1 avec combles, jardin en fond, un logement par maison ; terrains étroits et profonds.
+  - *Maisons groupées* (petit lotissement) : maisons isolées ou jumelées de ≈ 75 m² d'emprise, voirie interne, viabilisation par lot ; grands terrains pavillonnaires.
+  - Plus tard : logements intermédiaires (duplex superposés à entrée individuelle), résidences services (étudiants, seniors).
+- **Ce que chaque type fixe** : gabarit (niveaux), emprise et forme d'un bâtiment, parties communes (escalier, ascenseur, hall) ou pas, stationnement, coût de construction et viabilisation, prix de vente (maisons ou appartements d'après les ventes réelles DVF),
+  surface et largeur de terrain adaptées, et **types admis par zone de PLU** (hyper-centre : collectif et mitoyen ; quartier pavillonnaire : maisons groupées, mitoyen, petit collectif selon la zone ; etc.).
+- **Dépendances** : d'abord corriger la classification des zones de PLU (voir la note précédente : l'habitat individuel est classé en zone mixte) ; le type `maison` de l'essai abandonné est un premier pas (`Criteria.housing`) à généraliser en une liste de types.
+
 ### Notes de la partie « clarté » (à traiter plus tard)
 - ~~Voir les bâtiments construits par les autres sur la carte~~ : fait (voir plus haut).
 - **Choix de l'implantation du bâtiment** : le joueur choisit de construire **le long de la route** (à l'alignement, en front
