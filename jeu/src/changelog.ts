@@ -7,6 +7,15 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.12.1',
+    title: 'Nouveau logo et une seule police',
+    notes: [
+      'Nouveau logo : une skyline qui monte vers une tour à balise, avec un soleil levant. Le même dessin partout : icône du navigateur, écran d’accueil, barre du haut, icône installée sur le téléphone',
+      'La police Alte Haas Grotesk s’applique maintenant partout, y compris sur la carte (cartes flottantes, légende, infobulles, boutons de zoom), les cases à cocher, les menus et les pastilles d’équipement',
+      'Barre du haut : sur les écrans moyens elle passe sur deux lignes (le menu ne sort plus de l’écran) et le numéro de version la quitte au profit du joueur',
+    ],
+  },
+  {
     version: '0.12.0',
     title: 'Page des cartes et six nouvelles villes',
     notes: [

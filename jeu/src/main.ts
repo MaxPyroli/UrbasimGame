@@ -86,6 +86,7 @@ import {
 } from '../../moteur/src/game';
 import { pointInRing } from '../../moteur/src/game/district';
 import { CHANGELOG } from './changelog';
+import logoSvg from './assets/logo.svg?raw';
 import { DISTRICTS, DEFAULT_DISTRICT, chooseDistrict, chosenDistrictId, deleteMap, downloadMap, downloadedMaps, listMaps, loadDistrict, type MapEntry } from './districts';
 
 // Carte choisie sur l'écran d'accueil (changer de carte recharge la page) ; ses données sont chargées à la demande.
@@ -428,9 +429,9 @@ function lieuColor(f: number): string {
 const POI_COLORS: Record<string, string> = { metro: '#0b5fa5', gare: '#0b5fa5', tram: '#2f9e8f', mairie: '#8e24aa', ecole: '#d98e04', superieur: '#d98e04', parc: '#2e8b57', sante: '#d62839' };
 /** Pictogrammes des équipements (SVG blanc sur pastille de couleur). */
 const POI_GLYPH: Record<string, string> = {
-  metro: '<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="800" font-family="system-ui,sans-serif" fill="#fff">M</text>',
-  gare: '<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="800" font-family="system-ui,sans-serif" fill="#fff">G</text>',
-  tram: '<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="800" font-family="system-ui,sans-serif" fill="#fff">T</text>',
+  metro: '<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="800" fill="#fff">M</text>',
+  gare: '<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="800" fill="#fff">G</text>',
+  tram: '<text x="12" y="16.5" text-anchor="middle" font-size="13" font-weight="800" fill="#fff">T</text>',
   mairie: '<path d="M12 5 4.5 9.5h15L12 5Zm-6.5 6h2v6h-2v-6Zm4.5 0h2v6h-2v-6Zm4.5 0h2v6h-2v-6ZM4.5 18h15v1.8h-15V18Z" fill="#fff"/>',
   ecole: '<path d="m12 5-8 4 8 4 6.2-3.1V15h1.8V9l-8-4Zm-4.5 8.2v2.6c0 1.2 2 2.2 4.5 2.2s4.5-1 4.5-2.2v-2.6L12 15l-4.5-1.8Z" fill="#fff"/>',
   superieur: '<path d="m12 5-8 4 8 4 6.2-3.1V15h1.8V9l-8-4Zm-4.5 8.2v2.6c0 1.2 2 2.2 4.5 2.2s4.5-1 4.5-2.2v-2.6L12 15l-4.5-1.8Z" fill="#fff"/>',
@@ -1247,7 +1248,7 @@ function showHome() {
       </div>`
     : '';
   h.innerHTML = `<div class="home-inner">
-      <div class="home-brand"><div class="home-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></div><h1>Urbasim <span class="beta">bêta ${esc(VERSION)}</span></h1><p class="home-tag">Le Monopoly de l’immobilier réel.<br>Achetez des terrains sur la vraie carte de ${esc(district.name.split('–')[0].trim())}, construisez, vendez, et battez vos concurrents promoteurs.</p></div>
+      <div class="home-brand"><div class="home-logo" aria-hidden="true">${logoSvg}</div><h1>Urbasim <span class="beta">bêta ${esc(VERSION)}</span></h1><p class="home-tag">Le Monopoly de l’immobilier réel.<br>Achetez des terrains sur la vraie carte de ${esc(district.name.split('–')[0].trim())}, construisez, vendez, et battez vos concurrents promoteurs.</p></div>
       ${saveCard}
       <div class="home-actions">
         ${resume ? `<button id="hm-continue" class="primary big">${state.over ? 'Voir les résultats' : 'Continuer la partie'}</button>` : ''}
@@ -1327,7 +1328,7 @@ function pulse(el: HTMLElement | null) {
 function renderTop() {
   const w = netWorth(state, ME);
   $('top').innerHTML = `
-    <h1>Urbasim <button id="ver" class="ver" type="button" title="Version et nouveautés">bêta ${esc(VERSION)} · #${esc(BUILD)}</button></h1>
+    <h1><span class="brand-logo" aria-hidden="true">${logoSvg}</span>Urbasim <button id="ver" class="ver" type="button" title="Version et nouveautés">bêta ${esc(VERSION)} · #${esc(BUILD)}</button></h1>
     <div class="company" title="${esc(me().slogan ?? '')}"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><span class="cname">${esc(me().name)}</span></div>
     <div class="stats">
     <div class="stat" id="stat-round" title="Avancement de la partie"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b><span class="goalbar"><i style="width:${Math.min(100, (state.round / state.config.rounds) * 100)}%"></i></span></div>

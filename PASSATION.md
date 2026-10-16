@@ -506,6 +506,15 @@ collectivité jouent le rôle des enchères du Monopoly.
   - Simulations (normal) : Paris 11e ×0,8 / ordinateurs ×0,6 à ×1,1 ; Villeurbanne ×0,8 / ×0,4 à ×2,0 ; Brie ×0,8 / ×1,0 à ×1,7 ; Biarritz ×0,8 / ×0,7 à ×2,6 ; Bourges ×0,9 / ×1,7 à ×2,1 ; Murat ×0,8 / ×1,1 à ×1,4 ;
     aucune faillite. À surveiller : Bourges (ordinateurs très gagnants), Paris (très peu de terrains libres, 11 livrés).
 
+- Fait : **logo unique et police partout** (version 0.12.1).
+  - **Logo** : skyline de sept immeubles qui montent vers une tour à balise, soleil levant, fenêtres allumées, dans les couleurs du jeu (bleu, magenta, jaune, vert) sur tuile sombre. Source unique : `jeu/scripts/make-icons.mjs`
+    (dessin en code) écrit `public/icons/logo.svg`, `src/assets/logo.svg` (importé par le jeu en `?raw` : écran d'accueil et barre du haut), `public/icons/favicon.svg` (version simplifiée de 5 immeubles, lisible à 32 px) puis les PNG
+    (favicon 32 et 48, iOS 180, icônes 192 et 512, maskable 512 en plein cadre) avec Chromium (`NODE_PATH=…/playwright-core`). Avant, l'accueil dessinait en CSS une grille 2×2 : un autre logo que l'icône.
+  - **Police** : `--font` dans `style.css`, imposée (`!important`) aux champs, boutons et à tout l'intérieur de `.leaflet-container` (Leaflet impose Helvetica Neue et Lucida Console, y compris sur les boutons de zoom, infobulles,
+    cartes flottantes et légendes) ; les lettres M, G, T des pastilles de gare n'ont plus de police en dur. Vérifié par un recensement automatique de la police calculée de chaque élément (accueil, page des cartes, tutoriel,
+    jeu, infobulles) : tout est en Alte Haas Grotesk.
+  - **Barre du haut** : entre 801 et 1180 px elle passe sur deux lignes (le menu « ⋯ » sortait de l'écran), sous 1340 px le numéro de version la quitte, la pastille du joueur garde une largeur minimale.
+
 ## 5 ter. Idées notées pour plus tard
 - **Valeur selon le lieu** : un terrain vaut plus près d'une gare, du centre-ville, de commerces, etc. Pistes : bonus
   de prix de vente et de terrain selon la distance à des points d'intérêt (OSM/Overpass ou BPE de l'INSEE pour gares,
