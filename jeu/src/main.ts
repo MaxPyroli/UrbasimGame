@@ -818,8 +818,10 @@ function openModal(html: string, mount: (root: HTMLElement) => void, dismissable
   m.innerHTML = `<div class="sheet">${html}</div>`;
   m.hidden = false;
   mount(m);
+  // Focus sans défilement : sinon une fenêtre longue s'ouvre en bas, sur son bouton « Fermer ».
   const first = m.querySelector<HTMLElement>('input, button.primary');
-  first?.focus();
+  first?.focus({ preventScroll: true });
+  m.querySelector<HTMLElement>('.sheet')?.scrollTo(0, 0);
 }
 function closeModal() {
   $('modal').hidden = true;
@@ -2576,11 +2578,13 @@ function renderAll() {
 }
 
 /** Fenêtre « Version et nouveautés » : numéro de bêta, build et ce qui a changé. */
+const release = (r: (typeof CHANGELOG)[number]) => `<h3 class="rel">${esc(r.version)} · ${esc(r.title)}</h3><ul>${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`;
+
 function openVersion() {
   openModal(
     `<h2 class="mh">Urbasim · bêta ${esc(VERSION)}</h2>
      <p class="muted">Build <b>${esc(BUILD)}</b> · ${esc(__APP_DATE__)} · ${esc(__APP_COMMIT__)}<br>Le numéro de build monte à chaque mise à jour publiée : s’il change, une nouvelle version est en ligne.</p>
-     <div class="tuto">${CHANGELOG.map((r) => `<h3 class="rel">${esc(r.version)} · ${esc(r.title)}</h3><ul>${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`).join('')}</div>
+     <div class="tuto">${CHANGELOG.slice(0, 2).map(release).join('')}${CHANGELOG.length > 2 ? `<details class="fold"><summary>Versions précédentes (${CHANGELOG.length - 2})</summary><div class="foldbody">${CHANGELOG.slice(2).map(release).join('')}</div></details>` : ''}</div>
      <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="vr-ok" type="button" class="primary">Fermer</button></div>`,
     (root) => (root.querySelector<HTMLButtonElement>('#vr-ok')!.onclick = closeModal),
   );

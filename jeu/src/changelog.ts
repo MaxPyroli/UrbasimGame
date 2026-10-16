@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.12.3', title: 'Fenêtre des nouveautés', notes: ['S’ouvre en haut et ne montre que les dernières versions (les anciennes sont repliées)'] },
   {
     version: '0.12.2',
     title: 'PLU : les quartiers pavillonnaires',
