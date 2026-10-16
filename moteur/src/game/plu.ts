@@ -38,28 +38,53 @@ export const ZONE_RULES: Record<ZoneFamily, ZoneRule> = {
   centre: { family: 'centre', maxBuildings: 2, buildingGap: 8, alignment: 'rue', label: 'Centralité', summary: 'Centre-ville dense : on peut construire haut, jusqu’en limite de parcelle, mais le bâtiment doit s’aligner sur la rue.', buildable: true, maxLevels: 6, maxCoverage: 0.8, minOpenGround: 0.1, setbackFond: 0, setbackLateral: 0, use: 'logement', color: '#d95f02' },
   renouvellement: { family: 'renouvellement', maxBuildings: 4, buildingGap: 6, alignment: 'libre', label: 'Renouvellement urbain', summary: 'Secteur à densifier : la hauteur la plus généreuse du quartier.', buildable: true, maxLevels: 7, maxCoverage: 0.7, minOpenGround: 0.15, setbackFond: 3, setbackLateral: 0, use: 'logement', color: '#c2185b' },
   mixte: { family: 'mixte', maxBuildings: 3, buildingGap: 6, alignment: 'libre', label: 'Zone mixte', summary: 'Habitat et activités mêlés : immeubles moyens.', buildable: true, maxLevels: 4, maxCoverage: 0.6, minOpenGround: 0.2, setbackFond: 4, setbackLateral: 0, use: 'logement', color: '#e6ab02' },
+  pavillonnaire: { family: 'pavillonnaire', maxBuildings: 3, buildingGap: 4, alignment: 'libre', label: 'Habitat individuel', summary: 'Quartier pavillonnaire : petits gabarits (R+1 avec combles), peu d’emprise, de grands jardins. Il faut assembler des terrains pour faire un projet de taille.', buildable: true, maxLevels: 2, maxCoverage: 0.4, minOpenGround: 0.35, setbackFond: 5, setbackLateral: 3, use: 'logement', color: '#b08968' },
   preservation: { family: 'preservation', maxBuildings: 1, buildingGap: 8, alignment: 'libre', label: 'Préservation', summary: 'Tissu ancien à préserver : petit gabarit, jardins protégés.', buildable: true, maxLevels: 2, maxCoverage: 0.45, minOpenGround: 0.35, setbackFond: 5, setbackLateral: 3, use: 'logement', color: '#7570b3' },
   activites: { family: 'activites', maxBuildings: 3, buildingGap: 6, alignment: 'libre', label: 'Activités économiques', summary: 'Zone d’activités : bureaux et locaux d’activité, pas de logements.', buildable: true, maxLevels: 3, maxCoverage: 0.65, minOpenGround: 0.15, setbackFond: 4, setbackLateral: 0, use: 'bureaux', color: '#1b9e77' },
   equipement: { family: 'equipement', maxBuildings: 1, buildingGap: 0, alignment: 'libre', label: 'Équipement public', summary: 'Réservé aux équipements publics (écoles, services) : inconstructible pour un promoteur.', buildable: false, maxLevels: 0, maxCoverage: 0, minOpenGround: 1, setbackFond: 0, setbackLateral: 0, use: 'logement', color: '#6c8ebf' },
   nature: { family: 'nature', maxBuildings: 1, buildingGap: 0, alignment: 'libre', label: 'Zone naturelle', summary: 'Parc, cimetière ou espace naturel : inconstructible.', buildable: false, maxLevels: 0, maxCoverage: 0, minOpenGround: 1, setbackFond: 0, setbackLateral: 0, use: 'logement', color: '#66a61e' },
 };
 
-/** Famille de zone à partir des champs du Géoportail de l'Urbanisme (`typezone`, `libelle`, `libelong`). */
+const norm = (s: string) =>
+  (s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[’']/g, ' ');
+
+/**
+ * Famille de jeu d'une zone du PLU, d'après son type (U, AU, A, N), son code et son libellé long. Les libellés varient
+ * beaucoup d'une commune à l'autre (« Habitat individuel », « Zone urbaine générale », « UDa »…) : on cherche des mots
+ * clés, dans l'ordre du plus spécifique au plus général, et à défaut du libellé on se rabat sur la lettre du code.
+ * Reste en « zone mixte » quand rien ne permet de trancher.
+ */
 export function zoneFamily(typezone: string, libelle: string, libelong: string): ZoneFamily {
   const t = (typezone || '').toUpperCase();
   if (t === 'N' || t === 'A') return 'nature';
-  const long = (libelong || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '');
-  if (long.includes('equipement')) return 'equipement';
-  if (long.includes('activit')) return 'activites';
-  if (long.includes('renouvellement')) return 'renouvellement';
-  if (long.includes('centralit') || long.includes('centre')) return 'centre';
-  if (long.includes('preservation') || long.includes('patrimoine') || long.includes('pavillon')) return 'preservation';
-  if (long.includes('mixte')) return 'mixte';
-  // Libellés non reconnus : le code donne souvent la famille (UA, UB… varient d'une commune à l'autre : on reste prudent).
-  void libelle;
+  const long = norm(libelong);
+  const code = (libelle || '').trim();
+  const has = (...words: string[]) => words.some((w) => long.includes(w));
+  if (has('equipement', 'grands services', 'vocation d equipement')) return 'equipement';
+  // Parcs, jardins familiaux, zones vertes, naturelles ou agricoles : pas constructibles.
+  if (has('zone urbaine verte', 'jardins familiaux', 'naturel', 'agricole', 'forestier', 'cimetiere')) return 'nature';
+  // Activités économiques, sauf quand le libellé parle aussi d'habitat (« forte mixité de l'habitat et des activités »).
+  if (has('activit', 'industri', 'artisanal', 'entrepot') && !has('habitat', 'residentiel', 'logement', 'mixte', 'mixite')) return 'activites';
+  if (has('renouvellement')) return 'renouvellement';
+  if (has('coeur de ville', 'centre ville', 'centre-ville', 'centralit', 'zone urbaine generale') || (has('centre') && !has('peripher'))) return 'centre';
+  if (has('peripherie immediate') && has('centre ville')) return 'centre';
+  // Quartiers pavillonnaires : habitat individuel sauf s'il s'agit d'un front bâti, de collectif ou de mixité.
+  if (has('habitat individuel', 'individuel', 'pavillonn', 'faible densite', 'extensions en peripherie') && !has('collectif', 'immeuble', 'front bati', 'mixte', 'mixite')) return 'pavillonnaire';
+  if (has('preservation', 'patrimoine', 'patrimonial', 'traditionnel', 'sauvegard', 'jardins ou d espaces libres', 'a proteger', 'paysager')) return 'preservation';
+  if (has('mixte', 'mixite')) return 'mixte';
+  // Libellé absent ou identique au code : la lettre du code donne souvent la famille (UA centre, UD pavillonnaire…), à défaut on reste prudent.
+  // (« Urbaine » seul ne dit rien non plus : plusieurs communes l'ont pour libellé de toutes leurs zones U.)
+  if (!long || long === norm(code) || /^(zone )?(urbaine|a urbaniser)$/.test(long)) {
+    const c = code.toUpperCase();
+    if (/^UA/.test(c)) return 'centre';
+    if (/^(UD|UE|UH|UP)/.test(c)) return 'pavillonnaire';
+    if (/^(UY|UI|UX)/.test(c)) return 'activites';
+    if (/^UL/.test(c)) return 'equipement';
+  }
   return 'mixte';
 }
 

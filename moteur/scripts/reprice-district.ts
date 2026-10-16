@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
-import { analyseParcel, marketOf, priceParcels, wastelandCandidates, wastelandIds, withRoadClip, withWasteland, type District, type ParcelAnalysis } from '../src/game/district';
+import { analyseParcel, marketOf, priceParcels, wastelandCandidates, wastelandIds, withRoadClip, withWasteland, withZoneFamilies, type District, type ParcelAnalysis } from '../src/game/district';
 
 type Job = { kind: 'analyse'; district: District; indices: number[] } | { kind: 'waste'; district: District; appraised: number[]; indices: number[] };
 
@@ -34,7 +34,7 @@ if (!isMainThread) {
     process.exit(1);
   }
   const file = new URL(`../data/districts/${id}.json`, import.meta.url);
-  const raw = JSON.parse(readFileSync(file, 'utf8')) as District;
+  const raw = withZoneFamilies(JSON.parse(readFileSync(file, 'utf8')) as District);
   const { district: source, clipped, dropped } = withRoadClip(raw);
   console.log(`voies : ${clipped} parcelles rognées, ${dropped} écartées (voirie) sur ${raw.parcels.length}`);
   const t0 = Date.now();

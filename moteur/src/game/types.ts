@@ -84,7 +84,7 @@ export interface GameConfig {
 export type Density = 'dense' | 'moyenne' | 'diffuse';
 
 /** Famille de zone du PLU simplifié (voir `plu.ts`). */
-export type ZoneFamily = 'centre' | 'renouvellement' | 'mixte' | 'preservation' | 'activites' | 'equipement' | 'nature';
+export type ZoneFamily = 'centre' | 'renouvellement' | 'mixte' | 'pavillonnaire' | 'preservation' | 'activites' | 'equipement' | 'nature';
 
 /** Pourquoi un terrain ne peut pas être construit seul : à combiner avec des parcelles voisines. */
 export type PlotIssue = 'trop-petite' | 'enclavee' | 'inconstructible' | 'zone' | 'delaisse';

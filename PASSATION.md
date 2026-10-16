@@ -526,7 +526,16 @@ collectivité jouent le rôle des enchères du Monopoly.
   de programme » attachées à une parcelle ou une zone, qui modifient le bilan (TVA/prix de vente plafonné, aides,
   contraintes de programme) et se combinent avec les appels d'offres.
 
-### À reprendre plus tard : PLU des quartiers pavillonnaires et ensembles de maisons (essai abandonné, rien de publié)
+- Fait : **correction de la classification des zones de PLU** (version 0.12.2). `zoneFamily` (`game/plu.ts`) cherche des mots clés ordonnés dans le libellé long : équipement ; nature (zone verte, jardins familiaux, naturel, agricole,
+  cimetière) ; activités sauf si le libellé parle aussi d'habitat ou de mixité ; renouvellement ; centre (coeur de ville, centre-ville, « zone urbaine générale », centralité, sauf « périphérie ») ; **pavillonnaire** (habitat individuel,
+  pavillonnaire, faible densité, extensions en périphérie, sauf front bâti, collectif, immeuble, mixte) ; préservation (patrimoine, patrimonial, traditionnel, sauvegardé, jardins ou espaces libres, à protéger, paysager) ; mixte ; puis, quand
+  le libellé est vide, égal au code ou seulement « Urbaine », la lettre du code (UA centre, UD/UE/UH/UP pavillonnaire, UY/UI/UX activités, UL équipement). Nouvelle famille `pavillonnaire` (« Habitat individuel » : R+2 attique compris, 40 % d'emprise,
+  35 % de pleine terre, retraits 5 m fond et 3 m côtés, 3 bâtiments au plus, 4 m entre bâtiments). `withZoneFamilies` (`game/district.ts`) recalcule les familles d'un instantané sans le retélécharger ; `npm run reprice` l'appelle d'abord.
+  Effets : Sucy 6 044 parcelles pavillonnaires (au lieu de 0), prix médian 223 k€ (600 k€ avant), mise de départ 1 050 k€ ; Brie 2 491 pavillonnaires ; Biarritz 4 644 ; Murat 257 ; Paris 11e entièrement « centre » ; Villeurbanne 1 032 en activités (3 302 avant).
+  Sans type « maisons », un quartier pavillonnaire n'admet encore que de petits immeubles (R+1 avec combles) ; des parcelles étroites deviennent « à assembler » (Sucy : 720 inconstructibles seules de plus). À surveiller : Bourges (centre classé « centre », marché très bas : 4 207
+  délaissés, prix de terrain médian 56 €/m²), les codes sans libellé (UP, UD…) sont des suppositions raisonnables mais pas vérifiées une à une.
+
+### À reprendre plus tard : ensembles de maisons dans les quartiers pavillonnaires (la classification des zones est faite, voir « Fait » plus haut ; reste le type de logement « maisons »)
 - **Constat (mesuré le 16/10)** : à Sucy, 6 041 parcelles sur 7 154 sont en « UH : Habitat individuel », mais `zoneFamily` (`moteur/src/game/plu.ts`) ne reconnaît que quelques mots clés et les classe par défaut en « zone mixte »
   (R+4, 60 % d'emprise) : un pavillon de 450 m² est estimé comme un terrain à immeuble (prix demandé médian 600 k€, 1 316 €/m² de terrain ; Sucy « super dur » en jeu). Même défaut ailleurs : Biarritz et Paris 11e entièrement en « mixte »,
   Villeurbanne « habitat et activités économiques » classé en activités, Brie « habitat individuel » en mixte, Murat « patrimonial » en mixte.

@@ -21,7 +21,7 @@ import {
 } from '../engine';
 import { DEFAULT_CONFIG, SMALL_PLOT_AREA, appraise, askingPriceFrom, plotIssue, ruleOf, type PlotSeed } from './game';
 import { mergeParcels } from './merge';
-import { ZONE_RULES, adaptToDensity } from './plu';
+import { ZONE_RULES, adaptToDensity, zoneFamily } from './plu';
 import type { Density, PlotIssue, ZoneFamily } from './types';
 import { locationFactors, type Poi } from './location';
 import { MARKETS } from '../engine';
@@ -281,6 +281,23 @@ export function buildDistrict(src: DistrictSource): District {
     buildings.push({ ring: b.outer.map((q) => [Math.round(q.lon * 1e6) / 1e6, Math.round(q.lat * 1e6) / 1e6]), height: Math.round(b.height * 10) / 10, estimated: b.estimated });
   }
   return { name: src.name, center: src.center, radius: src.radius, market: src.market, parcels, buildings, pois: src.pois, ...(src.roads ? { roads: src.roads } : {}), ...(src.zones ? { zones: src.zones } : {}), credits: src.credits, fetchedAt: src.fetchedAt };
+}
+
+/**
+ * Recalcule les familles de zones d'un instantané déjà téléchargé (quand la correspondance entre libellés de PLU et familles de jeu
+ * s'améliore) : famille de chaque zone d'après son code et son libellé, puis zone de chaque parcelle (celle qui contient son centre).
+ * Les zones naturelles ou agricoles gardent leur famille (le type U, AU, A, N n'est plus dans l'instantané).
+ */
+export function withZoneFamilies(d: District): District {
+  if (!d.zones?.length) return d;
+  const zones = d.zones.map((z) => (z.family === 'nature' ? z : { ...z, family: zoneFamily('U', z.code, z.label) }));
+  const parcels = d.parcels.map((p) => {
+    const c = { lon: p.ring.reduce((s, q) => s + q.lon, 0) / p.ring.length, lat: p.ring.reduce((s, q) => s + q.lat, 0) / p.ring.length };
+    const z = zones.find((zone) => zone.rings.some((r) => pointInRing(c.lon, c.lat, r)));
+    if (!z) return p;
+    return { ...p, zone: z.family, zoneCode: z.code };
+  });
+  return { ...d, zones, parcels };
 }
 
 /** Demi-largeur (m) de l'emprise de chaussée qu'on retire des parcelles, selon l'importance de la voie (1 = axe majeur). */

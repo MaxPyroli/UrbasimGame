@@ -44,7 +44,7 @@ const game = (zones: ZoneFamily[], extra: Partial<Parameters<typeof createGame>[
   });
 
 describe('PLU simplifié', () => {
-  it('traduit les vraies familles du Géoportail de l’Urbanisme (Montreuil) en 7 familles de jeu', () => {
+  it('traduit les vraies familles du Géoportail de l’Urbanisme (Montreuil) en familles de jeu', () => {
     expect(zoneFamily('U', 'UC91Jb2', 'Centralite')).toBe('centre');
     expect(zoneFamily('U', 'UM91E13', 'Zone mixte')).toBe('mixte');
     expect(zoneFamily('U', 'UA91E13-3', 'Activites economiques')).toBe('activites');
@@ -53,7 +53,7 @@ describe('PLU simplifié', () => {
     expect(zoneFamily('U', 'UE91Anr', 'Equipement')).toBe('equipement');
     expect(zoneFamily('N', 'Nc', 'Zone naturelle cimetiere')).toBe('nature');
     expect(zoneFamily('A', 'A', 'Agricole')).toBe('nature');
-    expect(zoneFamily('U', 'UXYZ', '')).toBe('mixte'); // inconnu : zone mixte par défaut
+    expect(zoneFamily('U', 'UQ12', '')).toBe('mixte'); // inconnu : zone mixte par défaut
   });
 
   it('chaque famille a 5 règles lisibles, de la plus dense à la plus protectrice', () => {
@@ -200,6 +200,51 @@ describe('zonage dans le quartier', () => {
 
   it('l’instantané réel de Montreuil porte le zonage, avec plusieurs familles', () => {
     // vérifié via la lecture du JSON dans district.test ; ici : les règles couvrent toutes les familles
-    expect(Object.keys(ZONE_RULES)).toHaveLength(7);
+    expect(Object.keys(ZONE_RULES)).toHaveLength(8);
+  });
+});
+
+describe('familles de zones d’autres communes (libellés variés)', () => {
+  const fam = (code: string, label: string, t = 'U') => zoneFamily(t, code, label);
+  it('reconnaît l’habitat individuel (pavillons) et ne le prend pas pour de l’immeuble', () => {
+    expect(fam('UH', 'Habitat individuel')).toBe('pavillonnaire');
+    expect(fam('UC', "zone résidentielle à dominante d'habitat individuel")).toBe('pavillonnaire');
+    expect(fam('UD', "Zone d'habitat pavillonnaire à dominante de constructions diffuses")).toBe('pavillonnaire');
+    // habitat individuel organisé en front bâti, collectif ou mixte : pas pavillonnaire
+    expect(fam('URm', 'Zone à dominante résidentielle et d habitat individuel dont le bâti s organise selon un front bâti homogène')).toBe('mixte');
+    expect(fam('UB', "zone résidentielle à dominante d'habitat collectif")).toBe('mixte');
+  });
+  it('distingue mixité habitat-activités, activités pures et centre', () => {
+    expect(fam('UCe', 'Tissus marqués par une forte mixité de l habitat et des activités économiques')).toBe('mixte');
+    expect(fam('UE', 'Zone qui accueille des activités économiques de production artisanales ou industrielles')).toBe('activites');
+    expect(fam('UA', 'zone urbaine centre-ville')).toBe('centre');
+    expect(fam('UG', 'Zone urbaine générale')).toBe('centre');
+    expect(fam('UB', 'Périphérie immédiate du site patrimonial remarquable du centre-ville')).toBe('centre');
+  });
+  it('protège le patrimoine et les espaces verts', () => {
+    expect(fam('UP', 'secteurs à fort intérêt patrimonial')).toBe('preservation');
+    expect(fam('US', 'Zone urbaine Sauvegardée')).toBe('preservation');
+    expect(fam('UV', 'Zone urbaine verte')).toBe('nature');
+    expect(fam('UGSU', 'Zone urbaine des grands services urbains')).toBe('equipement');
+  });
+  it('sans libellé, la lettre du code donne la famille', () => {
+    expect(fam('UAs', 'UAs')).toBe('centre');
+    expect(fam('UDa', 'UDa')).toBe('pavillonnaire');
+    expect(fam('Uyb', 'Uyb')).toBe('activites');
+    expect(fam('UBa', 'UBa')).toBe('mixte');
+  });
+  it('un quartier pavillonnaire est moins constructible qu’une zone mixte', () => {
+    expect(ZONE_RULES.pavillonnaire.maxLevels).toBeLessThan(ZONE_RULES.mixte.maxLevels);
+    expect(ZONE_RULES.pavillonnaire.maxCoverage).toBeLessThan(ZONE_RULES.mixte.maxCoverage);
+    expect(ZONE_RULES.pavillonnaire.buildable).toBe(true);
+  });
+});
+
+describe('libellés génériques', () => {
+  it('« Urbaine » seul ne dit rien : on lit la lettre du code', () => {
+    expect(zoneFamily('U', 'UP', 'Urbaine')).toBe('pavillonnaire');
+    expect(zoneFamily('U', 'UA', 'Urbaine')).toBe('centre');
+    expect(zoneFamily('U', 'UXa', 'Urbaine')).toBe('activites');
+    expect(zoneFamily('U', 'UT', 'Urbaine')).toBe('mixte');
   });
 });

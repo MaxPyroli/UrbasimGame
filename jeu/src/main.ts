@@ -669,7 +669,7 @@ function updateMapLegend() {
   if (view === 'hauteur') {
     el.innerHTML = `<b>Hauteur du bâti existant</b>${HEIGHT_CLASSES.map((c) => `<div><i class="swatch" style="background:${c.color}"></i>${c.label}</div>`).join('')}`;
   } else if (view === 'zonage') {
-    el.innerHTML = `<b>Règles d’urbanisme (PLU simplifié)</b>${(['renouvellement', 'centre', 'mixte', 'preservation', 'activites', 'equipement'] as const)
+    el.innerHTML = `<b>Règles d’urbanisme (PLU simplifié)</b>${(['renouvellement', 'centre', 'mixte', 'pavillonnaire', 'preservation', 'activites', 'equipement'] as const)
       .map((f) => {
         const r = ZONE_RULES[f];
         return `<div><i class="swatch" style="background:${r.color}"></i>${esc(r.label)} · ${r.buildable ? `R+${r.maxLevels}${r.use === 'bureaux' ? ' bureaux' : ''}` : 'inconstructible'}</div>`;

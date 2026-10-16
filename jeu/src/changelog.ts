@@ -7,6 +7,15 @@ export interface Release {
 
 export const CHANGELOG: Release[] = [
   {
+    version: '0.12.2',
+    title: 'PLU : les quartiers pavillonnaires',
+    notes: [
+      'Correction importante du zonage : les zones « habitat individuel » (pavillons) étaient prises pour des zones mixtes constructibles jusqu’en R+4. Nouvelle famille « Habitat individuel » : R+1 avec combles, 40 % d’emprise, 35 % de pleine terre, retraits de 5 m au fond et 3 m sur les côtés',
+      'Le jeu lit mieux les PLU de chaque ville (libellés, et à défaut la lettre du code de zone) : Paris 11e passe en zone de centre, les quartiers pavillonnaires de Sucy, Brie, Biarritz et Murat sont reconnus, les tissus mixtes habitat et activités de Villeurbanne ne sont plus pris pour des zones d’activités, les zones vertes sont inconstructibles',
+      'Conséquence : les prix des terrains pavillonnaires baissent fortement (Sucy : 223 k€ médians au lieu de 600 k€, soit 471 €/m² au lieu de 1 316 €/m²) et la mise de départ de Sucy passe de 1,5 M€ à 1,05 M€. Des parcelles trop étroites pour les retraits demandent maintenant d’être assemblées',
+    ],
+  },
+  {
     version: '0.12.1',
     title: 'Nouveau logo et une seule police',
     notes: [
