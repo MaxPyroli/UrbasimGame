@@ -53,6 +53,8 @@ export const DEFAULT_CRITERIA: Criteria = {
   maxBuildings: 3,
   secondLevels: null,
   buildingGap: 6,
+  housing: 'collectif',
+  maxBuildingArea: null,
 
   groundFloorUse: 'logement',
   upperUse: 'logement',

@@ -30,6 +30,8 @@ export interface Parcel {
   streetEdges: number[];
 }
 
+export type HousingType = 'collectif' | 'maison';
+
 export interface Criteria {
   // Gabarit
   /** x dans « R+x » : nombre d'étages au-dessus du rez-de-chaussée. */
@@ -70,6 +72,10 @@ export interface Criteria {
   secondLevels: number | null;
   /** Distance minimale entre les deux bâtiments (m) ; au moins la moitié de la hauteur du bâtiment sur rue. */
   buildingGap: number;
+  /** Type de logement : immeuble collectif (escalier, ascenseur, appartements) ou maisons (un logement par bâtiment, sans parties communes). */
+  housing: HousingType;
+  /** Emprise maximale d'un bâtiment (m²), pour des maisons ; null = pas de limite. */
+  maxBuildingArea: number | null;
 
   // Programme
   groundFloorUse: Use;
@@ -206,6 +212,8 @@ export interface Indicators {
 }
 
 export interface Project {
+  /** Type de logement du projet (immeuble collectif ou maisons). */
+  housing: HousingType;
   /** Repère local (m) centré sur le terrain. */
   origin: LonLat;
   parcelRing: Ring;

@@ -19,11 +19,11 @@ import {
   type MarketStats,
   type Ring,
 } from '../engine';
-import { DEFAULT_CONFIG, SMALL_PLOT_AREA, appraise, askingPriceFrom, plotIssue, ruleOf, type PlotSeed } from './game';
+import { DEFAULT_CONFIG, SMALL_PLOT_AREA, appraise, askingPriceFrom, existingValue, plotIssue, ruleOf, type PlotSeed } from './game';
 import { mergeParcels } from './merge';
 import { ZONE_RULES, adaptToDensity, zoneFamily } from './plu';
 import type { Density, PlotIssue, ZoneFamily } from './types';
-import { locationFactors, type Poi } from './location';
+import { locationFactors, marketAt, type Poi } from './location';
 import { MARKETS } from '../engine';
 
 /** Parcelle cadastrale prête pour le jeu. */
@@ -96,6 +96,9 @@ export interface District {
   /** Répartition des logements du marché et prix relatifs, tirés des ventes réelles (facultatif). */
   demandMix?: Market['demandMix'];
   typologyRatio?: Market['typologyRatio'];
+  houseRatio?: number;
+  usedHouse?: Market['usedHouse'];
+  usedFlatPerSdp?: number;
   parcels: DistrictParcel[];
   buildings: DistrictBuilding[];
   /** Équipements qui valorisent les terrains alentour (y compris juste hors du quartier). */
@@ -139,8 +142,8 @@ export function pointInRing(x: number, y: number, ring: [number, number][]): boo
 }
 
 /** Marché du quartier : marché de référence, complété par le mix et les prix par typologie des ventes réelles quand on les a. */
-export function marketOf(d: Pick<District, 'market' | 'demandMix' | 'typologyRatio' | 'marketAdjust'>): Market {
-  return { ...MARKETS[d.market], ...(d.marketAdjust ?? {}), ...(d.demandMix ? { demandMix: d.demandMix } : {}), ...(d.typologyRatio ? { typologyRatio: d.typologyRatio } : {}) };
+export function marketOf(d: Pick<District, 'market' | 'demandMix' | 'typologyRatio' | 'marketAdjust' | 'houseRatio' | 'usedHouse' | 'usedFlatPerSdp'>): Market {
+  return { ...MARKETS[d.market], ...(d.marketAdjust ?? {}), ...(d.houseRatio ? { houseRatio: d.houseRatio } : {}), ...(d.usedHouse ? { usedHouse: d.usedHouse } : {}), ...(d.usedFlatPerSdp ? { usedFlatPerSdp: d.usedFlatPerSdp } : {}), ...(d.demandMix ? { demandMix: d.demandMix } : {}), ...(d.typologyRatio ? { typologyRatio: d.typologyRatio } : {}) };
 }
 
 export const MIN_PARCEL_AREA = 20;
@@ -537,7 +540,7 @@ export function priceParcels(source: District, analyses?: ParcelAnalysis[]): { p
     ...d,
     parcels: d.parcels.map((p, i) => ({
       ...p,
-      basePrice: askingPriceFrom(p.id, all[i].best, p.area, config, p.locationFactor),
+      basePrice: askingPriceFrom(p.id, all[i].best, p.area, config, p.locationFactor, existingValue(p.existingSdp, p.area, parcelRule(p), marketAt(config.market, p.locationFactor))),
       issue: all[i].issue,
     })),
   };

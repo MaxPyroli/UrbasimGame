@@ -617,3 +617,7 @@ Limite : le P2P pur n'empêche pas un hôte malhonnête ; acceptable entre amis,
 Donnez-lui ce fichier et dites par exemple : « Reprends le moteur de `./moteur`, crée la structure du jeu, et
 commence par le bilan du promoteur (module pur, testé), à brancher sur `computeProject`. » Vérifiez que la session a
 bien accès au nouveau dépôt.
+
+### 0.13.0 — équilibre prix / finances / maisons
+- Type de logement `maison` (zones pavillonnaires = maisons seules), valeur du bâti existant en plancher du prix demandé (`existingValue`), stats DVF maisons, terrain remboursé au lancement (prêt 80 %), écart de prix demandé 0,85–1,25 × résiduel.
+- Mesuré à Sucy : pavillonnaire rentable au prix demandé 81 %, marge médiane 6,5 %, prix médian 576 k€ ; trésorerie de départ 1,5 M€.

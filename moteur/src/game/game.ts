@@ -161,8 +161,8 @@ export function appraise(parcel: Parcel, existingSdp: number, config: GameConfig
   const area = parcelArea(parcel);
   if (parcel.streetEdges.length === 0 || (rule && !rule.buildable)) return { best: 0, area };
   let best = 0;
-  for (let levels = 0; levels <= 5; levels++) for (const attic of [false, true]) {
-    const base: Criteria = { ...promoterCriteria(config.market), levels, attic };
+  for (const housing of housingTypesFor(rule)) for (let levels = 0; levels <= (housing === 'maison' ? 1 : 5); levels++) for (const attic of [false, true]) {
+    const base: Criteria = { ...promoterCriteria(config.market), levels, attic, housing };
     const project = computeProject(parcel, rule ? applyRule(base, rule) : base);
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
     const b = computeBilan({ project, market, landPrice: 0, existingSdp, params: { ...config.bilanParams, targetMargin: config.askMargin } });
@@ -172,23 +172,49 @@ export function appraise(parcel: Parcel, existingSdp: number, config: GameConfig
 }
 
 /**
+ * Types de logement qu'un promoteur étudie sur un terrain : maisons seules en quartier pavillonnaire, immeuble seul en zone
+ * dense (centre, renouvellement, activités), les deux ailleurs.
+ */
+export function housingTypesFor(rule: ZoneRule | null): ('collectif' | 'maison')[] {
+  if (!rule) return ['collectif'];
+  if (rule.housing === 'maison') return ['maison'];
+  return ['centre', 'renouvellement', 'activites'].includes(rule.family) ? ['collectif'] : ['collectif', 'maison'];
+}
+
+/**
+ * Valeur de ce qui est déjà sur le terrain, au prix du marché de l'ancien : le vendeur ne cède pas sa maison (ou son immeuble)
+ * moins cher. Quartier pavillonnaire : une maison de la commune, au prorata de la taille du terrain ; ailleurs : les surfaces
+ * existantes au prix de l'ancien. Sans bâti, 0 (le prix suit alors le projet).
+ */
+export function existingValue(existingSdp: number, area: number, rule: ZoneRule | null, market: Market): number {
+  if (existingSdp < 20) return 0;
+  if (rule && (rule.family === 'pavillonnaire' || rule.family === 'preservation')) {
+    const house = market.usedHouse ?? { price: (market.housingPerShab / 1.3) * 1.1 * 100, land: 520 };
+    return house.price * Math.min(1.5, Math.max(0.6, area / house.land));
+  }
+  return existingSdp * (market.usedFlatPerSdp ?? (market.housingPerShab / 1.3) * 0.9);
+}
+
+/**
  * Prix de départ d'un terrain : ce que le meilleur projet réalisable peut payer, multiplié par 0,9 à 1,5 selon le
  * terrain (attentes du vendeur) : certains sont de bonnes affaires, d'autres trop chers.
  */
 export function defaultAskingPrice(id: string, parcel: Parcel, existingSdp: number, config: GameConfig, locationFactor = 1, rule: ZoneRule | null = null): number {
   const { best, area } = appraise(parcel, existingSdp, config, locationFactor, rule);
-  return askingPriceFrom(id, best, area, config, locationFactor);
+  return askingPriceFrom(id, best, area, config, locationFactor, existingValue(existingSdp, area, rule, marketAt(config.market, locationFactor)));
 }
 
 /** Prix de départ à partir de l'estimation `appraise` déjà calculée (évite de la refaire). */
-export function askingPriceFrom(id: string, best: number, area: number, config: GameConfig, locationFactor = 1): number {
+export function askingPriceFrom(id: string, best: number, area: number, config: GameConfig, locationFactor = 1, existing = 0): number {
   const market = marketAt(config.market, locationFactor);
   let h = 0;
   for (const ch of id) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
-  const factor = 0.9 + 0.6 * ((h % 1000) / 999);
+  const factor = 0.85 + 0.4 * ((h % 1000) / 999);
   // Même sans projet rentable, un terrain vaut quelque chose : usage actuel, jardin, intérêt pour un voisin qui assemble.
   const floor = Math.max(MIN_PLOT_PRICE, 0.6 * area * market.landPerSdp * locationFactor);
-  return Math.max(Math.round(floor / 1000) * 1000, Math.round((best * factor) / 1000) * 1000);
+  // Un terrain bâti ne se vend pas moins cher que ce qu'il y a dessus (de 0,95 à 1,1 fois sa valeur).
+  const used = existing * (0.95 + 0.15 * ((h % 1000) / 999));
+  return Math.max(Math.round(floor / 1000) * 1000, Math.round((best * factor) / 1000) * 1000, Math.round(used / 1000) * 1000);
 }
 
 /** Marché au niveau de prix actuel : seuls les prix de vente suivent l'indice, pas les coûts. */
@@ -455,8 +481,9 @@ export function applyAction(state: GameState, action: Action): ActionResult {
   const landAndFees = c.land + c.acquisitionFees;
   const equityBuild = buildSpend * (1 - ls);
   const refund = landAndFees * ls;
-  if (player.cash < equityBuild) {
-    return fail(`fonds propres insuffisants : ${eur(equityBuild)} à réserver pour le chantier, ${eur(player.cash)} disponibles. La banque ne financera le terrain et les travaux qu’une fois ${Math.round(config.presaleThreshold * 100)} % des lots vendus sur plan.`);
+  // La banque refinance le terrain dès le lancement (crédit d'acquisition) ; les travaux ne sont financés qu'une fois les préventes atteintes.
+  if (player.cash + refund < equityBuild) {
+    return fail(`fonds propres insuffisants : ${eur(equityBuild)} à réserver pour le chantier, ${eur(player.cash + refund)} disponibles (trésorerie et terrain refinancé par la banque). La banque ne financera les travaux qu’une fois ${Math.round(config.presaleThreshold * 100)} % des lots vendus sur plan.`);
   }
 
   const lots = Math.max(1, project.indicators.dwellings + Math.ceil(project.indicators.sdpCommerce / 120) + Math.ceil(project.indicators.sdpOffice / 200));
@@ -487,7 +514,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     socialRevenue,
     phase: 'permis',
     financed: false,
-    landRefund: refund,
+    landRefund: 0, // déjà refinancé au lancement
     phaseElapsed: 0,
     lots,
     lotsSold: socialLots,
@@ -505,7 +532,7 @@ export function applyAction(state: GameState, action: Action): ActionResult {
     loanRepayment: ls * (landAndFees + buildSpend),
     equityInvested: landAndFees * (1 - ls) + equityBuild,
   };
-  let s = mapPlayer(state, player.id, (p) => ({ ...p, cash: p.cash - equityBuild }));
+  let s = mapPlayer(state, player.id, (p) => ({ ...p, cash: p.cash - equityBuild + refund }));
   s = mapPlot(s, plot.id, (p) => ({ ...p, projectId: run.id }));
   s = { ...s, projects: [...s.projects, run], nextProjectId: s.nextProjectId + 1 };
   if (terms?.zacId) s = zacOnLaunch(s, terms.zacId, run.sdp);
@@ -703,10 +730,10 @@ export function advanceRound(state: GameState): GameState {
     s = withEvent(s, { player: run.owner, kind: 'commune', tone: 'bad', popup: true, code: 'retard-livraison', ref: { project: run.id, plot: run.plotId }, text: `Livraison de ${run.id} avec ${rounds} trimestre${rounds > 1 ? 's' : ''} de retard sur l’engagement pris auprès de la commune : pénalités de ${eur(Math.min(0.15, rounds * 0.02) * run.bilan.revenue.total)}` });
   }
 
-  // Le seuil de préventes est atteint : la banque débloque le crédit et refinance le terrain, le chantier peut démarrer.
+  // Le seuil de préventes est atteint : la banque débloque le crédit des travaux, le chantier peut démarrer.
   for (const p of released) {
     s = credit(s, p.owner, p.landRefund);
-    s = withEvent(s, { player: p.owner, kind: 'operation', tone: 'good', ref: { project: p.id, plot: p.plotId }, text: `La banque débloque le crédit de ${p.id} : ${Math.round(soldShare(p) * 100)} % des lots vendus sur plan, ${eur(p.landRefund)} de terrain refinancés, chantier lancé` });
+    s = withEvent(s, { player: p.owner, kind: 'operation', tone: 'good', ref: { project: p.id, plot: p.plotId }, text: `La banque débloque le crédit de ${p.id} : ${Math.round(soldShare(p) * 100)} % des lots vendus sur plan, crédit des travaux débloqué, chantier lancé` });
   }
 
   for (const p of closing) {

@@ -56,7 +56,7 @@ export function buildRear(input: RearInput): { rear: RearBuilding | null; reason
   const local: MultiPolygon = usable.map((poly) => poly.map((r) => frame.fromRing(r)));
   const cap = input.areaCap;
   if (cap !== null && cap < 30) return { rear: null, reason: 'l’emprise au sol maximale est déjà atteinte par le bâtiment sur rue' };
-  const gen = generateFootprint(local, frame, { shape: c.footprintShape, maxDepth: c.maxDepth, minWidth: c.minWidth, areaCap: cap, placement: 'fond' });
+  const gen = generateFootprint(local, frame, { shape: c.footprintShape, maxDepth: c.maxDepth, minWidth: c.minWidth, areaCap: capBuilding(cap, c), placement: 'fond', compact: c.maxBuildingArea != null });
   if (!gen.ring || ringArea(gen.ring) < 30 || minWidth(gen.ring) < c.minWidth) return { rear: null, reason: gen.reason ?? 'emprise arrière trop étroite' };
   // Accès : une allée libre de 3,5 m le long du bâtiment sur rue (d'un côté ou de l'autre), sinon un porche.
   const pb = bbox(frame.toRing(input.parcel));
@@ -67,6 +67,9 @@ export function buildRear(input: RearInput): { rear: RearBuilding | null; reason
   const { fpEdges, program } = secondaryProgram(gen.ring, 2, edges, c, a);
   return { rear: { ring: gen.ring, fpEdges, program, access, porchArea } };
 }
+
+/** Plafond de surface d'un bâtiment : le plus petit du plafond restant (emprise, densité) et de la taille maximale d'un bâtiment (maisons). */
+export const capBuilding = (cap: number | null, c: Pick<Criteria, 'maxBuildingArea'>): number | null => (c.maxBuildingArea == null ? cap : cap === null ? c.maxBuildingArea : Math.min(cap, c.maxBuildingArea));
 
 /** Niveaux (R+x) des bâtiments autres que celui sur rue. */
 export const secondaryLevels = (c: Criteria) => Math.max(0, c.secondLevels === null ? c.levels : Math.min(c.secondLevels, c.levels));
@@ -106,7 +109,7 @@ export function buildSecondary(input: RearInput & { maxBuildings: number }): { b
     const cap = input.areaCap === null ? null : input.areaCap - used;
     if (usable.length === 0 || (cap !== null && cap < MIN_EXTRA_AREA)) break;
     const local: MultiPolygon = usable.map((poly) => poly.map((r) => frame.fromRing(r)));
-    const gen = generateFootprint(local, frame, { shape: c.footprintShape, maxDepth: c.maxDepth, minWidth: c.minWidth, areaCap: cap, placement: 'auto' });
+    const gen = generateFootprint(local, frame, { shape: c.footprintShape, maxDepth: c.maxDepth, minWidth: c.minWidth, areaCap: capBuilding(cap, c), placement: 'auto', compact: c.maxBuildingArea != null });
     if (!gen.ring || ringArea(gen.ring) < MIN_EXTRA_AREA || minWidth(gen.ring) < c.minWidth) break;
     const { fpEdges, program } = secondaryProgram(gen.ring, n, edges, c, a);
     buildings.push({ ring: gen.ring, fpEdges, program, access: 'allee', porchArea: 0 });

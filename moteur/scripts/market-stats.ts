@@ -22,7 +22,8 @@ if (!stats) {
   console.error('aucune vente d’appartement trouvée pour cette commune : le marché de référence reste en place');
   process.exit(1);
 }
-const { demandMix, typologyRatio } = marketMix(stats);
-writeFileSync(file, JSON.stringify({ ...d, marketStats: stats, demandMix, typologyRatio, ...(adjust ? { marketAdjust: deriveMarketAdjust(MARKETS[d.market], stats) } : {}) }));
+const mix = marketMix(stats);
+const { demandMix, typologyRatio } = mix;
+writeFileSync(file, JSON.stringify({ ...d, marketStats: stats, ...mix, ...(adjust ? { marketAdjust: deriveMarketAdjust(MARKETS[d.market], stats) } : {}) }));
 console.log(`${stats.source} : ${stats.sales} ventes, ${stats.pricePerM2} €/m²`);
 for (const t of ['T1', 'T2', 'T3', 'T4', 'T5'] as const) console.log(`  ${t} : ${(demandMix[t] * 100).toFixed(0)} % des ventes · ${stats.byTypology[t].area} m² · ${stats.byTypology[t].pricePerM2} €/m² · prix relatif ×${typologyRatio[t]}`);

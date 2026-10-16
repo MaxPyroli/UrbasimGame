@@ -17,6 +17,11 @@ export interface TypologySales {
 }
 
 /** Statistiques de marché d'une commune, tirées des ventes réelles (DVF) : aide à choisir la répartition des logements. */
+/** Une maison coûte un peu moins cher à construire qu'un logement d'immeuble (ni ascenseur, ni parties communes), mais il faut viabiliser chaque lot. */
+export const HOUSE_BUILD_FACTOR = 0.9;
+export const HOUSE_SERVICES_COST = 12_000;
+export const DEFAULT_HOUSE_RATIO = 1.1;
+
 export interface MarketStats {
   /** Origine et période, pour l'affichage (ex. « DVF Sucy-en-Brie 2022-2025 »). */
   source: string;
@@ -26,6 +31,8 @@ export interface MarketStats {
   pricePerM2: number;
   byYear: { year: number; pricePerM2: number; sales: number }[];
   byTypology: Record<Typology, TypologySales>;
+  /** Maisons vendues dans la commune (ancien) : prix et terrain médians, prix au m² bâti. */
+  house?: { sales: number; price: number; area: number; land: number; pricePerM2: number };
 }
 
 export interface Market {
@@ -55,6 +62,12 @@ export interface Market {
    * C'est ce qui rend les très petites opérations déficitaires.
    */
   fixedCostPerOperation: number;
+  /** Maison existante type de la commune (prix de vente médian et terrain médian, ventes réelles) : valeur d'une parcelle bâtie en quartier pavillonnaire. */
+  usedHouse?: { price: number; land: number };
+  /** Prix de l'ancien au m² de SDP (immeubles existants). */
+  usedFlatPerSdp?: number;
+  /** Prix d'une maison rapporté à celui d'un appartement neuf au m² (1 = pareil) : tiré des ventes réelles, 1,1 à défaut. */
+  houseRatio?: number;
   /** Répartition des logements que le marché absorbe (parts T1 à T5, somme 1) : mix proposé par défaut. */
   demandMix?: Record<Typology, number>;
   /** Prix au m² de chaque typologie rapporté au prix moyen (1 = prix moyen) : les petits logements se vendent plus cher au m². */
@@ -309,7 +322,8 @@ export function computeBilan(input: BilanInput): Bilan {
   const social = Math.min(1, Math.max(0, input.socialShare ?? 0));
   const premium = QUALITY_PREMIUM[q] * (1 + (input.salesPremium ?? 0));
   // Les logements sociaux sont cédés en bloc à un bailleur, sans prime de qualité.
-  const housing = ind.shab * market.housingPerShab * typologyPriceFactor(project, market) * ((1 - social) * premium + social * SOCIAL_PRICE_RATIO);
+  const house = project.housing === 'maison';
+  const housing = ind.shab * market.housingPerShab * (house ? (market.houseRatio ?? DEFAULT_HOUSE_RATIO) : typologyPriceFactor(project, market)) * ((1 - social) * premium + social * SOCIAL_PRICE_RATIO);
   const commerce = sumLevels(project, 'commerce') * market.commercePerSdp * premium;
   const office = sumLevels(project, 'bureaux') * market.officePerSdp * premium;
   const parking = pk.basement * market.parkingBasementSpace + (pk.rdc + pk.surface) * market.parkingOtherSpace;
@@ -317,12 +331,12 @@ export function computeBilan(input: BilanInput): Bilan {
 
   // Coûts directs
   const works = QUALITY_COST[q] * (
-    ind.sdpHousing * market.buildHousingPerSdp +
+    ind.sdpHousing * market.buildHousingPerSdp * (house ? HOUSE_BUILD_FACTOR : 1) +
     ind.sdpCommerce * market.buildCommercePerSdp +
     ind.sdpOffice * market.buildOfficePerSdp +
     pk.basement * market.buildBasementSpace +
     (pk.rdc + pk.surface) * market.buildOtherSpace +
-    pk.offsite * market.offsiteParkingPlace);
+    pk.offsite * market.offsiteParkingPlace) + (house ? ind.dwellings * HOUSE_SERVICES_COST : 0);
   const demolition = (input.existingSdp ?? 0) * market.demolitionPerSdp;
   const acquisitionFees = landPrice * p.acquisitionFeeRate;
   const design = works * p.designFeeRate;

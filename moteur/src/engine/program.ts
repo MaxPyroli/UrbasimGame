@@ -110,7 +110,9 @@ function levelLabel(i: number, kind: LevelPlan['kind']): string {
 export function computeProgram(input: ProgramInput): ProgramResult {
   const { footprint, footprintEdges, atticFootprint, criteria: c, assumptions: a, rampLoss } = input;
   const count = totalLevelCount(c);
-  const hasVertical = count > 1;
+  // Maisons : un logement par bâtiment, ni escalier commun, ni ascenseur, ni hall, ni local vélos ou poubelles.
+  const house = c.housing === 'maison';
+  const hasVertical = count > 1 && !house;
   const hasLift = hasVertical && count - 1 >= a.liftFromLevel;
   const coreArea = hasVertical ? a.coreStairs + (hasLift ? a.coreLift : 0) + a.landing : 0;
   const groundUse = effectiveGroundUse(c);
@@ -130,7 +132,7 @@ export function computeProgram(input: ProgramInput): ProgramResult {
     for (let i = 0; i < count; i++) {
       const isAttic = c.attic && i === count - 1;
       const kind: LevelPlan['kind'] = isAttic ? 'attique' : i === 0 ? 'rdc' : 'etage';
-      const use: Use = i === 0 ? groundUse : c.upperUse;
+      const use: Use = house ? 'logement' : i === 0 ? groundUse : c.upperUse;
       const ring = isAttic && atticFootprint ? atticFootprint : footprint;
       const z0 = i === 0 ? 0 : c.groundFloorHeight + (i - 1) * c.floorHeight;
       const z1 = i === 0 ? c.groundFloorHeight : z0 + c.floorHeight;
@@ -157,6 +159,8 @@ export function computeProgram(input: ProgramInput): ProgramResult {
       if (use === 'parking') {
         plan.parkingSpaces = Math.floor(Math.max(0, inner - core - services) / a.spaceGross);
         groundParkingCapacity = plan.parkingSpaces;
+      } else if (use === 'logement' && house) {
+        // le logement de la maison est créé après la boucle (surface de tous ses niveaux)
       } else if (use === 'logement') {
         const units = allocateLevel(usable * a.shabRatio, maxPerLevel, totals, mix, a.typologyArea);
         for (const u of units) {
@@ -168,6 +172,16 @@ export function computeProgram(input: ProgramInput): ProgramResult {
       levels.push(plan);
     }
 
+    if (house) {
+      const shab = levels.filter((l) => l.use === 'logement').reduce((s, l) => s + l.usable, 0) * a.shabRatio;
+      if (shab >= 20) {
+        const t = a.typologyArea;
+        const typology: Typology = shab < (t.T1 + t.T2) / 2 ? 'T1' : shab < (t.T2 + t.T3) / 2 ? 'T2' : shab < (t.T3 + t.T4) / 2 ? 'T3' : shab < (t.T4 + t.T5) / 2 ? 'T4' : 'T5';
+        dwellings.push({ levelId: levels[0].id, typology, area: shab });
+        totals[typology]++;
+        levels[0].dwellings = 1;
+      }
+    }
     const nDw = dwellings.length;
     const officeSdp = levels.filter((l) => l.use === 'bureaux').reduce((s, l) => s + l.sdp, 0);
     let nextBike = 0;

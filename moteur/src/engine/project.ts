@@ -16,7 +16,7 @@ import {
 import { buildEnvelope, classifyFootprintEdges, computeEdges, inwardNormal, makeFrame, primaryStreetEdge } from './layout';
 import { computeParkingAccess } from './access';
 import { computeParking, requiredParking } from './parking';
-import { buildSecondary, secondaryLevels, type RearBuilding } from './rear';
+import { buildSecondary, capBuilding, secondaryLevels, type RearBuilding } from './rear';
 import { buildingHeight, computeProgram, effectiveGroundUse } from './program';
 import type {
   Assumptions,
@@ -54,6 +54,7 @@ function atticRing(footprint: Ring, frame: Frame, setback: number, minArea: numb
 export function emptyProject(origin: LonLat, parcelRing: Ring, c: Criteria): Project {
   const zero: Record<Typology, number> = { T1: 0, T2: 0, T3: 0, T4: 0, T5: 0 };
   return {
+    housing: c.housing ?? 'collectif',
     origin,
     parcelRing,
     parcelArea: ringArea(parcelRing),
@@ -177,7 +178,7 @@ function computeProjectCore(parcel: Parcel, criteria: Criteria, assumptions: Ass
   const streetFronts = [...new Set(parcel.streetEdges)]
     .filter((i) => i !== mainStreet && edges[i] && edges[i].kind === 'voie' && edges[i].length >= c.minWidth)
     .map((i) => ({ a: edges[i].a, b: edges[i].b, n: inwardNormal(ring, i), setback: edges[i].setback }));
-  const fpOptions = (cap: number | null) => ({ shape: c.footprintShape, maxDepth: c.maxDepth, minWidth: c.minWidth, areaCap: cap, placement: c.placement, streetFronts });
+  const fpOptions = (cap: number | null) => ({ shape: c.footprintShape, maxDepth: c.maxDepth, minWidth: c.minWidth, areaCap: capBuilding(cap, c), placement: c.placement, streetFronts, compact: c.maxBuildingArea != null });
   let fp = generateFootprint(envelope, frame, fpOptions(areaCap));
   let limitedBy = fp.limitedBy;
   let footprint: Ring | null = fp.ring;

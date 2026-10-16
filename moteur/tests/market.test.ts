@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_ASSUMPTIONS, DEFAULT_CRITERIA, LocalProjection, MARKETS, computeBilan, computeProject, mixFit, promoterCriteria, typologyPriceFactor, type Parcel, type Typology, type Vec2 } from '../src/engine';
 import { marketMix, marketStats, parseDvf, type DvfSale } from '../src/app/dvf';
 import { marketOf } from '../src/game';
+import { ZONE_RULES } from '../src/game';
 
 const HEAD = 'id_mutation,nature_mutation,valeur_fonciere,type_local,surface_reelle_bati,nombre_pieces_principales';
 const csv = (rows: string[]) => [HEAD, ...rows].join('\n');
@@ -159,5 +160,67 @@ describe('marché local dérivé des ventes', () => {
     const base = MARKETS['ville-moyenne'];
     const few = deriveMarketAdjust(base, stats(700, 3));
     expect(few.housingPerShab!).toBeGreaterThan(base.housingPerShab * 0.7);
+  });
+});
+
+import { HOUSE_MAX_AREA, applyRule } from '../src/game';
+
+describe('ensembles de maisons', () => {
+  const house = (extra = {}) => applyRule({ ...DEFAULT_CRITERIA, secondBuilding: true, levels: 1, ...extra }, ZONE_RULES.pavillonnaire);
+  const plot = rect(24, 40); // 960 m²
+
+  it('le quartier pavillonnaire impose des maisons, le promoteur ne peut pas y faire d’immeuble', () => {
+    expect(house().housing).toBe('maison');
+    expect(applyRule({ ...DEFAULT_CRITERIA, housing: 'collectif' }, ZONE_RULES.pavillonnaire).housing).toBe('maison');
+    expect(applyRule({ ...DEFAULT_CRITERIA }, ZONE_RULES.mixte).housing).toBe('collectif');
+    expect(applyRule({ ...DEFAULT_CRITERIA, housing: 'maison' }, ZONE_RULES.mixte).housing).toBe('maison');
+  });
+
+  it('plusieurs maisons sur un grand terrain, chacune de 75 m² d’emprise au plus, un logement par maison', () => {
+    const p = computeProject(plot, house());
+    expect(p.housing).toBe('maison');
+    expect(p.indicators.buildings).toBeGreaterThanOrEqual(2);
+    expect(p.indicators.dwellings).toBe(p.indicators.buildings);
+    const rings = [p.footprint!, p.rearFootprint, ...p.extraFootprints].filter(Boolean) as [number, number][][];
+    for (const r of rings) {
+      let a = 0;
+      r.forEach((v, i) => { const w = r[(i + 1) % r.length]; a += v[0] * w[1] - w[0] * v[1]; });
+      expect(Math.abs(a / 2)).toBeLessThanOrEqual(HOUSE_MAX_AREA + 1);
+    }
+    // ni escalier commun ni ascenseur, deux places par maison
+    expect(p.indicators.hasLift).toBe(false);
+    expect(p.levels.every((l) => l.core === 0)).toBe(true);
+    expect(p.parking.required).toBe(2 * p.indicators.dwellings);
+    // chaque maison fait une surface de maison (de 60 à 140 m² habitables)
+    for (const d of p.dwellings) {
+      expect(d.area).toBeGreaterThan(60);
+      expect(d.area).toBeLessThan(140);
+    }
+  });
+
+  it('l’emprise totale respecte celle du quartier pavillonnaire', () => {
+    const p = computeProject(plot, house());
+    expect(p.indicators.coverage).toBeLessThanOrEqual(ZONE_RULES.pavillonnaire.maxCoverage + 1e-3);
+  });
+
+  it('une maison coûte moins cher au m² qu’un immeuble, mais se vend plus cher ; chaque lot est viabilisé', () => {
+    const market = { ...MARKETS['grande-couronne'], houseRatio: 1.2 };
+    const h = computeProject(plot, house());
+    const b = computeBilan({ project: h, market, landPrice: 300_000 });
+    const sameAsApartments = computeBilan({ project: h, market: { ...market, houseRatio: 1 }, landPrice: 300_000 });
+    expect(b.revenue.housing).toBeCloseTo(sameAsApartments.revenue.housing * 1.2, 0);
+    // à projet égal, la maison coûte 10 % de moins en construction mais chaque lot est viabilisé
+    const asBlock = computeBilan({ project: { ...h, housing: 'collectif' }, market: { ...market, houseRatio: 1 }, landPrice: 300_000 });
+    expect(b.costs.works - asBlock.costs.works).toBeCloseTo(-0.1 * h.indicators.sdpHousing * market.buildHousingPerSdp + h.indicators.dwellings * 12_000, 0);
+  });
+
+  it('un petit ensemble de maisons est rentable sur un terrain pavillonnaire à prix de terrain pavillonnaire', () => {
+    const market = { ...MARKETS['grande-couronne'], houseRatio: 1.15, typologyRatio: undefined };
+    const p = computeProject(plot, house());
+    // un terrain de 960 m² pavillonnaire vaut environ 450 €/m² : 430 k€
+    const b = computeBilan({ project: p, market, landPrice: 430_000 });
+    expect(p.indicators.dwellings).toBeGreaterThanOrEqual(3);
+    expect(b.margin).toBeGreaterThan(0);
+    expect(b.marginRate).toBeGreaterThan(0.08);
   });
 });

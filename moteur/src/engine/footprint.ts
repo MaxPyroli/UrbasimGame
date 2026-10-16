@@ -34,6 +34,8 @@ export interface FootprintOptions {
   areaCap: number | null;
   /** Position dans la profondeur : côté rue, en fond de parcelle, ou la meilleure des deux. */
   placement: Placement;
+  /** Emprise la plus compacte possible (maisons : un volume proche du carré plutôt qu'une bande étroite et longue). */
+  compact?: boolean;
   /** Autres rues du terrain (angle) : l'emprise « adaptée » les longe aussi, sur la même profondeur maximale. */
   streetFronts?: StreetFront[];
 }
@@ -171,7 +173,8 @@ function largestRectangle(comp: PolygonRings, opts: FootprintOptions): { ring: R
           let w = run;
           if (cap !== null) w = Math.min(w, Math.floor(cap / (rows * res * res)));
           const score = w * rows;
-          if (score > best.score * 1.005 || (score >= best.score * 0.995 && w > best.w)) {
+          const tie = score >= best.score * 0.995 && (opts.compact ? w + rows < best.w + best.rows : w > best.w);
+          if (score > best.score * 1.005 || tie) {
             best = { score, i0: runStart, w, j0, rows };
           }
           run = 0;

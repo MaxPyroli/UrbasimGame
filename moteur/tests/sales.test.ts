@@ -57,11 +57,11 @@ describe('marché de l’immobilier : les logements se vendent au fil des trimes
     expect(Math.abs(netWorth(s, 'a') - worth)).toBeLessThan(worth * 0.02);
   });
 
-  it('au seuil de préventes la banque débloque le crédit : événement, refinancement du terrain, chantier', () => {
+  it('le terrain est refinancé dès le lancement ; au seuil de préventes la banque débloque le crédit des travaux : événement, chantier', () => {
     let s = launch(newGame({ salesDemand: 10_000 }), 'a', 'T1');
     const run = s.projects[0];
     expect(run.financed).toBe(false);
-    expect(run.landRefund).toBeGreaterThan(0);
+    expect(run.landRefund).toBe(0); // refinancé au lancement
     for (let i = 0; i < run.permitRounds; i++) s = both(s);
     expect(s.projects[0].financed).toBe(true);
     expect(s.projects[0].phase).toBe('chantier');

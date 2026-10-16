@@ -14,6 +14,7 @@ import {
   type Criteria,
   type FootprintShape,
   type Parcel,
+  type HousingType,
   type Typology,
   mixFit,
   typologyPriceFactor,
@@ -22,6 +23,7 @@ import {
 } from '../../moteur/src/engine';
 import {
   ISSUE_MESSAGE,
+  housingTypesFor,
   DIFFICULTIES,
   campaignConfig,
   bidProblem,
@@ -200,7 +202,7 @@ const SEEN_KEY = 'urbasim-seen-v1';
 let seenLog = Math.max(0, Math.round(+(localStorage_get(SEEN_KEY) ?? 0)) || 0);
 type NotifFilter = 'tout' | 'alea' | 'commune' | 'operation' | 'terrain';
 let notifFilter: NotifFilter = 'tout';
-let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number; placement: Placement; shape: FootprintShape; second: boolean; secondLevels: number | null; mix: Record<Typology, number> | null } = { levels: 3, attic: false, parking: 'auto', depth: 12, placement: 'auto', shape: 'adapte', second: true, secondLevels: null, mix: null };
+let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number; placement: Placement; shape: FootprintShape; second: boolean; secondLevels: number | null; mix: Record<Typology, number> | null; housing: HousingType } = { levels: 3, attic: false, parking: 'auto', depth: 12, placement: 'auto', shape: 'adapte', second: true, secondLevels: null, mix: null, housing: 'collectif' };
 
 function save() {
   try {
@@ -239,7 +241,7 @@ const plotById = (id: string) => {
   return idx.get(id);
 };
 const quarterLabel = (round: number) => `T${(round % 4) + 1} ${2027 + Math.floor(round / 4)}`;
-const criteria = (): Criteria => ({ ...promoterCriteria(state.config.market), ...(form.mix ? { mix: form.mix } : {}), levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth, placement: form.placement, footprintShape: form.shape, secondBuilding: form.second, secondLevels: form.secondLevels });
+const criteria = (): Criteria => ({ ...promoterCriteria(state.config.market), ...(form.mix ? { mix: form.mix } : {}), levels: form.levels, attic: form.attic, parkingStrategy: form.parking, maxDepth: form.depth, placement: form.placement, footprintShape: form.shape, secondBuilding: form.second, secondLevels: form.secondLevels, housing: form.housing });
 
 /** Passe un trimestre sans rien afficher ; retourne les nouvelles du journal qui concernent le joueur. */
 function advanceOne(): { mine: string[]; phases: string } {
@@ -2145,6 +2147,8 @@ function planBilan(p: Plot, proj: ReturnType<typeof computeProject>, landPrice: 
 
 /** Cherche le projet le plus rentable sans erreur (R+0 à R+8, avec ou sans attique, stationnement automatique). */
 interface BestPlan {
+  /** Type de logement du meilleur projet. */
+  housing: HousingType;
   levels: number;
   attic: boolean;
   margin: number;
@@ -2162,23 +2166,23 @@ function bestForm(p: Plot, owned: boolean): BestPlan | null {
   const landPrice = owned ? p.paid / (1 + state.config.bilanParams.acquisitionFeeRate) : landDraft(p);
   let best: BestPlan | null = null;
   const ob = owned ? p.obligation : undefined;
-  for (let levels = 0; levels <= 8; levels++) {
+  for (const housing of ob ? (['collectif'] as const) : housingTypesFor(ruleOf(p))) for (let levels = 0; levels <= (housing === 'maison' ? 1 : 8); levels++) {
     for (const attic of [false, true]) {
       if (ob && levels + (attic ? 1 : 0) > ob.maxLevels) continue;
-      const proj = computeProject(p.parcel, plotCriteria(p, { ...criteria(), levels, attic, parkingStrategy: 'auto' }, owned));
+      const proj = computeProject(p.parcel, plotCriteria(p, { ...criteria(), levels, attic, housing, parkingStrategy: 'auto' }, owned));
       if (!proj.footprint || proj.checks.some((c) => c.status === 'error')) continue;
       const b = planBilan(p, proj, landPrice, owned);
-      if (!best || b.margin > best.margin) best = { levels, attic, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal, buildings: proj.indicators.buildings };
+      if (!best || b.margin > best.margin) best = { levels, attic, housing, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal, buildings: proj.indicators.buildings };
     }
   }
   // Plusieurs bâtiments ne sont pas toujours plus rentables (allée ou porche, distance entre bâtiments) : on compare avec un seul.
   if (best && best.buildings > 1 && form.second) {
     for (const levels of [best.levels - 1, best.levels, best.levels + 1]) {
       if (levels < 0 || (ob && levels > ob.maxLevels)) continue;
-      const proj = computeProject(p.parcel, plotCriteria(p, { ...criteria(), levels, attic: levels === best.levels && best.attic, parkingStrategy: 'auto', secondBuilding: false }, owned));
+      const proj = computeProject(p.parcel, plotCriteria(p, { ...criteria(), levels, attic: levels === best.levels && best.attic, housing: best.housing, parkingStrategy: 'auto', secondBuilding: false }, owned));
       if (!proj.footprint || proj.checks.some((c) => c.status === 'error')) continue;
       const b = planBilan(p, proj, landPrice, owned);
-      if (b.margin > best.margin) best = { levels, attic: levels === best.levels && best.attic, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal, buildings: 1, single: true };
+      if (b.margin > best.margin) best = { levels, attic: levels === best.levels && best.attic, housing: best.housing, margin: b.margin, marginRate: b.marginRate, maxLand: b.maxLandPrice, dwellings: proj.indicators.dwellings, sdp: proj.indicators.sdpTotal, buildings: 1, single: true };
     }
   }
   return best;
@@ -2235,7 +2239,7 @@ function plotBrief(p: Plot, owned: boolean): string {
   if (!p.issue && !p.projectId && !p.municipal) {
     const b = bestBrief(p, owned);
     best = b
-      ? `<div class="brief ${b.margin >= 0 ? 'ok' : 'ko'}"><b>Meilleur projet</b> : R+${b.levels}${b.attic ? ' + attique' : ''}${b.buildings > 1 ? `, ${b.buildings} bâtiments` : ''}, ${b.dwellings} logements · marge <b class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)}</b> (${pct(b.marginRate)} du CA) · le terrain pourrait valoir jusqu’à ${eur(b.maxLand)}${price}</div>`
+      ? `<div class="brief ${b.margin >= 0 ? 'ok' : 'ko'}"><b>Meilleur projet</b> : ${b.housing === 'maison' ? 'maisons, ' : ''}R+${b.levels}${b.attic ? ' + attique' : ''}${b.buildings > 1 ? `, ${b.buildings} bâtiments` : ''}, ${b.dwellings} logements · marge <b class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)}</b> (${pct(b.marginRate)} du CA) · le terrain pourrait valoir jusqu’à ${eur(b.maxLand)}${price}</div>`
       : `<div class="brief ko"><b>Aucun projet rentable</b> avec les réglages actuels sur ce terrain seul.${price}</div>`;
   } else if (price) best = `<div class="brief"><span class="muted">Prix :</span>${price}</div>`;
   return `${rules ? `<div class="rules">${rules}</div>` : ''}${best}`;
@@ -2271,6 +2275,7 @@ let mixOpen = false;
  * change (prix moyen de vente, rapidité des ventes).
  */
 function mixFold(proj: ReturnType<typeof computeProject>): string {
+  if (proj.housing === 'maison') return `<div class="muted" style="font-size:12px">${proj.indicators.dwellings} maison${proj.indicators.dwellings > 1 ? 's' : ''} de ${Math.round(proj.indicators.avgDwellingArea)} m² habitables en moyenne, vendues au prix des maisons de la commune${state.config.market.houseRatio ? ` (×${state.config.market.houseRatio.toFixed(2).replace('.', ',')} le prix d’un appartement neuf)` : ''}.</div>`;
   const market = state.config.market;
   const stats = district.marketStats;
   const mix = form.mix ?? market.demandMix ?? criteria().mix;
@@ -2301,7 +2306,10 @@ function projectForm(p: Plot, owned: boolean): string {
   const ob = obligationOf(p, owned);
   // Hauteur permise (attique compris) : PLU plus bonus de la ZAC, sans dépasser l'engagement pris.
   const totalCap = Math.min(rule ? rule.maxLevels + (ob?.programme.bonusLevels ?? 0) : 11, ob ? ob.maxLevels : 99);
-  const maxLv = Math.max(0, rule || ob ? totalCap - (form.attic ? 1 : 0) : 10);
+  // Type de logement : maisons imposées en quartier pavillonnaire, immeuble imposé par un appel d'offres ou en zone dense.
+  const types = ob ? (['collectif'] as HousingType[]) : housingTypesFor(rule);
+  if (!types.includes(form.housing)) form.housing = types[0];
+  const maxLv = Math.max(0, Math.min(rule || ob ? totalCap - (form.attic ? 1 : 0) : 10, form.housing === 'maison' ? 1 : 99));
   if (form.levels > maxLv) form.levels = maxLv;
   const proj = computeProject(p.parcel, plotCriteria(p, criteria(), owned));
   drawOverlay(proj);
@@ -2322,6 +2330,7 @@ function projectForm(p: Plot, owned: boolean): string {
       <label class="f" style="margin:0" title="L'attique compte comme un niveau dans la hauteur maximale de la zone">attique <input type="checkbox" id="f-attic" ${form.attic ? 'checked' : ''} ${(rule || ob) && totalCap - 1 < form.levels ? 'disabled' : ''}/></label>
       <button id="best" title="Teste les niveaux autorisés par le PLU, avec ou sans attique, et choisit le plus rentable sans erreur">Meilleur projet</button>
     </div>
+    ${types.length > 1 ? `<label class="f" title="Immeuble collectif : escalier, ascenseur, appartements. Maisons : un logement par maison (R+1, 75 m² d'emprise au plus), plusieurs maisons sur le terrain, un jardin chacune">Type de logement<select id="f-housing"><option value="collectif" ${form.housing === 'collectif' ? 'selected' : ''}>immeuble collectif</option><option value="maison" ${form.housing === 'maison' ? 'selected' : ''}>maisons (ensemble)</option></select></label>` : `<div class="muted" style="font-size:12px">${types[0] === 'maison' ? 'Quartier pavillonnaire : ensembles de maisons seulement.' : 'Immeuble collectif.'}</div>`}
     ${secondControl}
     ${fold('Options', options)}
     ${mixFold(proj)}`;
@@ -2547,8 +2556,9 @@ function bindSelection() {
       form.levels = found.levels;
       form.attic = found.attic;
       if (found.single) form.second = false;
+      form.housing = found.housing;
       form.parking = 'auto';
-      toast(`Meilleur projet : R+${found.levels}${found.attic ? ' avec attique' : ''}${found.buildings > 1 ? `, ${found.buildings} bâtiments` : found.single ? ', un seul bâtiment' : ''}, ${eur(found.margin)} de marge`);
+      toast(`Meilleur projet : ${found.housing === 'maison' ? 'maisons, ' : ''}R+${found.levels}${found.attic ? ' avec attique' : ''}${found.buildings > 1 ? `, ${found.buildings} bâtiments` : found.single ? ', un seul bâtiment' : ''}, ${eur(found.margin)} de marge`);
       renderAll();
     };
   const pf = side.querySelector<HTMLSelectElement>('#pfilter');
@@ -2561,6 +2571,8 @@ function bindSelection() {
   if (lv) lv.onchange = () => ((form.levels = +lv.value), renderAll());
   const at = side.querySelector<HTMLInputElement>('#f-attic');
   if (at) at.onchange = () => ((form.attic = at.checked), renderAll());
+  const hs = side.querySelector<HTMLSelectElement>('#f-housing');
+  if (hs) hs.onchange = () => ((form.housing = hs.value as HousingType), renderAll());
   const sec = side.querySelector<HTMLInputElement>('#f-second');
   if (sec) sec.onchange = () => ((form.second = sec.checked), renderAll());
   const secLv = side.querySelector<HTMLSelectElement>('#f-second-levels');

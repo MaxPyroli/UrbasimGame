@@ -73,8 +73,43 @@ export function parseDvf(csv: string, year: number): DvfSale[] {
   return sales;
 }
 
-/** Statistiques de marché d'une commune à partir de ses ventes d'appartements. */
-export function marketStats(sales: DvfSale[], source: string): MarketStats {
+export interface DvfHouse {
+  year: number;
+  price: number;
+  area: number;
+  land: number;
+}
+
+/** Ventes simples d'une maison (un seul local d'habitation, de 40 à 250 m² sur 100 à 2 000 m² de terrain). */
+export function parseDvfHouses(csv: string, year: number): DvfHouse[] {
+  const lines = csv.split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return [];
+  const head = splitCsv(lines[0]);
+  const col = (name: string) => head.indexOf(name);
+  const ci = { id: col('id_mutation'), nature: col('nature_mutation'), value: col('valeur_fonciere'), type: col('type_local'), area: col('surface_reelle_bati'), land: col('surface_terrain') };
+  if (Object.values(ci).some((i) => i < 0)) return [];
+  const byMutation = new Map<string, string[][]>();
+  for (const line of lines.slice(1)) {
+    const f = splitCsv(line);
+    if (f[ci.nature] !== 'Vente') continue;
+    const list = byMutation.get(f[ci.id]) ?? [];
+    list.push(f);
+    byMutation.set(f[ci.id], list);
+  }
+  const out: DvfHouse[] = [];
+  for (const rows of byMutation.values()) {
+    const homes = rows.filter((f) => (f[ci.type] === 'Appartement' || f[ci.type] === 'Maison') && f[ci.area]);
+    if (homes.length !== 1 || homes[0][ci.type] !== 'Maison') continue;
+    const price = Number(homes[0][ci.value]);
+    const area = Number(homes[0][ci.area]);
+    const land = rows.reduce((s, f) => s + (Number(f[ci.land]) || 0), 0);
+    if (price >= 50000 && area >= 40 && area <= 250 && land >= 100 && land <= 2000) out.push({ year, price, area, land });
+  }
+  return out;
+}
+
+/** Statistiques de marché d'une commune à partir de ses ventes d'appartements (et de maisons). */
+export function marketStats(sales: DvfSale[], source: string, houses: DvfHouse[] = []): MarketStats {
   const typ = (s: DvfSale): Typology => TYPOLOGIES[Math.min(5, Math.max(1, s.rooms)) - 1];
   const total = sales.length;
   const overall = median(sales.map((s) => s.pricePerM2));
@@ -101,6 +136,7 @@ export function marketStats(sales: DvfSale[], source: string): MarketStats {
       return { year, pricePerM2: Math.round(median(g.map((s) => s.pricePerM2))), sales: g.length };
     }),
     byTypology,
+    ...(houses.length >= 5 ? { house: { sales: houses.length, price: Math.round(median(houses.map((h) => h.price))), area: Math.round(median(houses.map((h) => h.area))), land: Math.round(median(houses.map((h) => h.land))), pricePerM2: Math.round(median(houses.map((h) => h.price / h.area))) } } : {}),
   };
 }
 
@@ -108,7 +144,16 @@ export function marketStats(sales: DvfSale[], source: string): MarketStats {
  * Mix de logements du marché (parts par typologie) et prix relatifs, à fournir au jeu. Les prix relatifs sont normalisés pour
  * que la moyenne pondérée par la surface vendue vaille 1 : un programme calé sur le marché garde le prix moyen de la commune.
  */
-export function marketMix(stats: MarketStats): { demandMix: Record<Typology, number>; typologyRatio: Record<Typology, number> } {
+export interface MarketMix {
+  demandMix: Record<Typology, number>;
+  typologyRatio: Record<Typology, number>;
+  /** Prix d'une maison neuve rapporté à celui d'un appartement neuf au m² (ventes réelles, tiré vers 1,1 quand elles sont rares). */
+  houseRatio: number;
+  usedHouse?: { price: number; land: number };
+  usedFlatPerSdp: number;
+}
+
+export function marketMix(stats: MarketStats): MarketMix {
   const demandMix = {} as Record<Typology, number>;
   const raw = {} as Record<Typology, number>;
   let wArea = 0;
@@ -123,7 +168,10 @@ export function marketMix(stats: MarketStats): { demandMix: Record<Typology, num
   const norm = wArea > 0 && wPrice > 0 ? wPrice / wArea : 1;
   const typologyRatio = {} as Record<Typology, number>;
   for (const t of TYPOLOGIES) typologyRatio[t] = Math.round((raw[t] / norm) * 1000) / 1000;
-  return { demandMix, typologyRatio };
+  const h = stats.house;
+  const w = h ? h.sales / (h.sales + 25) : 0;
+  const houseRatio = Math.round((w * Math.min(1.6, Math.max(0.9, h && stats.pricePerM2 > 0 ? h.pricePerM2 / stats.pricePerM2 : 1.1)) + (1 - w) * 1.1) * 1000) / 1000;
+  return { demandMix, typologyRatio, houseRatio, ...(h && h.sales >= 15 ? { usedHouse: { price: h.price, land: h.land } } : {}), usedFlatPerSdp: Math.round(stats.pricePerM2 * 0.9) };
 }
 
 /** Années proposées par le jeu de données DVF (les plus récentes d'abord), tentées jusqu'à en réunir quatre. */
@@ -133,15 +181,17 @@ export const DVF_YEARS = [2025, 2024, 2023, 2022];
 export async function fetchMarketStats(insee: string, name: string, get: (url: string) => Promise<string | null>): Promise<MarketStats | null> {
   const dep = insee.startsWith('97') ? insee.slice(0, 3) : insee.slice(0, 2);
   const sales: DvfSale[] = [];
+  const houses: DvfHouse[] = [];
   const years: number[] = [];
   for (const year of DVF_YEARS) {
     const text = await get(`https://files.data.gouv.fr/geo-dvf/latest/csv/${year}/communes/${dep}/${insee}.csv`);
     if (!text) continue;
     const s = parseDvf(text, year);
+    houses.push(...parseDvfHouses(text, year));
     if (s.length) (sales.push(...s), years.push(year));
   }
   if (sales.length === 0) return null;
-  return marketStats(sales, `Ventes réelles (DVF) ${name} ${Math.min(...years)}–${Math.max(...years)}`);
+  return marketStats(sales, `Ventes réelles (DVF) ${name} ${Math.min(...years)}–${Math.max(...years)}`, houses);
 }
 
 /** Prix plancher d'un logement neuf (€/m² habitable) : en dessous, plus personne ne construit, quel que soit le prix de l'ancien. */

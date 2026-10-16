@@ -1,5 +1,5 @@
-import { DEFAULT_CRITERIA, promoterCriteria, computeBilan, computeProject, type Bilan, type Criteria, type Parcel, type Project } from '../engine';
-import { MAX_PRICE_POLICY, MIN_PRICE_POLICY, applyAction, criteriaFor, currentMarket, currentParams, ruleOf } from './game';
+import { DEFAULT_CRITERIA, promoterCriteria, computeBilan, computeProject, type Bilan, type Criteria, type HousingType, type Parcel, type Project } from '../engine';
+import { MAX_PRICE_POLICY, MIN_PRICE_POLICY, applyAction, criteriaFor, currentMarket, currentParams, housingTypesFor, ruleOf } from './game';
 import { buildDuration } from '../engine';
 import { minOfferPrice, offerOf } from './market';
 import { MAX_SOCIAL_SHARE, openTenders, programmeParams, scoreBid, tenderBidOf } from './tender';
@@ -54,9 +54,9 @@ function projectOf(parcel: Parcel, criteria: Criteria): Project {
   return project;
 }
 
-function projectFor(state: GameState, plot: Plot, levels: number, attic: boolean): { criteria: Criteria; project: Project } {
+function projectFor(state: GameState, plot: Plot, levels: number, attic: boolean, housing: HousingType = 'collectif'): { criteria: Criteria; project: Project } {
   const ob = plot.obligation;
-  const criteria: Criteria = criteriaFor(plot, { ...promoterCriteria(state.config.market), levels, attic, ...(ob?.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) }, ob?.programme.bonusLevels ?? 0);
+  const criteria: Criteria = criteriaFor(plot, { ...promoterCriteria(state.config.market), levels, attic, housing, ...(ob?.groundCommerce ? { groundFloorUse: 'commerce' as const } : {}) }, ob?.programme.bonusLevels ?? 0);
   return { criteria, project: projectOf(plot.parcel, criteria) };
 }
 
@@ -68,9 +68,9 @@ export function bestPlan(state: GameState, plot: Plot, landPrice: number, profil
   // Au-delà de la hauteur du PLU (et du bonus d'un appel d'offres), le projet est refusé : inutile de le calculer.
   const zoneCap = rule ? rule.maxLevels + (plot.obligation?.programme.bonusLevels ?? 0) : Infinity;
   const cap = Math.min(plot.obligation ? plot.obligation.maxLevels : Infinity, zoneCap);
-  for (let levels = 0; levels <= Math.min(profile.maxLevels, cap); levels++) {
-    for (const attic of levels >= 2 && levels + 1 <= cap ? [false, true] : [false]) {
-      const { criteria, project } = projectFor(state, plot, levels, attic);
+  for (const housing of plot.obligation ? (['collectif'] as const) : housingTypesFor(rule)) for (let levels = 0; levels <= Math.min(profile.maxLevels, cap, housing === 'maison' ? 1 : 99); levels++) {
+    for (const attic of housing === 'maison' ? [false, true] : levels >= 2 && levels + 1 <= cap ? [false, true] : [false]) {
+      const { criteria, project } = projectFor(state, plot, levels, attic, housing);
       if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
       const bilan = computeBilan({ project, market: currentMarket(state, plot), landPrice, existingSdp: plot.existingSdp, params: { ...programmeParams(currentParams(state), plot.obligation?.programme), targetMargin: profile.minMargin }, ...(plot.obligation ? { socialShare: plot.obligation.socialShare, quality: plot.obligation.quality, salesPremium: plot.obligation.programme.salesPremium } : {}) });
       if (bilan.marginRate < profile.minMargin) continue;
