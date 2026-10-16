@@ -526,6 +526,7 @@ collectivité jouent le rôle des enchères du Monopoly.
   de programme » attachées à une parcelle ou une zone, qui modifient le bilan (TVA/prix de vente plafonné, aides,
   contraintes de programme) et se combinent avec les appels d'offres.
 
+- Fait : **carte limitée à la commune** (0.12.4) : `District.outline` (contour de la commune, `fetchCommuneOutline`, `npm run outline -- <id> <insee>`, ajouté aux cartes de Sucy, Brie, Biarritz, Villeurbanne ; absent pour Paris 11e, Bourges et Murat, qui sont un arrondissement ou un secteur). Le jeu ne dessine que le bâti, les voies (tronçons) et le zonage (découpé au contour) dans la commune ; les données restent complètes (densité et équipements voisins).
 - Fait : **correction de la classification des zones de PLU** (version 0.12.2). `zoneFamily` (`game/plu.ts`) cherche des mots clés ordonnés dans le libellé long : équipement ; nature (zone verte, jardins familiaux, naturel, agricole,
   cimetière) ; activités sauf si le libellé parle aussi d'habitat ou de mixité ; renouvellement ; centre (coeur de ville, centre-ville, « zone urbaine générale », centralité, sauf « périphérie ») ; **pavillonnaire** (habitat individuel,
   pavillonnaire, faible densité, extensions en périphérie, sauf front bâti, collectif, immeuble, mixte) ; préservation (patrimoine, patrimonial, traditionnel, sauvegardé, jardins ou espaces libres, à protéger, paysager) ; mixte ; puis, quand

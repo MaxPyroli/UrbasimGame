@@ -10,6 +10,7 @@ import {
   QUALITY_PREMIUM,
   computeBilan,
   computeProject,
+  intersection,
   type Criteria,
   type FootprintShape,
   type Parcel,
@@ -333,6 +334,32 @@ function runFastForward() {
 
 // ---------------------------------------------------------------- carte
 
+// Carte d'une commune entière : le bâti, le zonage et les voies téléchargés sur le rectangle englobant débordent sur les
+// communes voisines ; on ne montre que ce qui est dans le contour de la commune (sans contour : tout).
+const outline = district.outline;
+const inCommune = (lon: number, lat: number) => !outline || outline.some((r) => pointInRing(lon, lat, r));
+/** Une ligne coupée au contour : les tronçons dont les sommets sont dans la commune. */
+function clipLine(line: [number, number][]): [number, number][][] {
+  if (!outline) return [line];
+  const runs: [number, number][][] = [];
+  let cur: [number, number][] = [];
+  for (const q of line) {
+    if (inCommune(q[0], q[1])) cur.push(q);
+    else if (cur.length) (runs.push(cur), (cur = []));
+  }
+  if (cur.length) runs.push(cur);
+  return runs.filter((r) => r.length >= 2);
+}
+/** Un polygone (zonage) découpé au contour de la commune. */
+function clipRing(ring: [number, number][]): [number, number][][] {
+  if (!outline) return [ring];
+  try {
+    return intersection([[ring]], outline.map((r) => [r])).map((poly) => poly[0] as [number, number][]);
+  } catch {
+    return [ring];
+  }
+}
+
 const map = L.map('map', { zoomControl: true, preferCanvas: true, attributionControl: false });
 // Attribution discrète : une seule ligne courte, le détail des sources est dans « Crédits et données ».
 L.control.attribution({ prefix: false }).addTo(map);
@@ -350,7 +377,7 @@ if (!NO_TILES) {
   // Rendu SVG pour les voies : leur couleur vient de la feuille de style (thème clair ou sombre).
   const roadRenderer = L.svg({ pane: 'routes' });
   for (const r of [...(district.roads ?? [])].sort((a, b) => b.importance - a.importance)) {
-    L.polyline(r.line.map(([lon, lat]) => [lat, lon] as [number, number]), { pane: 'routes', renderer: roadRenderer, interactive: false, className: 'road', weight: widths[r.importance] ?? 2, lineCap: 'round' }).addTo(map);
+    for (const part of clipLine(r.line)) L.polyline(part.map(([lon, lat]) => [lat, lon] as [number, number]), { pane: 'routes', renderer: roadRenderer, interactive: false, className: 'road', weight: widths[r.importance] ?? 2, lineCap: 'round' }).addTo(map);
   }
 }
 const layers = new Map<string, L.Polygon>();
@@ -472,7 +499,7 @@ map.getPane('zones')!.style.zIndex = '330';
 map.getPane('zones')!.style.pointerEvents = 'none';
 const zonesLayer = L.layerGroup();
 for (const z of district.zones ?? []) {
-  for (const ring of z.rings) {
+  for (const ring of z.rings.flatMap(clipRing)) {
     L.polygon(ring.map(([lon, lat]) => [lat, lon] as [number, number]), { pane: 'zones', interactive: false, stroke: true, color: ZONE_RULES[z.family].color, weight: 1, opacity: 0.8, fillColor: ZONE_RULES[z.family].color, fillOpacity: 0.38 })
       .bindTooltip(`${esc(z.code)} · ${esc(ZONE_RULES[z.family].label)}`, { sticky: true })
       .addTo(zonesLayer);
@@ -490,6 +517,7 @@ function ensureExistingBuildings() {
   if (existingBuilt) return;
   existingBuilt = true;
   for (const b of district.buildings) {
+    if (outline && !inCommune(b.ring.reduce((s, q) => s + q[0], 0) / b.ring.length, b.ring.reduce((s, q) => s + q[1], 0) / b.ring.length)) continue;
     const layer = L.polygon(b.ring.map(([lon, lat]) => [lat, lon] as [number, number]), {
       pane: 'bati',
       interactive: false,

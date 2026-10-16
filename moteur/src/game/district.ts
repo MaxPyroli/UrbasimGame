@@ -87,6 +87,8 @@ export interface District {
   radius: number;
   /** Marché de référence du bilan. */
   market: MarketId;
+  /** Contour de la commune (anneaux [lon, lat]) : bâti, zonage et voies hors de ce contour ne s'affichent pas ; absent = tout s'affiche. */
+  outline?: [number, number][][];
   /** Ajustement des prix et coûts du marché de référence au niveau local (tiré des ventes réelles) ; facultatif. */
   marketAdjust?: Partial<Market>;
   /** Ventes réelles de la commune (DVF) : mix de logements, prix par typologie (facultatif : sans, le marché de référence seul). */

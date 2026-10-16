@@ -76,6 +76,22 @@ export async function fetchCadastreCommune(insee: string, arr?: string): Promise
   return { type: 'FeatureCollection', features };
 }
 
+/** Contour de la commune (anneaux extérieurs [lon, lat], simplifiés à 3 m) : sert à n'afficher que ce qui est dans la commune. */
+export async function fetchCommuneOutline(insee: string): Promise<[number, number][][]> {
+  const j = await getJson(`https://apicarto.ign.fr/api/cadastre/commune?code_insee=${insee}`);
+  const rings: [number, number][][] = [];
+  for (const f of j.features ?? []) {
+    const polys: number[][][][] = f.geometry?.type === 'MultiPolygon' ? f.geometry.coordinates : f.geometry?.type === 'Polygon' ? [f.geometry.coordinates] : [];
+    for (const poly of polys) {
+      const ring = poly[0].map((q) => [Math.round(q[0] * 1e5) / 1e5, Math.round(q[1] * 1e5) / 1e5] as [number, number]);
+      const lat = ring.reduce((s, q) => s + q[1], 0) / ring.length;
+      const simple = simplifyRing(ring, 3, lat);
+      if (simple.length >= 4) rings.push(simple);
+    }
+  }
+  return rings;
+}
+
 /** Rectangle englobant (lon/lat) d'une commune, d'après le contour de l'API Carto cadastre. */
 export async function fetchCommuneBounds(insee: string): Promise<{ minLon: number; maxLon: number; minLat: number; maxLat: number }> {
   const j = await getJson(`https://apicarto.ign.fr/api/cadastre/commune?code_insee=${insee}`);
@@ -177,8 +193,11 @@ export async function fetchCommune(opts: CommuneOptions): Promise<District> {
     credits: ['Parcelles : IGN / DGFiP, cadastre Etalab (Licence Ouverte 2.0)', buildingsCredit(buildings, fetchedAt), 'Équipements : IGN, BD TOPO® (Licence Ouverte 2.0)', 'Zonage : Géoportail de l’Urbanisme (PLU, Licence Ouverte 2.0)'],
     fetchedAt,
   });
+  // Commune entière (ni arrondissement ni secteur) : on garde son contour pour ne montrer que ce qui y est.
+  const outline = !opts.sector && !opts.arr ? await fetchCommuneOutline(opts.insee).catch(() => undefined) : undefined;
   const adjust = opts.adjustMarket && stats ? deriveMarketAdjust(MARKETS[opts.market], stats) : undefined;
-  return stats ? { ...district, marketStats: stats, ...marketMix(stats), ...(adjust ? { marketAdjust: adjust } : {}) } : district;
+  const withOutline = outline?.length ? { ...district, outline } : district;
+  return stats ? { ...withOutline, marketStats: stats, ...marketMix(stats), ...(adjust ? { marketAdjust: adjust } : {}) } : withOutline;
 }
 
 const WFS = 'https://data.geopf.fr/wfs/ows';
