@@ -67,13 +67,8 @@ if (!isMainThread) {
     ).then((parts) => parts.map((p, b) => Object.assign(p, { idx: buckets[b] })) as R[][]);
   };
 
-  // 1) densité (rapide, dans ce processus) puis estimation de chaque parcelle en parallèle
-  const { priced: dense } = priceParcels(source, source.parcels.map(() => ({ best: 0, issue: null })));
-  const all = dense.parcels.map((_, i) => i);
-  const parts = (await run<ParcelAnalysis>('analyse', all, (indices) => ({ kind: 'analyse', district: dense, indices }))) as (ParcelAnalysis[] & { idx: number[] })[];
-  const analyses: ParcelAnalysis[] = new Array(dense.parcels.length);
-  parts.forEach((p) => p.forEach((a, k) => (analyses[p.idx[k]] = a)));
-  const { priced, appraised } = priceParcels(source, analyses);
+  // 1) densité, modèle de prix par zone (étalonné sur quelques terrains types) et prix de chaque parcelle
+  const { priced, appraised } = priceParcels(source);
 
   // 2) délaissés : seules les parcelles non constructibles seules sont étudiées
   const cands = wastelandCandidates(priced);

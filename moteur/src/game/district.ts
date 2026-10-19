@@ -19,7 +19,7 @@ import {
   type MarketStats,
   type Ring,
 } from '../engine';
-import { DEFAULT_CONFIG, SMALL_PLOT_AREA, appraise, askingPriceFrom, existingValue, plotIssue, ruleOf, type PlotSeed } from './game';
+import { DEFAULT_CONFIG, SMALL_PLOT_AREA, appraise, parcelArea, askingPriceFrom, existingValue, plotIssue, ruleOf, type PlotSeed } from './game';
 import { mergeParcels } from './merge';
 import { ZONE_RULES, adaptToDensity, zoneFamily } from './plu';
 import type { Density, PlotIssue, ZoneFamily } from './types';
@@ -450,6 +450,8 @@ export function districtToSeeds(d: District): PlotSeed[] {
     const parcel = { ring: p.ring, streetEdges: p.streetEdges };
     // Analyse mémorisée dans l'instantané (longue à calculer) ; sinon, contrôle géométrique rapide.
     const issue = p.issue !== undefined ? p.issue ?? undefined : plotIssue(parcel, undefined, 1, parcelRule(p));
+    // Zones naturelles, agricoles ou d'équipement public : rien à y construire, on ne les propose pas à l'achat.
+    if (issue === 'zone') continue;
     seeds.push({ id: p.id, parcel, existingSdp: p.existingSdp, existingHeight: p.existingHeight, locationFactor: p.locationFactor, label: p.label, ...(issue ? { issue } : {}), ...(p.zone ? { zones: [p.zone], ...(p.zoneCode ? { zoneCode: p.zoneCode } : {}) } : {}), ...(p.density ? { density: p.density } : {}), ...(p.basePrice ? { askingPrice: p.basePrice } : {}) });
   }
   return seeds;
@@ -471,14 +473,15 @@ export const wastelandCandidates = (d: District): number[] => d.parcels.flatMap(
 /** Identifiants des délaissés parmi les parcelles d'indices `only` (toutes les candidates par défaut) ; parallélisable par indices. */
 export function wastelandIds(d: District, appraised?: number[], only?: number[]): Set<string> {
   const config = { ...DEFAULT_CONFIG, market: marketOf(d) };
-  const kx = 111320 * Math.cos((d.center.lat * Math.PI) / 180);
-  const ky = 110540;
   const info = d.parcels.map((p) => {
     const parcel = { ring: p.ring, streetEdges: p.streetEdges };
     const cx = p.ring.reduce((t, q) => t + q.lon, 0) / p.ring.length;
     const cy = p.ring.reduce((t, q) => t + q.lat, 0) / p.ring.length;
-    return { p, parcel, cx, cy, rule: parcelRule(p) };
+    const lons = p.ring.map((q) => q.lon);
+    const lats = p.ring.map((q) => q.lat);
+    return { p, parcel, cx, cy, rule: parcelRule(p), x0: Math.min(...lons), x1: Math.max(...lons), y0: Math.min(...lats), y1: Math.max(...lats) };
   });
+  const EPS = 2e-5; // ~2 m : deux parcelles qui se touchent ont des boîtes englobantes qui se recouvrent
   // Estimation de chaque parcelle seule, à la demande (celles des voisines de candidates uniquement).
   const aloneCache = new Map<number, number>();
   const alone = (j: number) => {
@@ -498,19 +501,39 @@ export function wastelandIds(d: District, appraised?: number[], only?: number[])
     let neighbours = 0;
     for (let j = 0; j < info.length; j++) {
       const b = info[j];
-      if (j === i || Math.hypot((a.cx - b.cx) * kx, (a.cy - b.cy) * ky) > 90) continue;
+      if (j === i || b.x0 > a.x1 + EPS || b.x1 < a.x0 - EPS || b.y0 > a.y1 + EPS || b.y1 < a.y0 - EPS) continue;
       const m = mergeParcels([a.parcel, b.parcel]);
       if (!m.ok) continue;
       neighbours++;
       const zones = [...new Set([...(a.p.zone ? [a.p.zone] : []), ...(b.p.zone ? [b.p.zone] : [])])];
       const rule = ruleOf({ zones, density: b.p.density });
-      if (plotIssue(m.parcel, config, b.p.locationFactor, rule)) continue;
-      gain = Math.max(gain, appraise(m.parcel, a.p.existingSdp + b.p.existingSdp, config, b.p.locationFactor, rule).best - alone(j));
+      // Avec le modèle de prix, un contrôle rapide suffit : accès à la rue et surface suffisante pour un projet.
+      if (appraised ? m.parcel.streetEdges.length === 0 || parcelArea(m.parcel) < Math.max(SMALL_PLOT_AREA, 250) || (rule && !rule.buildable) : plotIssue(m.parcel, config, b.p.locationFactor, rule)) continue;
+      // Avec le modèle de prix : l'assemblage ajoute la surface de la candidate au prix au m² du voisin (pas de nouveau projet à calculer).
+      gain = Math.max(gain, appraised ? (appraised[j] / Math.max(b.p.area, 1)) * a.p.area : appraise(m.parcel, a.p.existingSdp + b.p.existingSdp, config, b.p.locationFactor, rule).best - alone(j));
     }
     const floor = 0.6 * a.p.area * config.market.landPerSdp * a.p.locationFactor;
     if (neighbours === 0 || gain < floor) useless.add(a.p.id);
   }
   return useless;
+}
+
+/**
+ * Verdict géométrique d'une parcelle. Les terrains larges et compacts, avec une façade sur rue, sont constructibles à coup
+ * sûr : on évite alors de dessiner un projet (le plus gros du temps de calcul). Les autres passent le contrôle complet.
+ */
+function structuralIssue(p: DistrictParcel): PlotIssue | null {
+  const rule = parcelRule(p);
+  if (rule && !rule.buildable) return 'zone';
+  if (p.streetEdges.length === 0) return 'enclavee';
+  const n = p.ring.length;
+  const my = p.ring.reduce((t, q) => t + q.lat, 0) / n;
+  const kx = 111320 * Math.cos((my * Math.PI) / 180);
+  let perimeter = 0;
+  for (let i = 0; i < n; i++) perimeter += Math.hypot((p.ring[(i + 1) % n].lon - p.ring[i].lon) * kx, (p.ring[(i + 1) % n].lat - p.ring[i].lat) * 110540);
+  // 2·A/P vaut environ la largeur utile d'un terrain en longueur ; au-delà de 9 m et de 300 m² (moins de 1 % d’erreurs mesurées à Sucy), pas de doute possible.
+  if (p.area >= 300 && (2 * p.area) / perimeter >= 9) return null;
+  return plotIssue({ ring: p.ring, streetEdges: p.streetEdges }, undefined, p.locationFactor, rule) ?? null;
 }
 
 /** Résultat de l'analyse d'une parcelle : ce que son meilleur projet peut payer, et pourquoi elle n'est pas constructible seule. */
@@ -519,18 +542,73 @@ export interface ParcelAnalysis {
   issue: PlotIssue | null;
 }
 
-/** Analyse une parcelle (longue : ~0,2 s) ; indépendante des autres, donc parallélisable. */
+/** Analyse exacte d'une parcelle (longue : ~20 ms) : sert à étalonner le modèle de prix et dans les tests. */
 export function analyseParcel(p: DistrictParcel, market: Market): ParcelAnalysis {
   const config = { ...DEFAULT_CONFIG, market };
   const parcel = { ring: p.ring, streetEdges: p.streetEdges };
   const rule = parcelRule(p);
-  // Contrôle géométrique d'abord (rapide), puis une seule estimation : elle sert à la fois au prix et au verdict « rentable seule ».
+  // Contrôle géométrique d'abord (rapide), puis une seule estimation : elle sert à la fois au prix et au verdict « rentable seul ».
   const structural = plotIssue(parcel, undefined, p.locationFactor, rule);
   if (structural) return { best: 0, issue: structural };
   const best = appraise(parcel, p.existingSdp, config, p.locationFactor, rule).best;
   // La démolition ne peut qu'abaisser l'estimation : si elle est positive avec le bâti existant, le terrain est rentable seul.
   if (best <= 0 && appraise(parcel, 0, config, p.locationFactor, rule).best <= 0) return { best, issue: p.area < SMALL_PLOT_AREA ? 'trop-petite' : 'inconstructible' };
   return { best, issue: null };
+}
+
+/**
+ * Modèle de prix par zone : ce que peut payer un terrain, au m², selon sa zone du PLU et sa situation (équipements,
+ * commerces, transports à proximité). Étalonné sur quelques terrains types par zone, calculés exactement, puis appliqué
+ * à toutes les parcelles sans refaire de projet : best/m² = a + b × (situation − 1).
+ */
+export type PriceModel = Record<string, { a: number; b: number }>;
+
+const SAMPLES_PER_ZONE = 24;
+const MODEL_DISCOUNT = 0.8;
+
+export function priceModel(d: District, market: Market): PriceModel {
+  const groups = new Map<string, DistrictParcel[]>();
+  for (const p of d.parcels) {
+    if (!p.zone || !ZONE_RULES[p.zone].buildable || p.streetEdges.length === 0) continue;
+    (groups.get(p.zone) ?? groups.set(p.zone, []).get(p.zone)!).push(p);
+  }
+  const model: PriceModel = {};
+  let all: { x: number; y: number }[] = [];
+  for (const [zone, ps] of groups) {
+    // Terrains répartis sur toute la gamme de tailles, en laissant de côté les trop petits ou ingrats seuls (ils ont leur propre verdict).
+    const sorted = ps.filter((p) => p.area >= SMALL_PLOT_AREA).sort((x, y) => x.area - y.area);
+    const step = Math.max(1, sorted.length / SAMPLES_PER_ZONE);
+    const pts: { x: number; y: number }[] = [];
+    for (let k = 0; k < sorted.length && pts.length < SAMPLES_PER_ZONE; k = Math.round(k + step) || k + 1) {
+      const p = sorted[k];
+      const parcel = { ring: p.ring, streetEdges: p.streetEdges };
+      if (plotIssue(parcel, undefined, p.locationFactor, parcelRule(p))) continue;
+      pts.push({ x: p.locationFactor - 1, y: appraise(parcel, 0, { ...DEFAULT_CONFIG, market }, p.locationFactor, parcelRule(p)).best / p.area });
+    }
+    all = all.concat(pts);
+    model[zone] = fitLine(pts);
+  }
+  model['*'] = fitLine(all);
+  return model;
+}
+
+/** Droite y = a + b·x (moindres carrés) ; à défaut de dispersion, la pente suit l'effet moyen d'un point de situation sur le résiduel. */
+function fitLine(pts: { x: number; y: number }[]): { a: number; b: number } {
+  if (pts.length === 0) return { a: 0, b: 0 };
+  const n = pts.length;
+  const mx = pts.reduce((t, q) => t + q.x, 0) / n;
+  const my = pts.reduce((t, q) => t + q.y, 0) / n;
+  const vx = pts.reduce((t, q) => t + (q.x - mx) ** 2, 0);
+  const slope = vx > 1e-4 ? pts.reduce((t, q) => t + (q.x - mx) * (q.y - my), 0) / vx : 6 * my;
+  const b = Math.max(0, Math.min(slope, 12 * Math.max(my, 0)));
+  return { a: Math.max(0, my - b * mx), b };
+}
+
+/** Ce que le meilleur projet peut payer pour la parcelle, d'après le modèle de sa zone (sans refaire de projet). */
+export function estimateBest(p: DistrictParcel, model: PriceModel): number {
+  const m = (p.zone && model[p.zone]) || model['*'];
+  // Le modèle donne la moyenne des terrains types : on la tire vers le bas pour qu'une bonne moitié des terrains reste rentable au prix demandé.
+  return Math.max(0, Math.round((m.a + m.b * (p.locationFactor - 1)) * p.area * MODEL_DISCOUNT));
 }
 
 /**
@@ -546,8 +624,23 @@ export function withBasePrices(source: District, analyses?: ParcelAnalysis[]): D
 /** Première étape de `withBasePrices` : densité, prix de référence et constructibilité seule (sans la recherche des délaissés). */
 export function priceParcels(source: District, analyses?: ParcelAnalysis[]): { priced: District; appraised: number[] } {
   const d = withDensity(source);
-  const config = { ...DEFAULT_CONFIG, market: marketOf(d) };
-  const all = analyses ?? d.parcels.map((p) => analyseParcel(p, marketOf(d)));
+  const market = marketOf(d);
+  const config = { ...DEFAULT_CONFIG, market };
+  let all = analyses;
+  if (!all) {
+    const model = priceModel(d, market);
+    // Parcelles qui portent un équipement public (école, mairie, université, santé) : on n'y construit pas.
+    const publicIdx = new Set<number>();
+    for (const poi of d.pois) {
+      if (!['ecole', 'mairie', 'superieur', 'sante'].includes(poi.kind)) continue;
+      const i = d.parcels.findIndex((p) => pointInRing(poi.lon, poi.lat, p.ring.map((q) => [q.lon, q.lat] as [number, number])));
+      if (i >= 0) publicIdx.add(i);
+    }
+    all = d.parcels.map((p, i) => {
+      const issue = publicIdx.has(i) ? 'zone' : structuralIssue(p);
+      return { best: issue ? 0 : estimateBest(p, model), issue };
+    });
+  }
   const priced = {
     ...d,
     parcels: d.parcels.map((p, i) => ({

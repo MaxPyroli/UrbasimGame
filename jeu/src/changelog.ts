@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.13.2', title: 'Chargement des cartes beaucoup plus rapide', notes: ['Prix par zone (avec bonus de situation), sans parcelles naturelles ni équipements publics à l’achat, ZAC de part et d’autre d’une rue'] },
   { version: '0.13.1', title: 'Zones mixtes et prix', notes: ['Zones du PLU qui se recouvrent : la plus précise s’applique (mixte de Sucy) ; prix demandés alignés sur le potentiel du terrain'] },
   { version: '0.13.0', title: 'Prix réalistes et ensembles de maisons', notes: ['Prix des terrains alignés sur le bâti existant, type « maisons » en zone pavillonnaire, terrain refinancé par la banque au lancement'] },
   { version: '0.12.5', title: 'Quartiers pavillonnaires un peu plus souples', notes: ['Habitat individuel : 50 % d’emprise, retraits de 4 m au fond et 2 m sur les côtés (réglage provisoire avant les ensembles de maisons)'] },
