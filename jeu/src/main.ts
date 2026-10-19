@@ -1392,18 +1392,6 @@ function renderTop() {
   $('credits-btn').onclick = () => (closeMenu(), openCredits());
   $('version-btn').onclick = () => (closeMenu(), openVersion());
   $('company').onclick = () => (closeMenu(), openIdentity('edit'));
-  // Mode caché : 7 touches rapides sur la trésorerie = argent illimité.
-  let taps: number[] = [];
-  document.getElementById('stat-cash')?.parentElement?.addEventListener('click', () => {
-    const now = Date.now();
-    taps = [...taps.filter((t) => now - t < 3000), now];
-    if (taps.length < 7) return;
-    taps = [];
-    state = { ...state, players: state.players.map((p) => (p.id === ME ? { ...p, cash: 1_000_000_000 } : p)) };
-    save();
-    renderAll();
-    toast('Mode argent illimité activé');
-  });
   const nb = $('new');
   nb.onclick = () => {
     // Confirmation dans la page : les boîtes de dialogue du navigateur sont bloquées dans certains environnements.
@@ -2739,4 +2727,21 @@ if (import.meta.env.DEV) {
       return out;
     },
   };
+}
+
+// Mode caché : taper « bigmoney » hors d'un champ de saisie.
+{
+  let typed = '';
+  document.addEventListener('keydown', (e) => {
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key.length !== 1) return;
+    typed = (typed + e.key.toLowerCase()).slice(-8);
+    if (typed !== 'bigmoney' || !state) return;
+    typed = '';
+    state = { ...state, players: state.players.map((p) => (p.id === ME ? { ...p, cash: 1_000_000_000 } : p)) };
+    save();
+    renderAll();
+    toast('Mode argent illimité activé');
+  });
 }
