@@ -73,7 +73,7 @@ export function planZacs(plots: Plot[], count: number): Zac[] {
         const g = Math.min(...lots.map((l) => gap(pts.get(l.id)!, pts.get(p.id)!)));
         if (g < bestGap) (best = p), (bestGap = g);
       }
-      if (!best || bestGap > 25) break;
+      if (!best || bestGap > 40) break;
       lots.push(best);
     }
     if (lots.length < 2) continue;
@@ -84,7 +84,7 @@ export function planZacs(plots: Plot[], count: number): Zac[] {
     const nearby = plots
       .filter((p) => !taken.has(p.id) && !p.municipal && p.issue !== 'zone' && p.area >= 60 && p.area <= 1200 && metres(centre(p), c0) < 260)
       .map((p) => ({ p, d: dist(p) }))
-      .filter((x) => x.d <= 40)
+      .filter((x) => x.d <= 50)
       .sort((x, y) => (x.p.issue ? 0 : 1) - (y.p.issue ? 0 : 1) || x.d - y.d)
       .map((x) => x.p);
     const sites = nearby.slice(0, 2);
