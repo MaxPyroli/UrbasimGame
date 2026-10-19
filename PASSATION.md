@@ -626,3 +626,7 @@ bien accès au nouveau dépôt.
 - `priceModel` (district.ts) : prix au m² par zone = a + b·(situation−1), étalonné sur 24 terrains types par zone (calcul exact), ×0,8 ; `estimateBest` l'applique à chaque parcelle. Les bonus d'équipements restent via `locationFactor`.
 - Contrôle géométrique rapide (`structuralIssue`) et délaissés sans nouveau projet : Sucy 7 154 parcelles en ~30 s sur 4 cœurs (avant ~4 min), 8 cartes en moins de 3 min.
 - Parcelles `zone` (nature, équipement, POI école/mairie/université/santé) retirées des terrains proposés. Églises : pas de donnée, à faire. Bâtiment unique sur terrain large et peu profond : à traiter (maisons en rangée).
+
+### 0.13.6 — formes de bâtiments
+- `clipLength` (footprint.ts) : emprise tronquée à 55 m (`MAX_BUILDING_LENGTH`), le reste est libre pour les bâtiments suivants ; largeur minimale d'un immeuble 8 m (`MIN_BUILDING_WIDTH`, plu.ts), 6 m en tissu dense (`ZoneRule.minBuildingWidth`), maisons 6 m. `regularize` : rectangle dès 50 % de l'emprise tarabiscotée (avant 70 %).
+- À faire : conserver le bâti existant (3) et formes en L/U/plots (4).

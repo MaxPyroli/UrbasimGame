@@ -257,6 +257,29 @@ function distToSeg(p: Vec2, a: Vec2, b: Vec2): number {
   const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2));
   return distTo(p, [a[0] + t * dx, a[1] + t * dy]);
 }
+
+/** Longueur maximale d'un bâtiment (m) le long de la rue : au-delà, on ne bâtit pas d'un seul tenant. */
+export const MAX_BUILDING_LENGTH = 55;
+
+/** Tronçon de contour d'au plus `maxLen` mètres de long (selon u) ayant la plus grande surface ; null si le contour est déjà assez court. */
+function clipLength(ring: Ring, maxLen: number): Ring | null {
+  const bb = bbox(ring);
+  if (bb.maxX - bb.minX <= maxLen + 1e-6) return null;
+  let best: Ring | null = null;
+  let bestArea = 0;
+  const span = bb.maxX - bb.minX - maxLen;
+  const steps = Math.max(1, Math.ceil(span / 2.5));
+  for (let k = 0; k <= steps; k++) {
+    const x0 = bb.minX + (span * k) / steps;
+    const poly = largestPolygon(intersection(toMulti(ring), toMulti(rectRing(x0, bb.minY - 1, x0 + maxLen, bb.maxY + 1))));
+    if (!poly) continue;
+    const r = cleanRing(poly[0], 0.3);
+    const area = r.length >= 3 ? ringArea(r) : 0;
+    if (area > bestArea) (best = r), (bestArea = area);
+  }
+  return best;
+}
+
 /** Compacité d'un contour (1 = cercle, 0,785 = carré, petit = forme en lanière ou en peigne). */
 function compactness(r: Ring): number {
   let per = 0;
@@ -372,6 +395,14 @@ export function generateFootprintUncached(envelope: MultiPolygon, frame: Frame, 
     return { ring: null, limitedBy: ['retraits'], at, reason: 'Emprise constructible trop petite après retraits.' };
   }
   const limitedBy = best.limitedBy.length > 0 ? best.limitedBy : ['retraits'];
+  // Un bâtiment n'est pas une bande de cent mètres : au-delà de la longueur maximale on garde le tronçon le plus étoffé,
+  // le reste du terrain pouvant accueillir d'autres bâtiments séparés.
+  const long = clipLength(best.ring, MAX_BUILDING_LENGTH);
+  if (long) {
+    best.ring = long;
+    best.area = ringArea(long);
+    if (!limitedBy.includes('longueur maximale')) limitedBy.push('longueur maximale');
+  }
   if (minWidth(best.ring) < opts.minWidth) {
     return {
       ring: null,

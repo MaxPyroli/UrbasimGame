@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.13.6', title: 'Fini les bandes interminables', notes: ['Bâtiments de 55 m au plus de long et 8 m au moins de large (6 m en tissu dense) ; le reste du terrain accueille d’autres bâtiments'] },
   { version: '0.13.5', title: 'Bâtiments plus nets', notes: ['Les emprises qui contournent un terrain par plusieurs rues redeviennent un rectangle net'] },
   { version: '0.13.4', title: 'Barres du haut stables', notes: ['Les barres Objectif et Trimestre ne rejouent plus leur animation à chaque clic'] },
   { version: '0.13.3', title: 'Meilleur projet par défaut', notes: ['Chaque terrain s’ouvre sur son meilleur projet (immeuble ou maisons, niveaux, attique)'] },

@@ -39,7 +39,7 @@ const err = (s: GameState, a: Action) => {
 const game = (zones: ZoneFamily[], extra: Partial<Parameters<typeof createGame>[0]['plots'][number]> = {}) =>
   createGame({
     players: [{ id: 'a', name: 'Alice' }],
-    plots: [{ id: 'T1', parcel: rect(0, 0, 14, 30), zones, ...extra }, { id: 'T2', parcel: rect(14, 0, 14, 30), zones: ['preservation'] }],
+    plots: [{ id: 'T1', parcel: rect(0, 0, 20, 30), zones, ...extra }, { id: 'T2', parcel: rect(20, 0, 20, 30), zones: ['preservation'] }],
     config: { market: MARKETS['petite-couronne'], startCash: 20_000_000, eventChance: 0, salesDemand: 1000 },
   });
 

@@ -7,6 +7,8 @@ import type { Density, ZoneFamily } from './types';
  * l'Urbanisme) ; les valeurs sont des ordres de grandeur inspirés du type de zone, pas le règlement réel.
  */
 export interface ZoneRule {
+  /** Largeur minimale d'un immeuble (m) ; 8 par défaut, 6 en tissu dense où les bâtiments sont mitoyens. */
+  minBuildingWidth?: number;
   family: ZoneFamily;
   /** Nom court affiché au joueur. */
   label: string;
@@ -121,6 +123,7 @@ export function adaptToDensity(rule: ZoneRule, density: Density | undefined): Zo
   return {
     ...rule,
     setbackLateral: 0,
+    minBuildingWidth: 6,
     alignment: 'rue',
     setbackFond: Math.min(rule.setbackFond, 2),
     maxCoverage: Math.min(0.85, rule.maxCoverage + 0.15),
@@ -137,6 +140,8 @@ export const heightOfLevels = (levels: number, c: Pick<Criteria, 'groundFloorHei
  * sont conservés, les contraintes de la zone (hauteur, emprise, pleine terre, retraits, destination) s'imposent.
  */
 /** Emprise maximale d'une maison (m²) : environ 125 m² habitables sur deux niveaux. */
+/** Largeur minimale d'un immeuble (m). */
+export const MIN_BUILDING_WIDTH = 8;
 export const HOUSE_MAX_AREA = 75;
 
 export function applyRule(base: Criteria, rule: ZoneRule): Criteria {
@@ -147,7 +152,8 @@ export function applyRule(base: Criteria, rule: ZoneRule): Criteria {
     housing: house ? 'maison' : 'collectif',
     // Une maison : une emprise limitée, un volume simple d'au moins 6 m de large, deux places de stationnement.
     maxBuildingArea: house ? (base.maxBuildingArea ?? HOUSE_MAX_AREA) : null,
-    ...(house ? { footprintShape: 'rectangle' as const, minWidth: Math.max(base.minWidth, 6) } : {}),
+    // Un immeuble a au moins deux rangées de logements de part et d'autre d'un palier : pas de bande de moins de 8 m ; une maison, 6 m.
+    ...(house ? { footprintShape: 'rectangle' as const, minWidth: Math.max(base.minWidth, 6) } : { minWidth: Math.max(base.minWidth, rule.minBuildingWidth ?? MIN_BUILDING_WIDTH) }),
     parkingPerDwelling: house ? Math.max(base.parkingPerDwelling, 2) : base.parkingPerDwelling,
     maxHeight: heightOfLevels(rule.maxLevels, base) + 0.05,
     maxCoverage: rule.maxCoverage,
