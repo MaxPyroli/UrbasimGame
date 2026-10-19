@@ -10,6 +10,7 @@
     "commune": "rolldown scripts/fetch-commune.ts -f esm -p node -o .build/fetch-commune.mjs && node .build/fetch-commune.mjs",
     "simulate": "rolldown scripts/simulate.ts -f esm -p node -o .build/simulate.mjs && node .build/simulate.mjs",
     "market": "rolldown scripts/market-stats.ts -f esm -p node -o .build/market-stats.mjs && node .build/market-stats.mjs",
+    "bench-open": "rolldown scripts/bench-open.ts -f esm -p node -o .build/bench-open.mjs && node .build/bench-open.mjs",
     "outline": "rolldown scripts/add-outline.ts -f esm -p node -o .build/add-outline.mjs && node .build/add-outline.mjs",
     "reprice": "rolldown scripts/reprice-district.ts -f esm -p node -o .build/reprice-district.mjs && node .build/reprice-district.mjs"
   },

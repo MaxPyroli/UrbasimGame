@@ -630,3 +630,8 @@ bien accès au nouveau dépôt.
 ### 0.13.6 — formes de bâtiments
 - `clipLength` (footprint.ts) : emprise tronquée à 55 m (`MAX_BUILDING_LENGTH`), le reste est libre pour les bâtiments suivants ; largeur minimale d'un immeuble 8 m (`MIN_BUILDING_WIDTH`, plu.ts), 6 m en tissu dense (`ZoneRule.minBuildingWidth`), maisons 6 m. `regularize` : rectangle dès 50 % de l'emprise tarabiscotée (avant 70 %).
 - À faire : conserver le bâti existant (3) et formes en L/U/plots (4).
+
+### Carte libre — étape 1 : mesure (`npm run bench-open -- "<nom>" <insee> <marché>`)
+- Préparation complète d'une commune sur un seul cœur (téléchargement puis calcul) : Sucy 7 264 parcelles **66 s** (avant parallélisation du téléchargement : 147 s), Villeurbanne 10 117 parcelles 81 s, Murat (commune entière, rurale, 1 142 requêtes, 71 Mo) 138 s.
+- Le goulot était le cadastre (pages de 500 parcelles lues en série, ~58 s pour Sucy) : lu par lots de 4 pages (`getAllPages`, `PAGE_CONCURRENCY`), carreaux par lots de 4 (`pool`, `TILE_CONCURRENCY`). Reste ~16 s de cadastre, ~12 s de marché (DVF) et équipements, ~26 s de calcul (densité, modèle de prix, contrôle géométrique), ~2 s de délaissés.
+- Prochaines étapes : recherche de commune, choix du marché, calcul dans un Web Worker avec progression, garde-fous (grandes communes, rurales).

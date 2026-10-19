@@ -26,19 +26,32 @@ async function getJson(url: string): Promise<any> {
   throw last instanceof Error ? last : new Error('réseau');
 }
 
+/** Pages du cadastre demandées en même temps (chaque page de 1 000 parcelles met plusieurs secondes à répondre). */
+const PAGE_CONCURRENCY = 4;
+
+/** Lit toutes les pages d'un service paginé, par lots de `PAGE_CONCURRENCY` pages à la fois, jusqu'à la première page incomplète. */
+async function getAllPages(urlAt: (start: number) => string, maxPages: number): Promise<any[]> {
+  const features: any[] = [];
+  for (let page = 0; page < maxPages; page += PAGE_CONCURRENCY) {
+    const batch = await Promise.all(Array.from({ length: Math.min(PAGE_CONCURRENCY, maxPages - page) }, (_, k) => getJson(urlAt((page + k) * PAGE))));
+    let full = true;
+    for (const j of batch) {
+      const got: any[] = j.features ?? [];
+      features.push(...got);
+      if (got.length < PAGE) full = false;
+    }
+    if (!full) break;
+  }
+  return features;
+}
+
 /** Toutes les parcelles cadastrales (API Carto IGN, Licence Ouverte 2.0) d'un carré autour du centre, par pages. */
 export async function fetchCadastreBox(center: LonLat, radius: number): Promise<{ type: 'FeatureCollection'; features: any[] }> {
   const dLat = radius / 110574;
   const dLon = radius / (111320 * Math.cos((center.lat * Math.PI) / 180));
   const box = [center.lon - dLon, center.lat - dLat, center.lon + dLon, center.lat + dLat];
   const geom = { type: 'Polygon', coordinates: [[[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]], [box[0], box[1]]]] };
-  const features: any[] = [];
-  for (let start = 0; start < 20 * PAGE; start += PAGE) {
-    const j = await getJson(`${API}?geom=${encodeURIComponent(JSON.stringify(geom))}&_limit=${PAGE}&_start=${start}`);
-    const got: any[] = j.features ?? [];
-    features.push(...got);
-    if (got.length < PAGE) break;
-  }
+  const features = await getAllPages((start) => `${API}?geom=${encodeURIComponent(JSON.stringify(geom))}&_limit=${PAGE}&_start=${start}`, 20);
   return { type: 'FeatureCollection', features };
 }
 
@@ -66,13 +79,7 @@ export async function fetchDistrict(opts: { name: string; center: LonLat; radius
 
 /** Toutes les parcelles cadastrales d'une commune (code INSEE), par pages. */
 export async function fetchCadastreCommune(insee: string, arr?: string): Promise<{ type: 'FeatureCollection'; features: any[] }> {
-  const features: any[] = [];
-  for (let start = 0; start < 60 * PAGE; start += PAGE) {
-    const j = await getJson(`${API}?code_insee=${insee}${arr ? `&code_arr=${arr}` : ''}&_limit=${PAGE}&_start=${start}`);
-    const got: any[] = j.features ?? [];
-    features.push(...got);
-    if (got.length < PAGE) break;
-  }
+  const features = await getAllPages((start) => `${API}?code_insee=${insee}${arr ? `&code_arr=${arr}` : ''}&_limit=${PAGE}&_start=${start}`, 60);
   return { type: 'FeatureCollection', features };
 }
 
@@ -140,6 +147,18 @@ function boundsOf(features: any[]): { minLon: number; maxLon: number; minLat: nu
   return { minLon, maxLon, minLat, maxLat };
 }
 
+/** Nombre de carreaux téléchargés en même temps. */
+const TILE_CONCURRENCY = 4;
+
+/** Exécute `fn` sur chaque élément, `limit` à la fois ; la première erreur interrompt le tout. */
+export async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 export async function fetchCommune(opts: CommuneOptions): Promise<District> {
   const log = opts.log ?? (() => {});
   // Parcelles : commune (ou arrondissement) par code, ou secteur autour d'un point ; l'étendue se déduit des parcelles.
@@ -160,14 +179,17 @@ export async function fetchCommune(opts: CommuneOptions): Promise<District> {
   const roadMap = new Map<string, DistrictRoad>();
   const zoneMap = new Map<string, DistrictZone>();
   let n = 0;
-  for (const t of tiles) {
-    const b = await fetchNearbyBuildings(t.lon, t.lat, TILE / 2 + 20);
+  // Carreaux traités par groupes (le service répond en ~0,6 s par requête : en série, une commune prend des minutes).
+  await pool(tiles, TILE_CONCURRENCY, async (t) => {
+    const [b, roads, zones] = await Promise.all([fetchNearbyBuildings(t.lon, t.lat, TILE / 2 + 20), fetchRoads(t, TILE / 2), fetchZones(t, TILE / 2)]);
     for (const x of b.buildings) bMap.set(x.id, x);
-    for (const r of await fetchRoads(t, TILE / 2)) roadMap.set(`${r.line[0]}|${r.line[r.line.length - 1]}|${r.line.length}`, r);
-    for (const z of await fetchZones(t, TILE / 2)) zoneMap.set(`${z.code}|${z.label}|${z.rings[0][0]}|${z.rings.length}`, z);
+    for (const r of roads) roadMap.set(`${r.line[0]}|${r.line[r.line.length - 1]}|${r.line.length}`, r);
+    for (const z of zones) zoneMap.set(`${z.code}|${z.label}|${z.rings[0][0]}|${z.rings.length}`, z);
     log(`carreau ${++n}/${tiles.length} : ${bMap.size} bâtiments, ${roadMap.size} voies, ${zoneMap.size} zones`);
-  }
-  for (const t of tiles) for (const p of await fetchPois(t, TILE / 2 - 700 > 0 ? TILE / 2 - 700 : 0)) poiMap.set(`${p.kind}|${p.lon}|${p.lat}`, p);
+  });
+  await pool(tiles, TILE_CONCURRENCY, async (t) => {
+    for (const p of await fetchPois(t, TILE / 2 - 700 > 0 ? TILE / 2 - 700 : 0)) poiMap.set(`${p.kind}|${p.lon}|${p.lat}`, p);
+  });
   const fetchedAt = new Date().toISOString().slice(0, 10);
   const buildings = [...bMap.values()];
   // Ventes réelles de la commune : mix de logements et prix par typologie (absent si la commune n'a pas de ventes d'appartements).
