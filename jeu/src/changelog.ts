@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.13.5', title: 'Bâtiments plus nets', notes: ['Les emprises qui contournent un terrain par plusieurs rues redeviennent un rectangle net'] },
   { version: '0.13.4', title: 'Barres du haut stables', notes: ['Les barres Objectif et Trimestre ne rejouent plus leur animation à chaque clic'] },
   { version: '0.13.3', title: 'Meilleur projet par défaut', notes: ['Chaque terrain s’ouvre sur son meilleur projet (immeuble ou maisons, niveaux, attique)'] },
   { version: '0.13.2', title: 'Chargement des cartes beaucoup plus rapide', notes: ['Prix par zone (avec bonus de situation), sans parcelles naturelles ni équipements publics à l’achat, ZAC de part et d’autre d’une rue'] },

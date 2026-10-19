@@ -282,7 +282,8 @@ function regularize(res: { ring: Ring; limitedBy: string[] }, comp: PolygonRings
   }
   if (simp && !isComplex(simp) && ringArea(simp) >= 0.85 * area) return { ...res, ring: simp };
   const rect = largestRectangle(comp, opts);
-  if (rect && ringArea(rect.ring) >= 0.7 * area) return { ring: rect.ring, limitedBy: [...new Set([...res.limitedBy, ...rect.limitedBy])] };
+  // Encore tarabiscotée (bande qui contourne le terrain par plusieurs rues) : un bâtiment net, même plus petit, vaut mieux.
+  if (rect && ringArea(rect.ring) >= 0.5 * area) return { ring: rect.ring, limitedBy: [...new Set([...res.limitedBy, ...rect.limitedBy])] };
   if (simp && ringArea(simp) >= 0.8 * area && simp.length < res.ring.length) return { ...res, ring: simp };
   return res;
 }
