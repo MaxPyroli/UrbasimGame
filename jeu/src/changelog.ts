@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.13.3', title: 'Meilleur projet par défaut', notes: ['Chaque terrain s’ouvre sur son meilleur projet (immeuble ou maisons, niveaux, attique)'] },
   { version: '0.13.2', title: 'Chargement des cartes beaucoup plus rapide', notes: ['Prix par zone (avec bonus de situation), sans parcelles naturelles ni équipements publics à l’achat, ZAC de part et d’autre d’une rue'] },
   { version: '0.13.1', title: 'Zones mixtes et prix', notes: ['Zones du PLU qui se recouvrent : la plus précise s’applique (mixte de Sucy) ; prix demandés alignés sur le potentiel du terrain'] },
   { version: '0.13.0', title: 'Prix réalistes et ensembles de maisons', notes: ['Prix des terrains alignés sur le bâti existant, type « maisons » en zone pavillonnaire, terrain refinancé par la banque au lancement'] },

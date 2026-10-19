@@ -181,6 +181,7 @@ let state: GameState = saved ?? newGame(randomIdentity(Date.now() % 100000), 'no
 const colorOf = (id: string) => state.players.find((p) => p.id === id)?.color ?? FALLBACK_COLORS[id] ?? '#888';
 const shortName = (n: string) => (n.length > 16 ? `${n.slice(0, 15)}…` : n);
 let selected = new Set<string>();
+let autoBestKey = '';
 let multi = false;
 /** Coche la case « sélection multiple » de la barre de la carte pour qu'elle reflète l'état. */
 function syncMultiBox() {
@@ -2310,6 +2311,19 @@ function projectForm(p: Plot, owned: boolean): string {
   const totalCap = Math.min(rule ? rule.maxLevels + (ob?.programme.bonusLevels ?? 0) : 11, ob ? ob.maxLevels : 99);
   // Type de logement : maisons imposées en quartier pavillonnaire, immeuble imposé par un appel d'offres ou en zone dense.
   const types = ob ? (['collectif'] as HousingType[]) : housingTypesFor(rule);
+  // Un nouveau terrain (ou assemblage) s'ouvre sur son meilleur projet ; le joueur ajuste ensuite à sa guise.
+  const bestKey = `${p.id}|${[...selected].sort().join('+')}`;
+  if (autoBestKey !== bestKey) {
+    autoBestKey = bestKey;
+    const found = bestForm(p, owned);
+    if (found) {
+      form.levels = found.levels;
+      form.attic = found.attic;
+      form.housing = found.housing;
+      form.second = !found.single;
+      form.parking = 'auto';
+    }
+  }
   if (!types.includes(form.housing)) form.housing = types[0];
   const maxLv = Math.max(0, Math.min(rule || ob ? totalCap - (form.attic ? 1 : 0) : 10, form.housing === 'maison' ? 1 : 99));
   if (form.levels > maxLv) form.levels = maxLv;
