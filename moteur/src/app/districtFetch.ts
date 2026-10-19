@@ -147,6 +147,29 @@ function boundsOf(features: any[]): { minLon: number; maxLon: number; minLat: nu
   return { minLon, maxLon, minLat, maxLat };
 }
 
+/** Au-delà de cette surface (m²), une parcelle isolée est un champ ou un bois, pas un terrain à bâtir. */
+const COUNTRYSIDE_PARCEL = 5000;
+
+/** Centre (moyenne des sommets du premier contour) d'une parcelle GeoJSON. */
+function featureCenter(f: any): { lon: number; lat: number } | null {
+  const poly: number[][] | undefined = f.geometry?.type === 'MultiPolygon' ? f.geometry.coordinates?.[0]?.[0] : f.geometry?.type === 'Polygon' ? f.geometry.coordinates?.[0] : undefined;
+  if (!poly?.length) return null;
+  return { lon: poly.reduce((t, q) => t + q[0], 0) / poly.length, lat: poly.reduce((t, q) => t + q[1], 0) / poly.length };
+}
+
+/** Surface approximative (m²) d'une parcelle GeoJSON (premier contour). */
+function featureArea(f: any, kx: number): number {
+  const poly: number[][] | undefined = f.geometry?.type === 'MultiPolygon' ? f.geometry.coordinates?.[0]?.[0] : f.geometry?.type === 'Polygon' ? f.geometry.coordinates?.[0] : undefined;
+  if (!poly || poly.length < 3) return 0;
+  let a = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const [x1, y1] = poly[i];
+    const [x2, y2] = poly[(i + 1) % poly.length];
+    a += x1 * kx * (y2 * 110574) - x2 * kx * (y1 * 110574);
+  }
+  return Math.abs(a) / 2;
+}
+
 /** Nombre de carreaux téléchargés en même temps. */
 const TILE_CONCURRENCY = 4;
 
@@ -171,9 +194,23 @@ export async function fetchCommune(opts: CommuneOptions): Promise<District> {
   const radius = Math.ceil(Math.hypot(widthM, heightM) / 2 / 50) * 50;
   log(`${cadastre.features.length} parcelles`);
   const TILE = opts.tile ?? 1000;
+  // Commune étendue (rurale) : on ne télécharge que les carreaux qui contiennent du bâti ou de petites parcelles (le village),
+  // pas les champs et les bois ; leurs grandes parcelles agricoles sont écartées (rien à y construire).
+  const tileOf = (f: any) => {
+    const c = featureCenter(f);
+    return c ? `${Math.floor(((c.lon - bounds.minLon) * kx) / TILE)}|${Math.floor(((c.lat - bounds.minLat) * 110574) / TILE)}` : null;
+  };
+  const needed = new Set<string>();
+  for (const f of cadastre.features) if (featureArea(f, kx) < COUNTRYSIDE_PARCEL) needed.add(tileOf(f) ?? '');
+  const kept = cadastre.features.filter((f) => needed.has(tileOf(f) ?? ''));
+  if (kept.length < cadastre.features.length) {
+    log(`${cadastre.features.length - kept.length} grandes parcelles de campagne écartées`);
+    cadastre.features = kept;
+  }
   const tiles: LonLat[] = [];
-  for (let x = TILE / 2; x < widthM + TILE / 2; x += TILE)
-    for (let y = TILE / 2; y < heightM + TILE / 2; y += TILE) tiles.push({ lon: bounds.minLon + x / kx, lat: bounds.minLat + y / 110574 });
+  for (let i = 0; i * TILE < widthM + TILE / 2; i++)
+    for (let j = 0; j * TILE < heightM + TILE / 2; j++)
+      if (needed.has(`${i}|${j}`)) tiles.push({ lon: bounds.minLon + (i * TILE + TILE / 2) / kx, lat: bounds.minLat + (j * TILE + TILE / 2) / 110574 });
   const bMap = new Map<string, ContextBuilding>();
   const poiMap = new Map<string, Poi>();
   const roadMap = new Map<string, DistrictRoad>();
