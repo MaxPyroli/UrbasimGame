@@ -341,7 +341,7 @@ button.install { border-style: dashed; }
 .home-inner > *:nth-child(3) { animation-delay: 0.12s; }
 .home-inner > *:nth-child(4) { animation-delay: 0.18s; }
 .home-inner > *:nth-child(n+5) { animation-delay: 0.24s; }
-.pbar i, .goalbar i, .tlbar i, .meter i { transform-origin: left; animation: barIn 0.6s ease-out; }
+.pbar i, .tlbar i, .meter i { transform-origin: left; animation: barIn 0.6s ease-out; }
 .pulse { animation: pulse 0.5s ease-out; }
 .flash-up { animation: flashUp 0.9s ease-out; }
 .flash-down { animation: flashDown 0.9s ease-out; }
