@@ -500,7 +500,9 @@ map.createPane('zones');
 map.getPane('zones')!.style.zIndex = '330';
 map.getPane('zones')!.style.pointerEvents = 'none';
 const zonesLayer = L.layerGroup();
-for (const z of district.zones ?? []) {
+// Les grandes zones d'abord : un secteur plus petit recouvrant une zone reste visible par-dessus.
+const zoneSize = (z: { rings: [number, number][][] }) => z.rings.reduce((t, r) => t + Math.abs(r.reduce((a, q, i) => a + (r[(i + 1) % r.length][0] - q[0]) * (r[(i + 1) % r.length][1] + q[1]), 0)), 0);
+for (const z of [...(district.zones ?? [])].sort((a, b) => zoneSize(b) - zoneSize(a))) {
   for (const ring of z.rings.flatMap(clipRing)) {
     L.polygon(ring.map(([lon, lat]) => [lat, lon] as [number, number]), { pane: 'zones', interactive: false, stroke: true, color: ZONE_RULES[z.family].color, weight: 1, opacity: 0.8, fillColor: ZONE_RULES[z.family].color, fillOpacity: 0.38 })
       .bindTooltip(`${esc(z.code)} · ${esc(ZONE_RULES[z.family].label)}`, { sticky: true })

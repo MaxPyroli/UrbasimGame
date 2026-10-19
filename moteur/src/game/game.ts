@@ -161,9 +161,15 @@ export function appraise(parcel: Parcel, existingSdp: number, config: GameConfig
   const area = parcelArea(parcel);
   if (parcel.streetEdges.length === 0 || (rule && !rule.buildable)) return { best: 0, area };
   let best = 0;
+  const seen = new Set<string>();
   for (const housing of housingTypesFor(rule)) for (let levels = 0; levels <= (housing === 'maison' ? 1 : 5); levels++) for (const attic of [false, true]) {
     const base: Criteria = { ...promoterCriteria(config.market), levels, attic, housing };
-    const project = computeProject(parcel, rule ? applyRule(base, rule) : base);
+    const crit = rule ? applyRule(base, rule) : base;
+    // Le PLU plafonne les niveaux : au-delà, ce serait le même projet recalculé.
+    const key = `${housing}${crit.levels}${crit.attic}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const project = computeProject(parcel, crit);
     if (project.footprint === null || project.checks.some((c) => c.status === 'error')) continue;
     const b = computeBilan({ project, market, landPrice: 0, existingSdp, params: { ...config.bilanParams, targetMargin: config.askMargin } });
     best = Math.max(best, b.maxLandPrice);
@@ -213,7 +219,8 @@ export function askingPriceFrom(id: string, best: number, area: number, config: 
   // Même sans projet rentable, un terrain vaut quelque chose : usage actuel, jardin, intérêt pour un voisin qui assemble.
   const floor = Math.max(MIN_PLOT_PRICE, 0.6 * area * market.landPerSdp * locationFactor);
   // Un terrain bâti ne se vend pas moins cher que ce qu'il y a dessus (de 0,95 à 1,1 fois sa valeur).
-  const used = existing * (0.95 + 0.15 * ((h % 1000) / 999));
+  // … sauf quand le projet vaut nettement moins que le bâti (Paris, centres denses) : le vendeur s'aligne alors sur le potentiel.
+  const used = Math.min(existing * (0.95 + 0.15 * ((h % 1000) / 999)), Math.max(best, 0) * 1.3);
   return Math.max(Math.round(floor / 1000) * 1000, Math.round((best * factor) / 1000) * 1000, Math.round(used / 1000) * 1000);
 }
 

@@ -131,6 +131,18 @@ export interface DistrictSource {
 }
 
 /** Point dans un contour [lon, lat] (lancer de rayon). */
+/** Zone du PLU en un point : quand des zones se recouvrent (secteur dans une zone), la plus petite, donc la plus précise, l'emporte. */
+export function zoneAt<Z extends { rings: [number, number][][] | number[][][] }>(zones: Z[], lon: number, lat: number): Z | undefined {
+  let best: Z | undefined;
+  let bestArea = Infinity;
+  for (const z of zones) {
+    if (!(z.rings as [number, number][][]).some((r) => pointInRing(lon, lat, r))) continue;
+    const area = (z.rings as [number, number][][]).reduce((t, r) => t + Math.abs(r.reduce((a, q, i) => a + (r[(i + 1) % r.length][0] - q[0]) * (r[(i + 1) % r.length][1] + q[1]), 0)), 0);
+    if (area < bestArea) (best = z), (bestArea = area);
+  }
+  return best;
+}
+
 export function pointInRing(x: number, y: number, ring: [number, number][]): boolean {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -270,7 +282,7 @@ export function buildDistrict(src: DistrictSource): District {
   // Zone du PLU : celle qui contient le centre de la parcelle (sinon la plus proche en contenance : rien).
   for (const p of parcels) {
     const c = { lon: p.ring.reduce((t, q) => t + q.lon, 0) / p.ring.length, lat: p.ring.reduce((t, q) => t + q.lat, 0) / p.ring.length };
-    const z = (src.zones ?? []).find((zone) => zone.rings.some((r) => pointInRing(c.lon, c.lat, r)));
+    const z = zoneAt(src.zones ?? [], c.lon, c.lat);
     if (z) {
       p.zone = z.family;
       p.zoneCode = z.code;
@@ -298,7 +310,7 @@ export function withZoneFamilies(d: District): District {
   const zones = d.zones.map((z) => (z.family === 'nature' ? z : { ...z, family: zoneFamily('U', z.code, z.label) }));
   const parcels = d.parcels.map((p) => {
     const c = { lon: p.ring.reduce((s, q) => s + q.lon, 0) / p.ring.length, lat: p.ring.reduce((s, q) => s + q.lat, 0) / p.ring.length };
-    const z = zones.find((zone) => zone.rings.some((r) => pointInRing(c.lon, c.lat, r)));
+    const z = zoneAt(zones, c.lon, c.lat);
     if (!z) return p;
     return { ...p, zone: z.family, zoneCode: z.code };
   });

@@ -25,6 +25,20 @@ const KINDS: Pick<ZacEquipment, 'kind' | 'label' | 'cost' | 'premium'>[] = [
 const centre = (p: Plot) => ({ x: p.parcel.ring.reduce((t, q) => t + q.lon, 0) / p.parcel.ring.length, y: p.parcel.ring.reduce((t, q) => t + q.lat, 0) / p.parcel.ring.length });
 const metres = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot((a.x - b.x) * 73_000, (a.y - b.y) * 111_000);
 
+type Pt = { x: number; y: number };
+const ringPts = (p: Plot): Pt[] => p.parcel.ring.map((q) => ({ x: q.lon * 73_000, y: q.lat * 111_000 }));
+function segDist(a: Pt, b: Pt, c: Pt): number {
+  const dx = c.x - b.x, dy = c.y - b.y, l = dx * dx + dy * dy;
+  const t = l === 0 ? 0 : Math.max(0, Math.min(1, ((a.x - b.x) * dx + (a.y - b.y) * dy) / l));
+  return Math.hypot(a.x - (b.x + t * dx), a.y - (b.y + t * dy));
+}
+/** Distance (m) entre les limites de deux parcelles : 0 si elles se touchent. */
+function gap(a: Pt[], b: Pt[]): number {
+  let d = Infinity;
+  for (const [u, v] of [[a, b], [b, a]] as const) for (const q of u) for (let i = 0; i < v.length; i++) d = Math.min(d, segDist(q, v[i], v[(i + 1) % v.length]));
+  return d;
+}
+
 /** Cadre d'opération des lots d'une ZAC : celui des ZAC (prix réduit, étage de plus) avec la participation aux équipements. */
 export function zacProgramme(zac: Zac): Programme {
   return {
@@ -48,12 +62,31 @@ export function planZacs(plots: Plot[], count: number): Zac[] {
     if (eligible.length < 3) break;
     const seed = eligible.slice().sort((a, b) => hashFrac(`${a.id}#zac${n}`) - hashFrac(`${b.id}#zac${n}`))[0];
     const c0 = centre(seed);
-    const lots = [seed, ...eligible.filter((p) => p !== seed).sort((a, b) => metres(centre(a), c0) - metres(centre(b), c0)).slice(0, 3)];
+    // Lots collés ou très proches : on agrandit le groupe de proche en proche (distance entre limites de parcelles).
+    const pts = new Map(plots.map((p) => [p.id, ringPts(p)]));
+    const lots = [seed];
+    while (lots.length < 4) {
+      let best: Plot | undefined;
+      let bestGap = Infinity;
+      for (const p of eligible) {
+        if (lots.includes(p) || metres(centre(p), c0) > 250) continue;
+        const g = Math.min(...lots.map((l) => gap(pts.get(l.id)!, pts.get(p.id)!)));
+        if (g < bestGap) (best = p), (bestGap = g);
+      }
+      if (!best || bestGap > 25) break;
+      lots.push(best);
+    }
+    if (lots.length < 2) continue;
     lots.forEach((p) => taken.add(p.id));
-    // Équipements : terrains proches, de préférence non constructibles seuls (délaissés, petits, enclavés), sinon les plus petits.
+    // Équipements : terrains collés ou proches du groupe, de préférence non constructibles seuls (délaissés, petits, enclavés), sinon les plus petits.
+    const lotPts = lots.map((l) => pts.get(l.id)!);
+    const dist = (p: Plot) => Math.min(...lotPts.map((l) => gap(l, pts.get(p.id)!)));
     const nearby = plots
       .filter((p) => !taken.has(p.id) && !p.municipal && p.issue !== 'zone' && p.area >= 60 && p.area <= 1200 && metres(centre(p), c0) < 260)
-      .sort((a, b) => (a.issue ? 0 : 1) - (b.issue ? 0 : 1) || metres(centre(a), c0) - metres(centre(b), c0));
+      .map((p) => ({ p, d: dist(p) }))
+      .filter((x) => x.d <= 40)
+      .sort((x, y) => (x.p.issue ? 0 : 1) - (y.p.issue ? 0 : 1) || x.d - y.d)
+      .map((x) => x.p);
     const sites = nearby.slice(0, 2);
     sites.forEach((p) => taken.add(p.id));
     const id = `ZAC${n + 1}`;
