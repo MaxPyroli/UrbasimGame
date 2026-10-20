@@ -25,6 +25,17 @@ export function lotPrice(s: GameState, p: ProjectRun): number {
   return ((p.bilan.revenue.total - p.socialRevenue) / Math.max(1, p.lots - p.socialLots)) * (s.marketIndex / p.marketIndexAtLaunch) * (1 + p.pricePolicy) * (1 + zacPremium(s, p.terms?.zacId));
 }
 
+/**
+ * Marge attendue d'une opération en cours : celle du lancement, corrigée de l'écart de prix des lots restants (évolution du
+ * marché et prix de vente choisi). Les ventes plus lentes d'un prix élevé coûtent en plus des intérêts, non comptés ici.
+ */
+export function expectedMargin(s: GameState, p: ProjectRun): { margin: number; rate: number } {
+  const launch = (p.bilan.revenue.total - p.socialRevenue) / Math.max(1, p.lots - p.socialLots);
+  const delta = (lotPrice(s, p) - launch) * lotsLeft(p);
+  const margin = p.bilan.margin - (p.extraCost ?? 0) + delta;
+  return { margin, rate: margin / Math.max(1, p.bilan.revenue.total + delta) };
+}
+
 /** Part des lots vendus. */
 export const soldShare = (p: ProjectRun) => p.lotsSold / p.lots;
 

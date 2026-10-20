@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.17.5', title: 'Marge en direct', notes: ['Le curseur de prix de vente d’une opération met à jour la marge attendue en direct'] },
   { version: '0.17.4', title: 'Fil du trimestre', notes: ['Onglet Trimestre : ce qu’on peut faire pendant son tour et quand passer au suivant'] },
   { version: '0.17.3', title: 'Verdict par terrain', notes: ['Chaque terrain affiche un verdict (rentable, limite, déficitaire) sur une jauge, avec la fourchette si les prix bougent'] },
   { version: '0.17.2', title: 'Pastille de notification réutilisable', notes: ['La pastille animée des nouveautés devient un composant prêt pour les notifications en jeu'] },

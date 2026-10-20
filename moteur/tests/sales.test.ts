@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_CRITERIA, LocalProjection, MARKETS, type Parcel, type Vec2 } from '../src/engine';
-import { MAX_PRICE_POLICY, MIN_PRICE_POLICY, applyAction, createGame, expectedSales, lotsLeft, marketDemand, netWorth, unitsOnOffer, type Action, type GameState } from '../src/game';
+import { MAX_PRICE_POLICY, MIN_PRICE_POLICY, applyAction, createGame, expectedMargin, expectedSales, lotsLeft, marketDemand, netWorth, unitsOnOffer, type Action, type GameState } from '../src/game';
 
 const O = new LocalProjection(2.35, 48.85);
 const lot = (x: number): Parcel => ({
@@ -27,6 +27,19 @@ const err = (s: GameState, a: Action) => {
 const both = (s: GameState) => play(play(s, { type: 'ready', player: 'a' }), { type: 'ready', player: 'b' });
 const crit = { ...DEFAULT_CRITERIA, levels: 4 };
 const launch = (s: GameState, who: 'a' | 'b', plot: string) => play(play(s, { type: 'buy', player: who, plot }), { type: 'launch', player: who, plot, criteria: crit });
+
+describe('marge attendue d’une opération en cours', () => {
+  it('suit le prix de vente choisi : une prime l’augmente, une remise la réduit, sans changement elle vaut la marge du lancement', () => {
+    const s = launch(newGame(), 'a', 'T1');
+    const base = expectedMargin(s, s.projects[0]);
+    expect(base.margin).toBeCloseTo(s.projects[0].bilan.margin, 0);
+    const up = expectedMargin(play(s, { type: 'setPrice', player: 'a', project: 'P1', policy: 0.1 }), play(s, { type: 'setPrice', player: 'a', project: 'P1', policy: 0.1 }).projects[0]);
+    const down = expectedMargin(play(s, { type: 'setPrice', player: 'a', project: 'P1', policy: -0.1 }), play(s, { type: 'setPrice', player: 'a', project: 'P1', policy: -0.1 }).projects[0]);
+    expect(up.margin).toBeGreaterThan(base.margin);
+    expect(down.margin).toBeLessThan(base.margin);
+    expect(up.rate).toBeGreaterThan(down.rate);
+  });
+});
 
 describe('marché de l’immobilier : les logements se vendent au fil des trimestres', () => {
   it('à l’ouverture, rien n’est vendu ; la demande limite les ventes par trimestre', () => {

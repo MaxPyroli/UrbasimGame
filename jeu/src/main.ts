@@ -73,6 +73,7 @@ import {
   expectedSales,
   lotsLeft,
   lotPrice,
+  expectedMargin,
   marketDemand,
   soldShare,
   unitsOnOffer,
@@ -2709,7 +2710,8 @@ function operationCard(runId: string): string {
     ${bar}<div>${r.lotsSold}/${r.lots} lots vendus${left ? ` <span class="muted">· ≈ <span data-sales="${esc(r.id)}">${sales.toFixed(1).replace('.', ',')}</span> par trimestre</span>` : ' · tout est vendu'}</div>`;
   html += r.financed ? '<div class="muted">Crédit bancaire débloqué</div>' : `<div class="muted">Crédit débloqué à ${threshold} % vendus${share >= threshold ? '' : ` · encore ${Math.max(1, Math.ceil(r.lots * state.config.presaleThreshold) - r.lotsSold)} lot(s)`}</div>`;
   if (mineOp) {
-    html += `<div>Marge attendue <b class="${r.bilan.margin >= 0 ? 'good' : 'bad'}">${eur(r.bilan.margin)}</b> <span class="muted">${pct(r.bilan.marginRate)}${r.extraCost ? ` · surcoûts ${eur(r.extraCost)}` : ''}</span></div>`;
+    const lm = expectedMargin(state, r);
+    html += `<div title="Estimation : prix du lancement ajusté du marché et de votre prix de vente sur les lots restants (les ventes plus lentes coûtent en plus des intérêts)">Marge attendue <b data-margin="${esc(r.id)}" class="${lm.margin >= 0 ? 'good' : 'bad'}">${eur(lm.margin)}</b> <span class="muted"><span data-margin-rate="${esc(r.id)}">${pct(lm.rate)}</span>${r.extraCost ? ` · surcoûts ${eur(r.extraCost)}` : ''}</span></div>`;
     if (left > 0)
       html += `<label class="f" title="Une remise vend plus vite ; une prime ralentit les ventes">Prix de vente <span><input type="range" data-price="${esc(r.id)}" min="${MIN_PRICE_POLICY * 100}" max="${MAX_PRICE_POLICY * 100}" step="1" value="${Math.round(r.pricePolicy * 100)}"> <b data-pct="${esc(r.id)}">${r.pricePolicy > 0 ? '+' : ''}${Math.round(r.pricePolicy * 100)} %</b> <span class="muted">(≈ <span data-lot="${esc(r.id)}">${eur(lotPrice(state, r))}</span>/lot)</span></span></label>`;
   }
@@ -2859,6 +2861,11 @@ function bindSelection() {
       set('data-pct', `${v > 0 ? '+' : ''}${v} %`);
       set('data-lot', eur(lotPrice(state, run)));
       set('data-sales', (expectedSales(state).get(id) ?? 0).toFixed(1).replace('.', ','));
+      // La marge attendue suit le prix de vente en direct.
+      const lm = expectedMargin(state, run);
+      set('data-margin', eur(lm.margin));
+      set('data-margin-rate', pct(lm.rate));
+      side.querySelector(`[data-margin="${id}"]`)?.setAttribute('class', lm.margin >= 0 ? 'good' : 'bad');
     };
     el.onchange = () => renderAll(); // met à jour aussi les autres opérations (la demande se partage)
   });
