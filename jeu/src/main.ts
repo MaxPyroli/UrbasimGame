@@ -3051,15 +3051,15 @@ if (import.meta.env.DEV) {
   };
 }
 
-// Mode caché : taper « bigmoney » hors d'un champ de saisie.
+// Mode caché : taper « motherlode » hors d'un champ de saisie.
 {
   let typed = '';
   document.addEventListener('keydown', (e) => {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     if (e.key.length !== 1) return;
-    typed = (typed + e.key.toLowerCase()).slice(-8);
-    if (typed !== 'bigmoney' || !state) return;
+    typed = (typed + e.key.toLowerCase()).slice(-10);
+    if (typed !== 'motherlode' || !state) return;
     typed = '';
     state = { ...state, players: state.players.map((p) => (p.id === ME ? { ...p, cash: 1_000_000_000 } : p)) };
     save();
