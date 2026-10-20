@@ -1,6 +1,6 @@
 import { MARKETS } from '../../moteur/src/engine';
 import { customId, listCustomMaps, prepareMap } from './customMaps';
-import { ARRONDISSEMENTS, MAX_PARCELS, SECTOR_RADII, countParcels, countParcelsBox, estimateSeconds, marketFor, searchCommunes, type CommuneHit } from '../../moteur/src/app/communes';
+import { ARRONDISSEMENTS, MAX_PARCELS, SECTOR_RADII, needsSector, countParcels, countParcelsBox, estimateSeconds, marketFor, searchCommunes, type CommuneHit } from '../../moteur/src/app/communes';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const fmt = (n: number) => n.toLocaleString('fr-FR');
@@ -35,7 +35,7 @@ export function mountCommuneSearch(host: HTMLElement, onPrepared: () => void = (
     const size = card.querySelector<HTMLElement>('#cs-size')!;
     try {
       const n = await countParcels(c.code, arr?.arr);
-      if (n <= MAX_PARCELS) return offerPrepare(size, c, arr, n);
+      if (!needsSector(n, c.population)) return offerPrepare(size, c, arr, n);
       if (arr) {
         size.innerHTML = `<span class="bad">${fmt(n)} parcelles : trop grand pour une seule carte.</span>`;
         return;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ARRONDISSEMENTS, estimateSeconds, marketFor } from '../src/app/communes';
+import { ARRONDISSEMENTS, estimateSeconds, marketFor, needsSector } from '../src/app/communes';
 
 describe('communes', () => {
   it('choisit le marché de référence selon le département et la taille', () => {
@@ -19,8 +19,14 @@ describe('communes', () => {
     expect(ARRONDISSEMENTS['13055'].list).toHaveLength(16);
     expect(ARRONDISSEMENTS['75056'].list[0].name).toBe('Paris 1er');
   });
+  it('ne découpe en secteurs que les grandes villes ou les communes démesurées', () => {
+    expect(needsSector(11_000, 73_000)).toBe(false);
+    expect(needsSector(38_000, 64_000)).toBe(true);
+    expect(needsSector(14_000, 2_000)).toBe(false); // village étendu : commune entière
+    expect(needsSector(40_000, 3_000)).toBe(true);
+  });
   it('estime la durée de préparation selon le nombre de parcelles', () => {
-    expect(estimateSeconds(7_000)).toBeGreaterThan(40);
-    expect(estimateSeconds(7_000)).toBeLessThan(90);
+    expect(estimateSeconds(7_000)).toBeGreaterThan(100);
+    expect(estimateSeconds(7_000)).toBeLessThan(200);
   });
 });

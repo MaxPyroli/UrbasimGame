@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.14.2', title: 'Carte libre : communes lentes', notes: ['Communes dont le cadastre répondait trop lentement (Noisy, Bourges, Chamonix) : sélection par contour ; secteur seulement pour les grandes villes'] },
   { version: '0.14.1', title: 'Carte libre : grandes villes et reprise', notes: ['Secteur autour du centre pour les très grandes villes, reprise après coupure, ventes réelles lues depuis le navigateur'] },
   { version: '0.14.0', title: 'Carte libre (bêta)', notes: ['Cartes › Une autre commune : cherchez n’importe quelle commune de France, elle se prépare en une à deux minutes puis reste sur l’appareil'] },
   { version: '0.13.6', title: 'Fini les bandes interminables', notes: ['Bâtiments de 55 m au plus de long et 8 m au moins de large (6 m en tissu dense) ; le reste du terrain accueille d’autres bâtiments'] },

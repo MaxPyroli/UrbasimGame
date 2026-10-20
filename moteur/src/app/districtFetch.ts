@@ -83,10 +83,68 @@ export async function fetchDistrict(opts: { name: string; center: LonLat; radius
   });
 }
 
-/** Toutes les parcelles cadastrales d'une commune (code INSEE), par pages. */
+/** Contour d'une commune assez simple pour tenir dans une URL (au plus ~100 points par anneau), au format GeoJSON. */
+async function queryGeom(insee: string): Promise<{ geom: object; outline: [number, number][][] }> {
+  const rings = await fetchCommuneOutline(insee);
+  if (rings.length === 0) throw new Error('Contour de la commune introuvable.');
+  const lat = rings[0][0][1];
+  const coarse = rings.map((r) => {
+    let tol = 10;
+    let out = simplifyRing(r, tol, lat);
+    while (out.length > 100 && tol < 400) out = simplifyRing(r, (tol *= 1.6), lat);
+    return out;
+  });
+  return { geom: { type: 'MultiPolygon', coordinates: coarse.map((r) => [r]) }, outline: rings };
+}
+
+/** Sélection du cadastre d'une commune : par code INSEE quand le service répond vite (certaines communes le font attendre plus d'une minute), sinon par contour. */
+export interface CadastreSelector {
+  query: string;
+  total: number;
+  /** Présent quand la sélection se fait par contour : les parcelles voisines qui le débordent sont écartées. */
+  outline?: [number, number][][];
+}
+export async function cadastreSelector(insee: string, arr?: string): Promise<CadastreSelector> {
+  const byCode = `code_insee=${insee}${arr ? `&code_arr=${arr}` : ''}`;
+  try {
+    const r = await fetch(`${API}?${byCode}&_limit=1`, { signal: AbortSignal.timeout(arr ? 30_000 : 10_000) });
+    if (r.ok) {
+      const j = await r.json();
+      return { query: byCode, total: j.totalFeatures ?? 0 };
+    }
+  } catch {
+    /* trop lent ou indisponible : repli par contour */
+  }
+  if (arr) return { query: byCode, total: (await getJson(`${API}?${byCode}&_limit=1`)).totalFeatures ?? 0 };
+  const { geom, outline } = await queryGeom(insee);
+  const query = `geom=${encodeURIComponent(JSON.stringify(geom))}`;
+  const j = await getJson(`${API}?${query}&_limit=1`);
+  return { query, total: j.totalFeatures ?? 0, outline };
+}
+
+/** Toutes les parcelles cadastrales d'une commune (code INSEE ou contour), par pages. */
 export async function fetchCadastreCommune(insee: string, arr?: string): Promise<{ type: 'FeatureCollection'; features: any[] }> {
-  const features = await getAllPages((start) => `${API}?code_insee=${insee}${arr ? `&code_arr=${arr}` : ''}&_limit=${PAGE}&_start=${start}`, 60);
+  const sel = await cadastreSelector(insee, arr);
+  let features = await getAllPages((start) => `${API}?${sel.query}&_limit=${PAGE}&_start=${start}`, 80);
+  if (sel.outline) {
+    // Par contour, le service renvoie aussi les parcelles voisines qui touchent la limite : on ne garde que celles de la commune.
+    const inside = (f: any) => {
+      const c = featureCenter(f);
+      return !!c && sel.outline!.some((r) => pointInPolygon(c.lon, c.lat, r));
+    };
+    features = features.filter(inside);
+  }
   return { type: 'FeatureCollection', features };
+}
+
+function pointInPolygon(x: number, y: number, ring: [number, number][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 /** Contour de la commune (anneaux extérieurs [lon, lat], simplifiés à 3 m) : sert à n'afficher que ce qui est dans la commune. */

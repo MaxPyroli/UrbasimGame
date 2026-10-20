@@ -1,5 +1,5 @@
 import type { MarketId } from '../engine';
-import { cadastreBoxGeom } from './districtFetch';
+import { cadastreBoxGeom, cadastreSelector } from './districtFetch';
 
 /** Une commune trouvée par la recherche (API Géo, données publiques). */
 export interface CommuneHit {
@@ -14,8 +14,16 @@ export interface CommuneHit {
   area: number;
 }
 
-/** Au-delà de ce nombre de parcelles, on propose un secteur plutôt que la commune entière. */
+/** Au-delà de ce nombre de parcelles, une grande ville se prépare par secteur plutôt qu'en entier. */
 export const MAX_PARCELS = 12_000;
+/** Plafond absolu, même pour une commune rurale. */
+export const HARD_MAX_PARCELS = 25_000;
+
+/**
+ * Faut-il proposer un secteur ? Les communes étendues et peu peuplées (montagne, campagne) comptent beaucoup de grandes
+ * parcelles agricoles ou forestières, écartées à la préparation : on les garde entières tant qu'elles restent raisonnables.
+ */
+export const needsSector = (parcels: number, population: number): boolean => parcels > HARD_MAX_PARCELS || (parcels > MAX_PARCELS && population >= 20_000);
 
 const GEO = 'https://geo.api.gouv.fr/communes';
 const CADASTRE = 'https://apicarto.ign.fr/api/cadastre/parcelle';
@@ -92,9 +100,8 @@ export function marketFor(c: Pick<CommuneHit, 'dept' | 'population'>): MarketId 
 }
 
 /** Nombre exact de parcelles du cadastre pour une commune (ou un arrondissement) : une requête d'une seule parcelle. */
-export async function countParcels(insee: string, arr?: string, signal?: AbortSignal): Promise<number> {
-  const j = await getJson(`${CADASTRE}?code_insee=${insee}${arr ? `&code_arr=${arr}` : ''}&_limit=1`, signal);
-  return j.totalFeatures ?? j.numberMatched ?? 0;
+export async function countParcels(insee: string, arr?: string, _signal?: AbortSignal): Promise<number> {
+  return (await cadastreSelector(insee, arr)).total;
 }
 
 /** Rayons (m) proposés pour un secteur autour du centre d'une très grande commune. */
@@ -107,4 +114,4 @@ export async function countParcelsBox(center: { lon: number; lat: number }, radi
 }
 
 /** Durée approximative de préparation (secondes) d'une commune de `parcels` parcelles, d'après les mesures de `bench-open`. */
-export const estimateSeconds = (parcels: number): number => Math.round(10 + parcels * 0.008);
+export const estimateSeconds = (parcels: number): number => Math.round(15 + parcels * 0.019);
