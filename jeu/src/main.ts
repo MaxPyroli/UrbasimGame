@@ -1815,7 +1815,7 @@ function renderSingle(p: Plot): string {
       ${p.obligation && p.owner === ME ? fact('Payé à la commune', `${eur(p.obligation.price)} <span class="muted">${Math.round(p.obligation.price / area)} €/m²</span>`) : fact(isListed(p) ? 'Prix de départ' : 'Prix affiché', `${eur(isListed(p) ? p.listing!.minPrice : p.askingPrice)} <span class="muted">${Math.round(p.askingPrice / area)} €/m²</span>`)}
       ${fact('Zone', rule ? pill(`${esc(rule.label)}${rule.buildable ? ` · R+${rule.maxLevels}` : ''}`, rule.color) : '—')}
       ${fact('Bâti existant', p.existingSdp ? `${p.existingSdp} m²${p.existingHeight ? ` · ${Math.round(p.existingHeight)} m` : ''}` : 'aucun')}
-    </div>`;
+    </div><!--VERDICT-->`;
 
   if (!run) html += plotBrief(p, mine) + neighboursBlock(p);
   if (run) {
@@ -1852,7 +1852,7 @@ function renderSingle(p: Plot): string {
       drawOverlay(null);
       return html + details(p);
     }
-    return html + projectForm(p, false) + details(p);
+    { const form = projectForm(p, false, false); return html.replace('<!--VERDICT-->', lastVerdict) + form + details(p); }
   }
   if (!p.owner) {
     const missing = buyCost(p) - me().cash;
@@ -1862,7 +1862,7 @@ function renderSingle(p: Plot): string {
       drawOverlay(null);
       return html + details(p);
     }
-    return html + projectForm(p, false) + details(p);
+    { const form = projectForm(p, false, false); return html.replace('<!--VERDICT-->', lastVerdict) + form + details(p); }
   }
   if (!mine) {
     drawOverlay(null);
@@ -1873,7 +1873,7 @@ function renderSingle(p: Plot): string {
     drawOverlay(null);
     return html + details(p);
   }
-  return html + projectForm(p, true) + details(p);
+  { const form = projectForm(p, true, false); return html.replace('<!--VERDICT-->', lastVerdict) + form + details(p); }
 }
 
 // ---------------------------------------------------------------- barres de progression, notifications, fenêtres d'alerte
@@ -2460,7 +2460,65 @@ function mixFold(proj: ReturnType<typeof computeProject>): string {
   return `<details class="fold" id="mix-fold" ${mixOpen ? 'open' : ''}><summary>Répartition des logements${market.demandMix ? ` · adéquation ${Math.round(fit * 100)} %` : ''}</summary><div class="foldbody">${body}</div></details>`;
 }
 
-function projectForm(p: Plot, owned: boolean): string {
+/** Zones de la jauge du verdict : en dessous de 0 % la marge est négative, jusqu'à 8 % elle est juste, au-delà le projet est rentable. */
+const VERDICT_MIN = -0.15;
+const VERDICT_MAX = 0.25;
+const VERDICT_OK = 0.08;
+const gaugePos = (m: number) => Math.max(0, Math.min(100, ((m - VERDICT_MIN) / (VERDICT_MAX - VERDICT_MIN)) * 100));
+
+/**
+ * Verdict du terrain en une carte : « Rentable / Limite / Déficitaire » sur une jauge rouge, orange, verte, avec le gain estimé,
+ * la fourchette si les prix de vente bougent de 5 % (la marge s'ajuste à chaque trimestre avec le marché) et l'étape suivante.
+ */
+function verdictCard(p: Plot, proj: ReturnType<typeof computeProject>, landPrice: number, owned: boolean, b: ReturnType<typeof planBilan>, ok: boolean, short: number): string {
+  const ob = obligationOf(p, owned);
+  const at = (delta: number) =>
+    computeBilan({
+      project: proj,
+      market: currentMarket(state, p),
+      landPrice,
+      existingSdp: p.existingSdp,
+      params: programmeParams(currentParams(state), ob?.programme),
+      ...(ob ? { socialShare: ob.socialShare, quality: ob.quality } : {}),
+      salesPremium: (ob?.programme.salesPremium ?? 0) + delta,
+    });
+  const up = at(0.05);
+  const down = at(-0.05);
+  const m = b.marginRate;
+  const level = !ok ? 'warn' : m < 0 ? 'bad' : m < VERDICT_OK ? 'mid' : 'good';
+  const word = !ok ? 'À corriger' : m < 0 ? 'Déficitaire' : m < VERDICT_OK ? 'Limite' : 'Rentable';
+  const lo = Math.min(gaugePos(down.marginRate), gaugePos(up.marginRate));
+  const hi = Math.max(gaugePos(down.marginRate), gaugePos(up.marginRate));
+  // Hausse des prix de vente qui ramènerait la marge à zéro (la marge est quasi linéaire avec les prix).
+  const slope = (up.margin - down.margin) / 0.1;
+  const breakEven = b.margin < 0 && slope > 0 ? -b.margin / slope : null;
+  const outlook =
+    breakEven !== null
+      ? breakEven <= 0.3
+        ? `Il faudrait environ <b>+${Math.round(breakEven * 100)} %</b> sur les prix de vente pour atteindre l’équilibre.`
+        : 'Même avec une forte hausse des prix, ce projet resterait déficitaire : changez de projet ou négociez le terrain.'
+      : `Si les prix de vente varient de 5 % : de <b>${pct(down.marginRate)}</b> à <b>${pct(up.marginRate)}</b> de marge.`;
+  const next = !ok
+    ? 'Corrigez les points signalés ci-dessous, ou cliquez sur « Meilleur projet ».'
+    : short > 0
+      ? `Il vous manque ${eur(short)} de trésorerie.`
+      : owned
+        ? 'Le terrain est à vous : lancez l’opération.'
+        : 'Étape suivante : faites une offre ou achetez (boutons plus bas).';
+  return `<div class="verdict ${level}" title="Calculée aux prix de vente actuels (indice ${(state.marketIndex * 100).toFixed(0)}) : la marge bouge avec le marché, les taux et les coûts.">
+      <div class="vd-head"><b class="vd-word">${word}</b><span class="vd-gain">${ok ? `${b.margin >= 0 ? '+' : '−'}${eur(Math.abs(b.margin))} · ${pct(m)}` : ''}</span></div>
+      <div class="vd-gauge" aria-hidden="true"><i class="z-bad"></i><i class="z-mid"></i><i class="z-good"></i><span class="vd-range" style="left:${lo.toFixed(1)}%;width:${Math.max(1.5, hi - lo).toFixed(1)}%"></span><span class="vd-mark" style="left:${gaugePos(m).toFixed(1)}%"></span></div>
+      <div class="vd-scale"><span style="left:0">−15 %</span><span style="left:${gaugePos(0).toFixed(1)}%">0 %</span><span style="left:${gaugePos(VERDICT_OK).toFixed(1)}%">8 %</span><span style="left:100%">+25 %</span></div>
+      <p class="vd-note">${outlook}</p>
+      <p class="vd-next">${next}</p>
+      ${owned ? `<div class="row"><button id="launch" class="primary" ${ok && short <= 0 ? '' : 'disabled'}>Lancer l’opération</button></div>` : ''}
+    </div>`;
+}
+
+/** Verdict du dernier projet calculé par `projectForm` : l'onglet Terrain le place en haut du panneau. */
+let lastVerdict = '';
+function projectForm(p: Plot, owned: boolean, inlineVerdict = true): string {
+  lastVerdict = '';
   const rule = ruleOf(p);
   const ob = obligationOf(p, owned);
   // Hauteur permise (attique compris) : PLU plus bonus de la ZAC, sans dépasser l'engagement pris.
@@ -2516,6 +2574,9 @@ function projectForm(p: Plot, owned: boolean): string {
   const short = cashNeeded - me().cash;
   const i = proj.indicators;
   const ok = errors.length === 0;
+  const verdict = verdictCard(p, proj, landPrice, owned, b, ok, short);
+  if (inlineVerdict) html += verdict;
+  else lastVerdict = verdict;
   html += `<div class="kpis">
       <div class="kpi"><small>Marge</small><b class="${b.margin >= 0 ? 'good' : 'bad'}">${eur(b.margin)}</b><span class="muted">${pct(b.marginRate)} du CA</span></div>
       <div class="kpi" title="Le terrain est payé comptant. La banque ne finance le terrain (80 %) et les travaux qu'une fois ${Math.round(state.config.presaleThreshold * 100)} % des logements vendus sur plan."><small>Fonds propres</small><b class="${short > 0 ? 'bad' : ''}">${eur(cashNeeded)}</b><span class="muted">${owned ? 'pour lancer' : 'achat compris'}</span></div>
@@ -2524,7 +2585,6 @@ function projectForm(p: Plot, owned: boolean): string {
   html += proj.checks.filter((c) => c.status === 'error' || c.status === 'warn').map((c) => `<div class="check ${c.status === 'error' ? 'bad' : 'warn'}">${esc(c.label)} : ${esc(c.detail)}</div>`).join('');
   if (!ok) html += `<div class="muted" style="font-size:12px">Pour débloquer : réduisez les niveaux, changez le mode de stationnement dans « Options », ou cliquez sur « Meilleur projet ».</div>`;
   if (short > 0) html += `<div class="check bad">Il vous manque ${eur(short)} pour ${owned ? 'lancer' : 'acheter et lancer'} ce projet.</div>`;
-  if (owned) html += `<div class="row"><button id="launch" class="primary" ${ok && short <= 0 ? '' : 'disabled'}>Lancer l’opération</button></div>`;
   const rows = `<table>
       <tr><td>Surface de plancher</td><td>${Math.round(i.sdpTotal)} m² (${i.levelsCount} niv.)</td></tr>
       <tr><td>Logements</td><td>${i.dwellings} · SHAB ${Math.round(i.shab)} m²</td></tr>
