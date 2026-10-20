@@ -54,6 +54,8 @@ export function mountPill(root: ParentNode, o: PillOptions): Pill {
       if (text) txt.textContent = text;
       // Un instant de repos avant de se dérouler, pour que l'œil la voie arriver.
       timer = window.setTimeout(() => {
+        // Largeur exacte du contenu : la transition couvre juste la distance à parcourir (pas de course morte, donc fluide).
+        el.style.setProperty('--pill-w', `${Math.ceil(el.querySelector<HTMLElement>('.ico')!.offsetWidth + txt.offsetWidth + 2)}px`);
         el.classList.add('open');
         timer = window.setTimeout(() => el.classList.remove('open'), ms);
       }, 900);
