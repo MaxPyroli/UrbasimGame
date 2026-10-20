@@ -1,5 +1,6 @@
 // Chronomètre la préparation complète d'une commune « comme dans le navigateur » : téléchargement puis calcul, sur un seul cœur.
-// Usage : npm run bench-open -- "<nom>" <code_insee> <marché> [--arr=111] [--sector=lon,lat,rayon_m] [--tile=500]
+// Usage : npm run bench-open -- "<nom>" <code_insee> <marché> [--arr=111] [--sector=lon,lat,rayon_m] [--tile=500] [--save=<id>]
+import { writeFileSync } from 'node:fs';
 import { fetchCommune } from '../src/app/districtFetch';
 import { priceParcels, wastelandCandidates, wastelandIds, withRoadClip, withWasteland, withZoneFamilies } from '../src/game/district';
 
@@ -46,4 +47,5 @@ const cands = wastelandCandidates(priced);
 const waste = new Set(wastelandIds(priced, appraised, cands));
 const final = withWasteland(priced, appraised, waste);
 lap(`délaissés (${cands.length} candidates)`, t);
+if (flags.save) writeFileSync(new URL(`../data/districts/${flags.save}.json`, import.meta.url), JSON.stringify(final));
 console.log(`TOTAL ${((Date.now() - t0) / 1000).toFixed(1)} s · carte ${(JSON.stringify(final).length / 1e6).toFixed(1)} Mo`);
