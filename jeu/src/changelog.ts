@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.17.1', title: 'Nouveautés discrètes', notes: ['Les notes de version ne s’ouvrent plus d’elles-mêmes : une icône en haut de l’accueil s’anime quand il y a du nouveau'] },
   { version: '0.17.0', title: 'Classement façon Mario Party', notes: ['Plus d’objectif chiffré : on joue pour la 1re place, avec un classement vertical animé (bilan chaque année, fin de partie) ; l’accueil suit l’heure de la journée'] },
   { version: '0.16.0', title: 'Nouvel écran d’accueil', notes: ['Accueil animé (quartier qui sort de terre, grue, nuages) ; nouvelle partie : villes prédéfinies ou ville de votre choix (bêta)'] },
   { version: '0.15.1', title: 'Recherche de commune plus fiable', notes: ['Si le service des communes ne répond pas, la recherche passe par le géocodeur de l’IGN'] },

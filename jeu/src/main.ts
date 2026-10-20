@@ -128,6 +128,31 @@ const TUTO_KEY = 'urbasim-tuto-v1';
 const VERSION = __APP_VERSION__.replace(/\.0$/, '');
 const BUILD = __APP_BUILD__;
 const BUILD_KEY = 'urbasim-build-v1';
+/** Dernière note de version lue : l'icône des nouveautés s'anime tant que la dernière version du journal n'a pas été ouverte. */
+const NOTES_KEY = 'urbasim-notes-seen-v1';
+const latestNotes = () => CHANGELOG[0]?.version ?? '';
+function hasNewNotes(): boolean {
+  try {
+    const seen = localStorage.getItem(NOTES_KEY);
+    if (seen === null) {
+      // Joueur déjà venu avant l'arrivée de cette icône : on lui signale la nouveauté ; première visite : rien à signaler.
+      if (localStorage.getItem(BUILD_KEY) !== null) return true;
+      localStorage.setItem(NOTES_KEY, latestNotes());
+      return false;
+    }
+    return seen !== latestNotes();
+  } catch {
+    return false;
+  }
+}
+function markNotesSeen() {
+  try {
+    localStorage.setItem(NOTES_KEY, latestNotes());
+  } catch {
+    /* stockage indisponible */
+  }
+  document.querySelectorAll('.hm-news, #ver').forEach((el) => el.classList.remove('new', 'open'));
+}
 
 // ---------------------------------------------------------------- état
 
@@ -1329,6 +1354,7 @@ async function openMaps(view: 'predefined' | 'custom' = 'predefined') {
 }
 
 let skyTimer = 0;
+let newsTimer = 0;
 function showHome() {
   closeNotif();
   const h = $('home');
@@ -1343,7 +1369,10 @@ function showHome() {
       </div>`
     : '';
   const placeName = DISTRICTS.find((d) => d.id === districtId)?.title ?? district.name;
-  h.innerHTML = `<div class="home-scene">${homeScene()}</div><div class="home-inner">
+  const isNew = hasNewNotes();
+  h.innerHTML = `<div class="home-scene">${homeScene()}</div>
+    <button type="button" id="hm-news" class="hm-news${isNew ? ' new' : ''}" aria-label="${isNew ? 'Nouvelle version disponible : voir les nouveautés' : 'Nouveautés'}" title="Nouveautés"><span class="ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a2 2 0 0 1 2 2v13a1 1 0 0 0 1 1H7a2 2 0 0 1-2-2z"/><path d="M18 9h2a1 1 0 0 1 1 1v8a2 2 0 0 1-2 2"/><path d="M8.5 8.5h6M8.5 12h6M8.5 15.5h3.5"/></svg><i class="dot"></i></span><span class="txt">Nouvelle version disponible !</span></button>
+    <div class="home-inner">
       <div class="home-brand"><div class="home-logo" aria-hidden="true">${logoSvg}</div><h1>Urbasim <span class="beta-badge" title="Version ${esc(VERSION)}">bêta</span></h1><p class="home-tag">Le Monopoly de l’immobilier réel.<br>Achetez de vrais terrains, construisez, vendez, et battez vos concurrents promoteurs.</p></div>
       ${saveCard}
       <div class="home-actions">
@@ -1360,6 +1389,16 @@ function showHome() {
   applySky(h, currentHour());
   window.clearInterval(skyTimer);
   skyTimer = window.setInterval(() => (h.hidden ? window.clearInterval(skyTimer) : applySky(h, currentHour())), 60_000);
+  const news = h.querySelector<HTMLButtonElement>('#hm-news')!;
+  news.onclick = openVersion;
+  window.clearTimeout(newsTimer);
+  if (isNew) {
+    // L'icône se déroule pour annoncer la nouveauté, puis se replie en gardant son point.
+    newsTimer = window.setTimeout(() => {
+      news.classList.add('open');
+      newsTimer = window.setTimeout(() => news.classList.remove('open'), 7000);
+    }, 900);
+  }
   const q = (id: string) => h.querySelector<HTMLButtonElement>(`#${id}`);
   const cont = q('hm-continue');
   if (cont)
@@ -1475,7 +1514,7 @@ function pulse(el: HTMLElement | null) {
 function renderTop() {
   const w = netWorth(state, ME);
   $('top').innerHTML = `
-    <h1><span class="brand-logo" aria-hidden="true">${logoSvg}</span>Urbasim <button id="ver" class="ver" type="button" title="Version et nouveautés">bêta ${esc(VERSION)} · #${esc(BUILD)}</button></h1>
+    <h1><span class="brand-logo" aria-hidden="true">${logoSvg}</span>Urbasim <button id="ver" class="ver${hasNewNotes() ? ' new' : ''}" type="button" title="Version et nouveautés">bêta ${esc(VERSION)} · #${esc(BUILD)}</button></h1>
     <div class="company" title="${esc(me().slogan ?? '')}"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><span class="cname">${esc(me().name)}</span></div>
     <div class="stats">
     <div class="stat" id="stat-round" title="Avancement de la partie"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b><span class="goalbar"><i style="width:${Math.min(100, (state.round / state.config.rounds) * 100)}%"></i></span></div>
@@ -2758,6 +2797,7 @@ function renderAll() {
 const release = (r: (typeof CHANGELOG)[number]) => `<h3 class="rel">${esc(r.version)} · ${esc(r.title)}</h3><ul>${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>`;
 
 function openVersion() {
+  markNotesSeen();
   openModal(
     `<h2 class="mh">Urbasim · bêta ${esc(VERSION)}</h2>
      <p class="muted">Build <b>${esc(BUILD)}</b> · ${esc(__APP_DATE__)} · ${esc(__APP_COMMIT__)}<br>Le numéro de build monte à chaque mise à jour publiée : s’il change, une nouvelle version est en ligne.</p>
@@ -2767,18 +2807,13 @@ function openVersion() {
   );
 }
 
-/** Première ouverture après une mise à jour : on le dit, et on montre les nouveautés quand la version bêta change. */
+/** Mémorise la version ouverte ; les nouveautés se signalent par l'icône de l'accueil (plus de grande fenêtre à chaque mise à jour). */
 function announceUpdate() {
-  let last: string | null = null;
   try {
-    last = localStorage.getItem(BUILD_KEY);
     localStorage.setItem(BUILD_KEY, `${VERSION}|${BUILD}`);
   } catch {
-    return;
+    /* stockage indisponible */
   }
-  if (!last || last === `${VERSION}|${BUILD}`) return;
-  if (last.split('|')[0] !== VERSION) openVersion();
-  else toast(`Mise à jour : bêta ${VERSION}, build ${BUILD} (menu ⋯ → Version et nouveautés)`);
 }
 
 /** Fenêtre « Crédits et données » : sources et licences, hors de l'écran de jeu. */
