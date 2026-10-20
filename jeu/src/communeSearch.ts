@@ -1,4 +1,5 @@
 import { MARKETS } from '../../moteur/src/engine';
+import { customId, listCustomMaps, prepareMap } from './customMaps';
 import { ARRONDISSEMENTS, MAX_PARCELS, countParcels, estimateSeconds, marketFor, searchCommunes, type CommuneHit } from '../../moteur/src/app/communes';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -6,8 +7,8 @@ const fmt = (n: number) => n.toLocaleString('fr-FR');
 const fmtTime = (s: number) => (s < 90 ? `environ ${Math.max(10, Math.round(s / 10) * 10)} s` : `environ ${Math.round(s / 60)} min`);
 
 /** Recherche d'une commune de France : suggestions, fiche (marché, nombre de parcelles, durée de préparation). */
-export function mountCommuneSearch(host: HTMLElement) {
-  host.innerHTML = `<div class="mapcard2"><div class="place-head"><b>Une autre commune</b><i>France entière</i></div>
+export function mountCommuneSearch(host: HTMLElement, onPrepared: () => void = () => {}) {
+  host.innerHTML = `<div class="mapcard2"><div class="place-head"><b>Une autre commune</b><i>Carte libre</i></div>
     <input id="cs-q" type="search" placeholder="Nom de commune ou code postal" autocomplete="off" style="width:100%">
     <div id="cs-list" class="muted"></div><div id="cs-card"></div></div>`;
   const q = host.querySelector<HTMLInputElement>('#cs-q')!;
@@ -35,7 +36,40 @@ export function mountCommuneSearch(host: HTMLElement) {
     try {
       const n = await countParcels(c.code, arr?.arr);
       if (n > MAX_PARCELS) size.innerHTML = `<span class="bad">${fmt(n)} parcelles : trop grand pour une seule carte.</span> Un secteur autour d’un point sera proposé (prochaine étape).`;
-      else size.innerHTML = `${fmt(n)} parcelles · préparation ${fmtTime(estimateSeconds(n))} · téléchargement unique, puis jouable hors ligne. <b>La préparation arrive à la prochaine étape.</b>`;
+      else {
+        const id = customId(c.code, arr?.arr);
+        const already = (await listCustomMaps()).some((m) => m.id === id);
+        size.innerHTML = `${fmt(n)} parcelles · préparation ${fmtTime(estimateSeconds(n))} · une seule fois, puis jouable hors ligne.
+          <div class="row" style="margin-top:6px"><button id="cs-go" type="button" class="primary">${already ? 'Préparer de nouveau' : 'Préparer cette carte'}</button><button id="cs-cancel" type="button" hidden>Annuler</button></div>
+          <div id="cs-prog" hidden><div class="dl-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><i style="width:0%"></i></div><span class="muted"></span></div>`;
+        const go = size.querySelector<HTMLButtonElement>('#cs-go')!;
+        const cancel = size.querySelector<HTMLButtonElement>('#cs-cancel')!;
+        const prog = size.querySelector<HTMLElement>('#cs-prog')!;
+        go.onclick = async () => {
+          const ctl = new AbortController();
+          go.hidden = true;
+          cancel.hidden = false;
+          prog.hidden = false;
+          cancel.onclick = () => ctl.abort();
+          const bar = prog.querySelector<HTMLElement>('.dl-bar i')!;
+          const label = prog.querySelector<HTMLElement>('.muted')!;
+          try {
+            await prepareMap(
+              { title: arr?.name ?? c.name, name: arr?.name ?? c.name, insee: c.code, ...(arr ? { arr: arr.arr, dvfInsee: ARRONDISSEMENTS[c.code].list.find((a) => a.arr === arr.arr)!.dvf } : {}), market: marketFor(c) },
+              (step, done) => {
+                bar.style.width = `${Math.round(done * 100)}%`;
+                label.textContent = `${Math.round(done * 100)} % · ${step}…`;
+              },
+              ctl.signal,
+            );
+            size.innerHTML = `<b>${esc(arr?.name ?? c.name)}</b> est prête : retrouvez-la dans « Mes cartes » ci-dessous.`;
+            onPrepared();
+          } catch (e) {
+            const aborted = e instanceof DOMException && e.name === 'AbortError';
+            size.innerHTML = aborted ? 'Préparation annulée.' : `<span class="bad">La préparation a échoué : ${esc(e instanceof Error ? e.message : 'erreur')}.</span> Réessayez dans un instant.`;
+          }
+        };
+      }
     } catch {
       size.innerHTML = '<span class="bad">Cadastre indisponible pour le moment.</span>';
     }

@@ -1,4 +1,5 @@
 import type { District } from '../../moteur/src/game';
+import { isCustomId, loadCustomDistrict } from './customMaps';
 
 /** Une carte jouable. Les données (instantané du cadastre, du bâti, du PLU, des ventes) se téléchargent une fois puis restent sur l'appareil. */
 export interface DistrictInfo {
@@ -69,7 +70,7 @@ const KEY = 'urbasim-district-v1';
 export function chosenDistrictId(): string {
   try {
     const id = localStorage.getItem(KEY);
-    if (id && DISTRICTS.some((d) => d.id === id)) return id;
+    if (id && (DISTRICTS.some((d) => d.id === id) || isCustomId(id))) return id;
   } catch {
     /* stockage indisponible */
   }
@@ -179,6 +180,7 @@ async function readEmbedded(id: string): Promise<District | null> {
 
 /** Instantané de la carte : intégré à la page, sinon en mémoire sur l'appareil, sinon téléchargé d'abord (avec progression). */
 export async function loadDistrict(id: string, onProgress: (done: number) => void = () => {}): Promise<District> {
+  if (isCustomId(id)) return loadCustomDistrict(id);
   const embedded = await readEmbedded(id);
   if (embedded) return embedded;
   const maps = await listMaps();

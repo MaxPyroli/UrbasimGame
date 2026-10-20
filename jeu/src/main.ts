@@ -90,6 +90,7 @@ import {
 import { pointInRing } from '../../moteur/src/game/district';
 import { CHANGELOG } from './changelog';
 import { mountCommuneSearch } from './communeSearch';
+import { deleteCustomMap, listCustomMaps, type CustomMap } from './customMaps';
 import logoSvg from './assets/logo.svg?raw';
 import { DISTRICTS, DEFAULT_DISTRICT, chooseDistrict, chosenDistrictId, deleteMap, downloadMap, downloadedMaps, listMaps, loadDistrict, type MapEntry } from './districts';
 
@@ -1193,13 +1194,32 @@ async function openMaps() {
   openModal(
     `<h2 class="mh">Cartes</h2>
      <p class="muted" style="margin-top:0">Chaque carte se télécharge une fois, puis reste sur votre appareil (jeu possible hors ligne). Chaque carte a sa propre partie enregistrée.</p>
-     ${new URLSearchParams(location.search).has('libre') ? '<div id="maps-search" style="margin-bottom:8px"></div>' : ''}
+     <div id="maps-search" style="margin-bottom:8px"></div>
+     <div id="maps-mine" class="maps" style="margin-bottom:8px"></div>
      <div id="maps-body" class="maps"><p class="muted">Chargement de la liste…</p></div>
      <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="mp-close" type="button">Fermer</button></div>`,
     (root) => (root.querySelector<HTMLButtonElement>('#mp-close')!.onclick = closeModal),
   );
   const search = document.getElementById('maps-search');
-  if (search) mountCommuneSearch(search); // carte libre en cours de construction : visible avec ?libre
+  const mine = document.getElementById('maps-mine');
+  let customs: CustomMap[] = [];
+  const renderMine = async () => {
+    if (!mine) return;
+    customs = await listCustomMaps();
+    mine.innerHTML = customs.length
+      ? `<h3 style="margin:10px 0 4px">Mes cartes</h3>` +
+        customs
+          .map((m) => {
+            const current = m.id === districtId;
+            return `<div class="mapcard2${current ? ' on' : ''}"><div class="place-head"><b>${esc(m.name)}</b><i>${esc(m.createdAt)}</i></div><div class="place-facts">${[`${m.parcels.toLocaleString('fr-FR')} parcelles`, m.pricePerM2 ? `appartements ${m.pricePerM2.toLocaleString('fr-FR')} €/m²` : 'marché par défaut', m.zones > 0 ? 'PLU numérisé' : 'sans PLU numérisé', fmtMB(m.bytes)].join(' · ')}</div><div class="row">${current ? '<span class="pill" style="--pc:#1f6feb">Carte actuelle</span>' : `<button type="button" class="primary" data-cplay="${m.id}">Jouer ici</button>`}<button type="button" data-cdel="${m.id}">Supprimer</button></div></div>`;
+          })
+          .join('')
+      : '';
+    mine.querySelectorAll<HTMLButtonElement>('[data-cplay]').forEach((b) => (b.onclick = () => (chooseDistrict(b.dataset.cplay!), (b.textContent = 'Chargement…'), location.reload())));
+    mine.querySelectorAll<HTMLButtonElement>('[data-cdel]').forEach((b) => (b.onclick = async () => (await deleteCustomMap(b.dataset.cdel!), renderMine())));
+  };
+  if (search) mountCommuneSearch(search, () => void renderMine()); // carte libre : recherche et préparation de n'importe quelle commune
+  void renderMine();
   const body = document.getElementById('maps-body')!;
   let maps: MapEntry[] = [];
   try {

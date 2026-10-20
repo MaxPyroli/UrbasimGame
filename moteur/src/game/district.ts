@@ -622,7 +622,7 @@ export function withBasePrices(source: District, analyses?: ParcelAnalysis[]): D
 }
 
 /** Première étape de `withBasePrices` : densité, prix de référence et constructibilité seule (sans la recherche des délaissés). */
-export function priceParcels(source: District, analyses?: ParcelAnalysis[]): { priced: District; appraised: number[] } {
+export function priceParcels(source: District, analyses?: ParcelAnalysis[], onProgress?: (done: number) => void): { priced: District; appraised: number[] } {
   const d = withDensity(source);
   const market = marketOf(d);
   const config = { ...DEFAULT_CONFIG, market };
@@ -637,6 +637,7 @@ export function priceParcels(source: District, analyses?: ParcelAnalysis[]): { p
       if (i >= 0) publicIdx.add(i);
     }
     all = d.parcels.map((p, i) => {
+      if (onProgress && i % 250 === 0) onProgress(i / d.parcels.length);
       const issue = publicIdx.has(i) ? 'zone' : structuralIssue(p);
       return { best: issue ? 0 : estimateBest(p, model), issue };
     });

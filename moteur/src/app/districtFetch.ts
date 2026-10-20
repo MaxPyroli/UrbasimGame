@@ -132,6 +132,8 @@ export interface CommuneOptions {
   /** Code des ventes réelles (DVF) si différent du code INSEE : arrondissement (75111 pour Paris 11e). Par défaut déduit de `arr`. */
   dvfInsee?: string;
   log?: (m: string) => void;
+  /** Avancement du téléchargement : étape en cours et part accomplie (0 à 1) de cette étape. */
+  progress?: (step: string, done: number) => void;
 }
 
 /** Rectangle englobant (lon/lat) d'un ensemble de parcelles GeoJSON. */
@@ -184,6 +186,8 @@ export async function pool<T>(items: T[], limit: number, fn: (item: T) => Promis
 
 export async function fetchCommune(opts: CommuneOptions): Promise<District> {
   const log = opts.log ?? (() => {});
+  const progress = opts.progress ?? (() => {});
+  progress('Parcelles du cadastre', 0);
   // Parcelles : commune (ou arrondissement) par code, ou secteur autour d'un point ; l'étendue se déduit des parcelles.
   const cadastre = opts.sector ? await fetchCadastreBox(opts.sector.center, opts.sector.radius) : await fetchCadastreCommune(opts.insee, opts.arr);
   const bounds = boundsOf(cadastre.features);
@@ -223,7 +227,9 @@ export async function fetchCommune(opts: CommuneOptions): Promise<District> {
     for (const r of roads) roadMap.set(`${r.line[0]}|${r.line[r.line.length - 1]}|${r.line.length}`, r);
     for (const z of zones) zoneMap.set(`${z.code}|${z.label}|${z.rings[0][0]}|${z.rings.length}`, z);
     log(`carreau ${++n}/${tiles.length} : ${bMap.size} bâtiments, ${roadMap.size} voies, ${zoneMap.size} zones`);
+    progress('Bâtiments, voies et zonage', n / tiles.length);
   });
+  progress('Équipements et ventes réelles', 0);
   await pool(tiles, TILE_CONCURRENCY, async (t) => {
     for (const p of await fetchPois(t, TILE / 2 - 700 > 0 ? TILE / 2 - 700 : 0)) poiMap.set(`${p.kind}|${p.lon}|${p.lat}`, p);
   });
