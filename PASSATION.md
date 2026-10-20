@@ -699,3 +699,7 @@ bien accès au nouveau dépôt.
 - Nouvelle vue **Terrains** (par défaut) : pas de bâti coloré, terrains libres en gris discret, seuls les propriétaires et statuts (en vente, à assembler, communal…) ressortent. Les anciennes vues restent : Hauteur, Zonage, Lieu, Prix.
 - Barre d'outils en haut à droite (`mapTools`, `VIEWS`) : un sélecteur segmenté pour la vue, et un bouton « Filtres » (point bleu quand un filtre est actif) qui déplie : terrains libres (tous / en vente / à ma portée / à assembler), équipements, sélection multiple ; se ferme au clic ailleurs ou Échap. Légende repliée par défaut (« Légende ▸ »), propre à la vue choisie.
 - Idées : palette plus sobre pour les hauteurs et le zonage ; infos au survol seulement ; légende réduite aux seuls éléments visibles.
+
+### Panneau de droite remis en ordre (version 0.17.7)
+- Onglet Terrain d'un terrain libre : en-tête et chiffres clés → **verdict** (avec le prix de terrain maximal pour la marge visée et ce qu'on compte payer) → **Acquérir ce terrain** (offre / achat) → **Projet** (niveaux, attique, type, indicateurs) → repliés : Options, Répartition des logements, Détail du bilan, **Analyse du terrain** (règles en pastilles, « meilleur projet », voisines à assembler ; ouverte d'office pour un terrain « à assembler »), Règles d'urbanisme, Situation. Avant, l'analyse et les pastilles précédaient l'achat.
+- À faire : alléger le texte des encadrés bleus (« Pas en vente »), regrouper les trois indicateurs sous le verdict, curseur plutôt que menus pour les niveaux.

@@ -1923,7 +1923,9 @@ function renderSingle(p: Plot): string {
       ${fact('Bâti existant', p.existingSdp ? `${p.existingSdp} m²${p.existingHeight ? ` · ${Math.round(p.existingHeight)} m` : ''}` : 'aucun')}
     </div><!--VERDICT-->`;
 
-  if (!run) html += plotBrief(p, mine) + neighboursBlock(p);
+  // Règles, meilleur projet et voisines : l'analyse passe sous l'action (verdict, achat, projet), repliée sauf pour un terrain « à assembler ».
+  const analysis = run ? '' : plotBrief(p, mine) + neighboursBlock(p);
+  const analysisHtml = analysis ? fold('Analyse du terrain : règles, meilleur projet, voisines', analysis, !!p.issue && p.issue !== 'zone') : '';
   if (run) {
     drawOverlay(null);
     return html + `<h2>Opération ${esc(run.id)}</h2>` + operationCard(run.id) + details(p);
@@ -1937,13 +1939,13 @@ function renderSingle(p: Plot): string {
       return html + `<div class="notice" style="--nc:#4a6f9c"><b>${esc(e.label[0].toUpperCase() + e.label.slice(1))}</b> de la ZAC ${esc(z.name)} · <b>${EQUIPMENT_STATUS[e.status]}</b>
         <div class="muted" style="font-size:12px;margin-top:4px">Terrain public : il ne se vend pas. L’équipement est financé par les participations des lots de la ZAC (${z.participation} € par m² de plancher) et démarre quand assez de lots sont lancés. Une fois livré, les logements de la ZAC se vendent <b>${Math.round(e.premium * 100)} % plus cher</b>.</div>
         ${e.status === 'chantier' && left !== null ? pbar(EQUIPMENT_BUILD_ROUNDS - left, EQUIPMENT_BUILD_ROUNDS, `livraison dans ${left} trim.`) : ''}
-        ${e.status === 'prevu' ? pbar(z.launched, z.lots.length, `${z.launched}/${z.lots.length} lots lancés`) : ''}</div>` + details(p);
+        ${e.status === 'prevu' ? pbar(z.launched, z.lots.length, `${z.launched}/${z.lots.length} lots lancés`) : ''}</div>` + analysisHtml + details(p);
     }
   }
   if (p.municipal && !p.owner) {
     drawOverlay(null);
     const t = openTenders(state).find((x) => x.plotId === p.id);
-    return html + `<div class="notice" style="--nc:#0f8b8d"><b>Terrain communal</b> La commune ne le vend pas au plus offrant : elle choisit le meilleur projet par appel d’offres.${t ? `<br>${esc(t.id)} est ouvert (${esc(t.spec.programme.label)}).` : '<br>Un nouvel appel d’offres sera lancé prochainement.'}</div>${t ? '<div class="row"><button id="toTender" class="primary">Voir l’appel d’offres</button></div>' : ''}` + details(p);
+    return html + `<div class="notice" style="--nc:#0f8b8d"><b>Terrain communal</b> La commune ne le vend pas au plus offrant : elle choisit le meilleur projet par appel d’offres.${t ? `<br>${esc(t.id)} est ouvert (${esc(t.spec.programme.label)}).` : '<br>Un nouvel appel d’offres sera lancé prochainement.'}</div>${t ? '<div class="row"><button id="toTender" class="primary">Voir l’appel d’offres</button></div>' : ''}` + analysisHtml + details(p);
   }
   const issueBox = p.issue === 'zone'
     ? `<div class="notice" style="--nc:#777"><b>Inconstructible</b> ${esc(ISSUE_MESSAGE.zone)}</div>`
@@ -1953,33 +1955,33 @@ function renderSingle(p: Plot): string {
       ? `<div class="notice" style="--nc:#7b3fa0"><b>À assembler</b> ${esc(ISSUE_MESSAGE[p.issue])}<br><span class="muted">Sélectionnez les voisines (Maj+clic), achetez-les, puis « Assembler ».</span></div>`
       : '';
   if (!p.owner && state.config.landMarket === 'auction') {
-    html += `${issueBox}${auctionPanel(p)}`;
+    html += `<h3 class="sect">Acquérir ce terrain</h3>${issueBox}${auctionPanel(p)}`;
     if (p.issue) {
       drawOverlay(null);
-      return html + details(p);
+      return html + analysisHtml + details(p);
     }
-    { const form = projectForm(p, false, false); return html.replace('<!--VERDICT-->', lastVerdict) + form + details(p); }
+    { const form = projectForm(p, false, false); return html.replace('<!--VERDICT-->', lastVerdict) + form + analysisHtml + details(p); }
   }
   if (!p.owner) {
     const missing = buyCost(p) - me().cash;
-    html += `${issueBox}<div class="row"><button id="buy" class="primary" ${missing > 0 ? 'disabled' : ''}>Acheter · ${eur(buyCost(p))}</button></div>
+    html += `<h3 class="sect">Acquérir ce terrain</h3>${issueBox}<div class="row"><button id="buy" class="primary" ${missing > 0 ? 'disabled' : ''}>Acheter · ${eur(buyCost(p))}</button></div>
       <div class="muted" style="font-size:12px">${missing > 0 ? `<span class="bad">Il vous manque ${eur(missing)}.</span> ` : ''}Frais de notaire compris (${eur(fee)}).</div>`;
     if (p.issue) {
       drawOverlay(null);
-      return html + details(p);
+      return html + analysisHtml + details(p);
     }
-    { const form = projectForm(p, false, false); return html.replace('<!--VERDICT-->', lastVerdict) + form + details(p); }
+    { const form = projectForm(p, false, false); return html.replace('<!--VERDICT-->', lastVerdict) + form + analysisHtml + details(p); }
   }
   if (!mine) {
     drawOverlay(null);
-    return html + details(p);
+    return html + analysisHtml + details(p);
   }
   html += `${issueBox}${p.obligation ? obligationNotice(p) : `<div class="row"><button id="sell" class="danger" title="Revente à la banque : ${Math.round(state.config.plotSpread * 100)} % de moins que le prix affiché">Revendre · ${eur(p.askingPrice * (1 - state.config.plotSpread))}</button></div>`}`;
   if (p.issue) {
     drawOverlay(null);
-    return html + details(p);
+    return html + analysisHtml + details(p);
   }
-  { const form = projectForm(p, true, false); return html.replace('<!--VERDICT-->', lastVerdict) + form + details(p); }
+  { const form = projectForm(p, true, false); return html.replace('<!--VERDICT-->', lastVerdict) + form + analysisHtml + details(p); }
 }
 
 // ---------------------------------------------------------------- barres de progression, notifications, fenêtres d'alerte
@@ -2616,6 +2618,7 @@ function verdictCard(p: Plot, proj: ReturnType<typeof computeProject>, landPrice
       <div class="vd-gauge" aria-hidden="true"><i class="z-bad"></i><i class="z-mid"></i><i class="z-good"></i><span class="vd-range" style="left:${lo.toFixed(1)}%;width:${Math.max(1.5, hi - lo).toFixed(1)}%"></span><span class="vd-mark" style="left:${gaugePos(m).toFixed(1)}%"></span></div>
       <div class="vd-scale"><span style="left:0">−15 %</span><span style="left:${gaugePos(0).toFixed(1)}%">0 %</span><span style="left:${gaugePos(VERDICT_OK).toFixed(1)}%">8 %</span><span style="left:100%">+25 %</span></div>
       <p class="vd-note">${outlook}</p>
+      ${ok ? `<p class="vd-max">Prix de terrain maximal pour votre marge visée (${pct(state.config.bilanParams.targetMargin)}) : <b>${eur(b.maxLandPrice)}</b>${owned ? '' : ` · vous comptez payer ${eur(landPrice)}`}.</p>` : ''}
       <p class="vd-next">${next}</p>
       ${owned ? `<div class="row"><button id="launch" class="primary" ${ok && short <= 0 ? '' : 'disabled'}>Lancer l’opération</button></div>` : ''}
     </div>`;

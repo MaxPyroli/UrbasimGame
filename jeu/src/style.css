@@ -589,3 +589,7 @@ button.ver.new::after { content: ''; position: absolute; top: -3px; right: -3px;
 .map-legend details:not([open]) summary { padding: 1px 2px; }
 .mt-seg.sm { display: grid; grid-template-columns: 1fr 1fr; border-radius: 14px; gap: 2px; }
 .mt-seg.sm button { border-radius: 11px; }
+
+/* ---------- Panneau de droite ---------- */
+.sect { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.vd-max { margin: 4px 0 0; font-size: 12.5px; }

@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.17.7', title: 'Panneau de droite remis en ordre', notes: ['Verdict, puis « Acquérir », puis « Projet » ; le reste (analyse, règles, bilan) est replié dessous'] },
   { version: '0.17.6', title: 'Carte plus claire', notes: ['Vue Terrains par défaut, vues en un clic, filtres dans un bouton, légende repliée'] },
   { version: '0.17.5', title: 'Marge en direct', notes: ['Le curseur de prix de vente d’une opération met à jour la marge attendue en direct'] },
   { version: '0.17.4', title: 'Fil du trimestre', notes: ['Onglet Trimestre : ce qu’on peut faire pendant son tour et quand passer au suivant'] },
