@@ -119,7 +119,7 @@ export function mountCommuneSearch(host: HTMLElement, onPrepared: () => void = (
       hits = await searchCommunes(q.value, abort.signal);
     } catch (e) {
       if (abort.signal.aborted) return;
-      list.innerHTML = '<span class="bad">Recherche indisponible (réseau).</span> <button type="button" id="cs-retry-search">Réessayer</button>';
+      list.innerHTML = '<span class="bad">Recherche indisponible (réseau). La page autonome ne peut pas toujours joindre les services de données : essayez le site publié.</span> <button type="button" id="cs-retry-search">Réessayer</button>';
       list.querySelector<HTMLButtonElement>('#cs-retry-search')!.onclick = () => void search();
       return;
     }

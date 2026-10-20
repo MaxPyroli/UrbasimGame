@@ -28,13 +28,13 @@ export const needsSector = (parcels: number, population: number): boolean => par
 const GEO = 'https://geo.api.gouv.fr/communes';
 const CADASTRE = 'https://apicarto.ign.fr/api/cadastre/parcelle';
 
-async function getJson(url: string, signal?: AbortSignal): Promise<any> {
+async function getJson(url: string, signal?: AbortSignal, attempts = 5, timeoutMs = 20_000): Promise<any> {
   let last: unknown;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < attempts; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, 300 * i));
-    // Délai de 20 s par essai ; l'annulation de l'appelant interrompt aussi la requête.
+    // Délai par essai ; l'annulation de l'appelant interrompt aussi la requête.
     const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 20_000);
+    const timer = setTimeout(() => ctl.abort(), timeoutMs);
     signal?.addEventListener('abort', () => ctl.abort(), { once: true });
     try {
       const r = await fetch(url, { signal: ctl.signal });
@@ -62,15 +62,37 @@ const toHit = (c: any): CommuneHit => ({
   area: c.surface ? c.surface / 100 : 0,
 });
 
-/** Communes dont le nom (ou le code postal, ou le code INSEE) commence par la saisie ; les plus peuplées d'abord. */
+/** Résultat du géocodeur de l'IGN (secours quand l'API Géo ne répond pas : même hébergeur que le cadastre, qui répond). */
+export function fromGeocoder(f: any): CommuneHit {
+  const p = f.properties ?? {};
+  const [dept = '', deptName = ''] = String(p.context ?? '').split(',').map((x: string) => x.trim());
+  return {
+    code: p.citycode,
+    name: p.name ?? p.city ?? p.label,
+    postcodes: p.postcode ? [p.postcode] : [],
+    population: p.population ?? 0,
+    dept: p.depcode ?? dept,
+    deptName,
+    center: { lon: f.geometry?.coordinates?.[0] ?? 0, lat: f.geometry?.coordinates?.[1] ?? 0 },
+    area: 0,
+  };
+}
+
+/** Communes dont le nom (ou le code postal) correspond à la saisie ; les plus peuplées d'abord. L'API Géo d'abord, le géocodeur de l'IGN en secours. */
 export async function searchCommunes(query: string, signal?: AbortSignal): Promise<CommuneHit[]> {
   const q = query.trim();
   if (q.length < 2) return [];
   const fields = 'nom,code,codesPostaux,population,departement,centre,surface';
   const param = /^\d{5}$/.test(q) ? `codePostal=${q}` : /^\d{2,4}$/.test(q) ? '' : `nom=${encodeURIComponent(q)}&boost=population`;
   if (!param) return [];
-  const list: any[] = await getJson(`${GEO}?${param}&fields=${fields}&limit=8`, signal);
-  return list.map(toHit).sort((a, b) => b.population - a.population);
+  try {
+    const list: any[] = await getJson(`${GEO}?${param}&fields=${fields}&limit=8`, signal, 1, 6_000);
+    return list.map(toHit).sort((a, b) => b.population - a.population);
+  } catch (e) {
+    if (signal?.aborted) throw e;
+  }
+  const j = await getJson(`https://data.geopf.fr/geocodage/search?q=${encodeURIComponent(q)}&type=municipality&limit=8`, signal);
+  return (j.features ?? []).map(fromGeocoder).filter((h: CommuneHit) => h.code).sort((a: CommuneHit, b: CommuneHit) => b.population - a.population);
 }
 
 /** Les trois villes découpées en arrondissements : le cadastre et les ventes se demandent par arrondissement. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ARRONDISSEMENTS, estimateSeconds, marketFor, needsSector } from '../src/app/communes';
+import { ARRONDISSEMENTS, estimateSeconds, fromGeocoder, marketFor, needsSector } from '../src/app/communes';
 
 describe('communes', () => {
   it('choisit le marché de référence selon le département et la taille', () => {
@@ -24,6 +24,11 @@ describe('communes', () => {
     expect(needsSector(38_000, 64_000)).toBe(true);
     expect(needsSector(14_000, 2_000)).toBe(false); // village étendu : commune entière
     expect(needsSector(40_000, 3_000)).toBe(true);
+  });
+  it('lit un résultat du géocodeur de l’IGN (recherche de secours)', () => {
+    const hit = fromGeocoder({ properties: { name: 'Sucy-en-Brie', citycode: '94071', postcode: '94370', population: 27764, depcode: '94', context: '94, Val-de-Marne, Île-de-France' }, geometry: { coordinates: [2.5284, 48.7707] } });
+    expect(hit).toMatchObject({ code: '94071', name: 'Sucy-en-Brie', dept: '94', deptName: 'Val-de-Marne', population: 27764 });
+    expect(hit.center).toEqual({ lon: 2.5284, lat: 48.7707 });
   });
   it('estime la durée de préparation selon le nombre de parcelles', () => {
     expect(estimateSeconds(7_000)).toBeGreaterThan(100);
