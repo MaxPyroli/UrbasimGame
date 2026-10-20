@@ -64,7 +64,7 @@ export async function deleteCustomMap(id: string): Promise<void> {
  * Prépare une commune (téléchargement puis calcul, dans un processus d'arrière-plan) et la garde sur l'appareil.
  * `onProgress` reçoit l'étape en cours et l'avancement global (0 à 1) ; `signal` permet d'annuler.
  */
-export function prepareMap(req: PrepareRequest & { title: string }, onProgress: (step: string, done: number) => void, signal?: AbortSignal): Promise<CustomMap> {
+export function prepareMap(req: PrepareRequest & { title: string; suffix?: string }, onProgress: (step: string, done: number) => void, signal?: AbortSignal): Promise<CustomMap> {
   return new Promise((resolve, reject) => {
     const worker = new PrepareWorker();
     const stop = () => worker.terminate();
@@ -80,7 +80,7 @@ export function prepareMap(req: PrepareRequest & { title: string }, onProgress: 
         const named: District = { ...district, name: req.title };
         const body = JSON.stringify(named);
         const entry: CustomMap = {
-          id: customId(req.insee, req.arr),
+          id: customId(req.insee, req.suffix ?? req.arr),
           name: req.title,
           insee: req.insee,
           ...(req.arr ? { arr: req.arr } : {}),

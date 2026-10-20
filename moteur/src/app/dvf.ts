@@ -194,6 +194,66 @@ export async function fetchMarketStats(insee: string, name: string, get: (url: s
   return marketStats(sales, `Ventes réelles (DVF) ${name} ${Math.min(...years)}–${Math.max(...years)}`, houses);
 }
 
+/** Typologie estimée d'après la surface (l'API Cerema ne donne pas le nombre de pièces). */
+// (la surface bâtie du Cerema inclut des annexes : environ 10 % de plus que la surface habitable des fichiers Etalab)
+const roomsFromArea = (area: number) => ((a) => (a < 30 ? 1 : a < 48 ? 2 : a < 68 ? 3 : a < 88 ? 4 : 5))(area * 0.9);
+
+interface CeremaMutation {
+  anneemut: number;
+  libnatmut: string;
+  vefa: boolean;
+  valeurfonc: string | null;
+  sterr: string | null;
+  sbati: string | null;
+  libtypbien: string;
+}
+
+/**
+ * Variante pour le navigateur : les fichiers DVF d'Etalab ne sont pas lisibles depuis une page web (pas d'en-tête CORS), alors
+ * que l'API DVF+ du Cerema l'est. Elle ne donne pas le nombre de pièces : la typologie se déduit de la surface.
+ * `getJson` renvoie la réponse décodée, ou null si elle est indisponible.
+ */
+export async function fetchMarketStatsCerema(insee: string, name: string, getJson: (url: string) => Promise<any | null>): Promise<MarketStats | null> {
+  const base = 'https://apidf-preprod.cerema.fr/dvf_opendata/mutations/';
+  const PAGE = 500;
+  const fromYear = DVF_YEARS[DVF_YEARS.length - 1];
+  // Grandes communes : des dizaines de milliers de ventes ; on se limite aux plus récentes puis à 12 pages (6 000 ventes).
+  const all = async (type: string): Promise<CeremaMutation[]> => {
+    const url = (page: number, from: number) => `${base}?code_insee=${insee}&anneemut_min=${from}&libtypbien=${encodeURIComponent(type)}&page_size=${PAGE}&page=${page}`;
+    let from = fromYear;
+    let first = await getJson(url(1, from));
+    while (first && first.count > 6000 && from < DVF_YEARS[0]) first = await getJson(url(1, ++from));
+    if (!first) return [];
+    const out: CeremaMutation[] = [...first.results];
+    const pages = Math.min(12, Math.ceil((first.count ?? 0) / PAGE));
+    for (let p = 2; p <= pages; p += 4) {
+      const batch = await Promise.all(Array.from({ length: Math.min(4, pages - p + 1) }, (_, k) => getJson(url(p + k, from))));
+      for (const j of batch) if (j) out.push(...j.results);
+    }
+    return out;
+  };
+  const [apts, houses] = await Promise.all([all('UN APPARTEMENT'), all('UNE MAISON')]);
+  const sales: DvfSale[] = [];
+  for (const m of apts) {
+    const value = Number(m.valeurfonc);
+    const area = Number(m.sbati);
+    if (m.libnatmut !== 'Vente' || m.vefa || !(area >= 9 && area <= 300 && value >= 20000)) continue;
+    const pricePerM2 = value / area;
+    if (pricePerM2 < 500 || pricePerM2 > 25000) continue;
+    sales.push({ year: m.anneemut, rooms: roomsFromArea(area), area, pricePerM2 });
+  }
+  const homes: DvfHouse[] = [];
+  for (const m of houses) {
+    const price = Number(m.valeurfonc);
+    const area = Number(m.sbati);
+    const land = Number(m.sterr);
+    if (m.libnatmut === 'Vente' && !m.vefa && price >= 50000 && area >= 40 && area <= 250 && land >= 100 && land <= 2000) homes.push({ year: m.anneemut, price, area, land });
+  }
+  if (sales.length === 0) return null;
+  const years = sales.map((s) => s.year);
+  return marketStats(sales, `Ventes réelles (DVF+ Cerema) ${name} ${Math.min(...years)}–${Math.max(...years)}`, homes);
+}
+
 /** Prix plancher d'un logement neuf (€/m² habitable) : en dessous, plus personne ne construit, quel que soit le prix de l'ancien. */
 export const MIN_NEW_PRICE = 2200;
 

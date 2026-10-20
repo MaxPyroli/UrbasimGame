@@ -3,7 +3,7 @@ import { buildDistrict, type District, type DistrictRoad, type DistrictZone } fr
 import { zoneFamily } from '../game/plu';
 import type { Poi, PoiKind } from '../game/location';
 import { fetchNearbyBuildings, fetchWfsPage } from './services';
-import { deriveMarketAdjust, fetchMarketStats, marketMix } from './dvf';
+import { deriveMarketAdjust, fetchMarketStats, fetchMarketStatsCerema, marketMix } from './dvf';
 
 const API = 'https://apicarto.ign.fr/api/cadastre/parcelle';
 const PAGE = 500;
@@ -15,7 +15,8 @@ async function getJson(url: string): Promise<any> {
   for (const wait of [0, 1500, 5500]) {
     if (wait) await new Promise((r) => setTimeout(r, wait));
     try {
-      const r = await fetch(url);
+      // Un service qui ne répond pas ne doit pas bloquer la préparation indéfiniment.
+      const r = await fetch(url, { signal: AbortSignal.timeout(45_000) });
       if (r.ok) return await r.json();
       last = new Error(`HTTP ${r.status}`);
       if (r.status < 500 && r.status !== 429) break;
@@ -45,12 +46,17 @@ async function getAllPages(urlAt: (start: number) => string, maxPages: number): 
   return features;
 }
 
-/** Toutes les parcelles cadastrales (API Carto IGN, Licence Ouverte 2.0) d'un carré autour du centre, par pages. */
-export async function fetchCadastreBox(center: LonLat, radius: number): Promise<{ type: 'FeatureCollection'; features: any[] }> {
+/** Carré de côté 2 × `radius` mètres autour d'un point, au format GeoJSON attendu par l'API cadastre. */
+export function cadastreBoxGeom(center: LonLat, radius: number) {
   const dLat = radius / 110574;
   const dLon = radius / (111320 * Math.cos((center.lat * Math.PI) / 180));
   const box = [center.lon - dLon, center.lat - dLat, center.lon + dLon, center.lat + dLat];
-  const geom = { type: 'Polygon', coordinates: [[[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]], [box[0], box[1]]]] };
+  return { type: 'Polygon', coordinates: [[[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]], [box[0], box[1]]]] };
+}
+
+/** Toutes les parcelles cadastrales (API Carto IGN, Licence Ouverte 2.0) d'un carré autour du centre, par pages. */
+export async function fetchCadastreBox(center: LonLat, radius: number): Promise<{ type: 'FeatureCollection'; features: any[] }> {
+  const geom = cadastreBoxGeom(center, radius);
   const features = await getAllPages((start) => `${API}?geom=${encodeURIComponent(JSON.stringify(geom))}&_limit=${PAGE}&_start=${start}`, 20);
   return { type: 'FeatureCollection', features };
 }
@@ -236,14 +242,28 @@ export async function fetchCommune(opts: CommuneOptions): Promise<District> {
   const fetchedAt = new Date().toISOString().slice(0, 10);
   const buildings = [...bMap.values()];
   // Ventes réelles de la commune : mix de logements et prix par typologie (absent si la commune n'a pas de ventes d'appartements).
-  const stats = await fetchMarketStats(opts.dvfInsee ?? (opts.arr ? `${opts.insee.slice(0, 2)}${opts.arr.slice(-3)}` : opts.insee), opts.name, async (url) => {
+  const dvfCode = opts.dvfInsee ?? (opts.arr ? `${opts.insee.slice(0, 2)}${opts.arr.slice(-3)}` : opts.insee);
+  // Les fichiers DVF d'Etalab ne sont pas lisibles depuis une page web (pas de CORS) : en cas d'échec réseau, on passe par l'API du Cerema.
+  let blocked = false;
+  let stats = await fetchMarketStats(dvfCode, opts.name, async (url) => {
+    if (blocked) return null;
     try {
-      const r = await fetch(url);
+      const r = await fetch(url, { signal: AbortSignal.timeout(45_000) });
       return r.ok ? await r.text() : null;
     } catch {
+      blocked = true;
       return null;
     }
   });
+  if (!stats && blocked) {
+    stats = await fetchMarketStatsCerema(dvfCode, opts.name, async (url) => {
+      try {
+        return await getJson(url);
+      } catch {
+        return null;
+      }
+    }).catch(() => null);
+  }
   const district = buildDistrict({
     name: opts.name,
     center,

@@ -1,4 +1,5 @@
 import type { MarketId } from '../engine';
+import { cadastreBoxGeom } from './districtFetch';
 
 /** Une commune trouvée par la recherche (API Géo, données publiques). */
 export interface CommuneHit {
@@ -23,14 +24,20 @@ async function getJson(url: string, signal?: AbortSignal): Promise<any> {
   let last: unknown;
   for (let i = 0; i < 5; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, 300 * i));
+    // Délai de 20 s par essai ; l'annulation de l'appelant interrompt aussi la requête.
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 20_000);
+    signal?.addEventListener('abort', () => ctl.abort(), { once: true });
     try {
-      const r = await fetch(url, { signal });
+      const r = await fetch(url, { signal: ctl.signal });
       if (r.ok) return await r.json();
       last = new Error(`HTTP ${r.status}`);
       if (r.status < 500 && r.status !== 429) break;
     } catch (e) {
       if (signal?.aborted) throw e;
       last = e;
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw last instanceof Error ? last : new Error('réseau');
@@ -87,6 +94,15 @@ export function marketFor(c: Pick<CommuneHit, 'dept' | 'population'>): MarketId 
 /** Nombre exact de parcelles du cadastre pour une commune (ou un arrondissement) : une requête d'une seule parcelle. */
 export async function countParcels(insee: string, arr?: string, signal?: AbortSignal): Promise<number> {
   const j = await getJson(`${CADASTRE}?code_insee=${insee}${arr ? `&code_arr=${arr}` : ''}&_limit=1`, signal);
+  return j.totalFeatures ?? j.numberMatched ?? 0;
+}
+
+/** Rayons (m) proposés pour un secteur autour du centre d'une très grande commune. */
+export const SECTOR_RADII = [600, 1000, 1500, 2200];
+
+/** Nombre exact de parcelles dans un carré autour d'un point (secteur d'une très grande commune). */
+export async function countParcelsBox(center: { lon: number; lat: number }, radius: number, signal?: AbortSignal): Promise<number> {
+  const j = await getJson(`${CADASTRE}?geom=${encodeURIComponent(JSON.stringify(cadastreBoxGeom(center, radius)))}&_limit=1`, signal);
   return j.totalFeatures ?? j.numberMatched ?? 0;
 }
 
