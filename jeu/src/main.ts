@@ -90,7 +90,8 @@ import {
 import { pointInRing } from '../../moteur/src/game/district';
 import { CHANGELOG } from './changelog';
 import { mountCommuneSearch } from './communeSearch';
-import { homeScene } from './homeScene';
+import { applySky, currentHour, homeScene } from './homeScene';
+import { mountPodium, type PodiumRow } from './podium';
 import { deleteCustomMap, listCustomMaps, type CustomMap } from './customMaps';
 import logoSvg from './assets/logo.svg?raw';
 import { DISTRICTS, DEFAULT_DISTRICT, chooseDistrict, chosenDistrictId, deleteMap, downloadMap, downloadedMaps, listMaps, loadDistrict, type MapEntry } from './districts';
@@ -269,6 +270,7 @@ function afterAdvance(message: string, before = state.log.length) {
   // Les aléas et verdicts importants s'affichent dans une fenêtre, un par un.
   const popups = state.log.slice(before).filter((e) => e.popup && isRelevant(e, ME) && (e.player === ME || !e.player));
   if (popups.length) showPopups(popups);
+  else if (state.round > 0 && state.round % 4 === 0) openRanking(true); // chaque 1er janvier : bilan de l'année
 }
 
 /** Les concurrents calculent leur tour (parfois plusieurs secondes la première fois) : on l'indique avant de bloquer la page. */
@@ -1069,30 +1071,24 @@ function firstSteps(): string {
 
 /** Écran de fin de partie : verdict, classement, bilan des opérations, rejouer. */
 function openEndScreen() {
-  const r = ranking(state);
+  const r = currentRanking();
   const mine = r.findIndex((x) => x.player === ME);
   const best = r[0];
-  const mult = r[mine].netWorth / state.config.startCash;
-  const m = (x: number) => x.toFixed(2).replace('.', ',');
-  const goal = state.config.goalMultiple;
-  const reached = goal > 0 && mult >= goal && !me().bankrupt;
-  const verdict = me().bankrupt
-    ? 'Faillite'
-    : mult >= 3 ? 'Magnat du quartier' : mult >= 2 ? 'Promoteur confirmé' : mult >= 1.2 ? 'Promoteur honorable' : mult >= 1 ? 'Le quartier n’a pas fait fortune' : 'Une décennie difficile';
-  const headline = me().bankrupt ? 'Votre patrimoine est devenu négatif : la banque a saisi vos terrains et arrêté vos chantiers.' : mine === 0 ? `Vous êtes le promoteur n°1 du quartier.` : `${esc(best.name)} remporte la partie. Vous terminez ${mine + 1}${mine === 1 ? 'e' : 'e'} sur ${r.length}.`;
+  const verdict = me().bankrupt ? 'Faillite' : ['Champion du quartier', 'Médaille d’argent', 'Sur le podium', 'Le quartier vous a résisté'][Math.min(mine, 3)];
+  const headline = me().bankrupt
+    ? 'Votre patrimoine est devenu négatif : la banque a saisi vos terrains et arrêté vos chantiers.'
+    : mine === 0
+      ? `Vous êtes le promoteur n°1 du quartier${r[1] ? `, ${eur(best.netWorth - r[1].netWorth)} devant ${esc(r[1].name)}` : ''}.`
+      : `${esc(best.name)} remporte la partie. Vous terminez ${mine + 1}e sur ${r.length}, à ${eur(best.netWorth - r[mine].netWorth)} du premier.`;
   const st = me().stats;
   const open = state.projects.filter((p) => p.owner === ME).length;
-  const rows = r
-    .map((x, k) => `<tr class="${x.player === ME ? 'me' : ''}"><td>${k + 1}.</td><td>${mono(x.name, colorOf(x.player), true)} ${esc(x.name)}${x.player === ME ? '' : ` <span class="muted">${PROFILE_LABEL[x.player] ?? ''}</span>`}</td><td class="num">${state.players.find((p) => p.id === x.player)?.bankrupt ? '<span class="bad">faillite</span>' : eur(x.netWorth)}</td><td class="num muted">${state.players.find((p) => p.id === x.player)?.bankrupt ? '' : `×${m(x.netWorth / state.config.startCash)}`}</td></tr>`)
-    .join('');
   const stat = (k: string, v: string) => `<div class="fact"><small>${k}</small><b>${v}</b></div>`;
   openModal(
     `<div class="muted" style="font-size:12px">Fin de partie · trimestre ${state.round}/${state.config.rounds}</div>
      <h2 class="mh">${verdict}</h2>
      <p>${headline}</p>
-     ${goal ? `<div class="notice" style="--nc:${reached ? 'var(--good)' : 'var(--bad)'}"><b>${reached ? 'Objectif atteint' : 'Objectif manqué'}</b> · ${me().bankrupt ? 'faillite' : `×${m(mult)}`} pour un objectif de ×${m(goal)} (${DIFFICULTIES[state.config.difficulty].label.toLowerCase()})</div>` : ''}
-     <table class="rank">${rows}</table>
-     <p class="muted" style="font-size:12px">Patrimoine = trésorerie + terrains + fonds propres engagés. Départ : ${eurFull(state.config.startCash)}.</p>
+     <div id="en-podium"></div>
+     <p class="muted" style="font-size:12px">Patrimoine = trésorerie + terrains + fonds propres engagés, moins les dettes. Départ : ${eurFull(state.config.startCash)}.</p>
      <h2 class="mh" style="font-size:15px;margin-top:14px">Votre décennie</h2>
      <div class="facts">
        ${stat('Opérations soldées', String(st?.closed ?? 0))}
@@ -1103,6 +1099,7 @@ function openEndScreen() {
      ${open ? `<p class="muted" style="font-size:12px">${open} opération${open > 1 ? 's' : ''} non soldée${open > 1 ? 's' : ''} : valorisée${open > 1 ? 's' : ''} au prix de revient.</p>` : ''}
      <div class="row" style="margin-top:14px"><button id="en-map" type="button">Voir la carte</button><span class="spacer"></span><button id="en-other" type="button">Changer de société</button><button id="en-again" type="button" class="primary">Rejouer</button></div>`,
     (root) => {
+      mountPodium(root.querySelector<HTMLElement>('#en-podium')!, podiumRows(r), podiumOptions(true));
       root.querySelector<HTMLButtonElement>('#en-map')!.onclick = closeModal;
       root.querySelector<HTMLButtonElement>('#en-other')!.onclick = () => (closeModal(), openIdentity('new'));
       root.querySelector<HTMLButtonElement>('#en-again')!.onclick = () => {
@@ -1331,17 +1328,17 @@ async function openMaps(view: 'predefined' | 'custom' = 'predefined') {
   render();
 }
 
+let skyTimer = 0;
 function showHome() {
   closeNotif();
   const h = $('home');
   const resume = gameStarted && me();
   const worth = resume ? netWorth(state, ME) : 0;
-  const goal = state.config.goalMultiple;
   const diff = DIFFICULTIES[state.config.difficulty ?? 'normal'];
   const saveCard = resume
     ? `<div class="home-save">
         <div class="home-save-head"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><div><b>${esc(me().name)}</b><div class="muted">${state.over ? 'Partie terminée' : `${quarterLabel(state.round)} · trimestre ${state.round}/${state.config.rounds}`}${state.config.difficulty && state.config.difficulty !== 'normal' ? ` · ${esc(diff.label)}` : ''}</div></div></div>
-        <div class="home-stats"><div><small>Patrimoine</small><b>${eur(worth)}</b></div><div><small>Objectif</small><b>${goal ? `×${(worth / state.config.startCash).toFixed(2).replace('.', ',')} / ×${goal.toFixed(1).replace('.', ',')}` : '—'}</b></div><div><small>Opérations</small><b>${state.projects.filter((p) => p.owner === ME).length}</b></div></div>
+        <div class="home-stats"><div><small>Patrimoine</small><b>${eur(worth)}</b></div><div><small>Classement</small><b>${ordinal(ranking(state).findIndex((x) => x.player === ME))} / ${state.players.length}</b></div><div><small>Opérations</small><b>${state.projects.filter((p) => p.owner === ME).length}</b></div></div>
         ${pbar(state.round, state.config.rounds, `${state.config.rounds - state.round} trimestres restants`)}
       </div>`
     : '';
@@ -1359,6 +1356,10 @@ function showHome() {
       <div class="home-foot">Version bêta : le jeu évolue vite, les prix et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.<br>Bêta ${esc(VERSION)} · build ${esc(BUILD)} · <a href="#" id="hm-version">Nouveautés</a> · <a href="#" id="hm-credits">Crédits et données</a></div>
     </div>`;
   h.hidden = false;
+  // Le ciel suit l'heure de la journée ; on le remet à jour chaque minute tant que l'accueil est visible.
+  applySky(h, currentHour());
+  window.clearInterval(skyTimer);
+  skyTimer = window.setInterval(() => (h.hidden ? window.clearInterval(skyTimer) : applySky(h, currentHour())), 60_000);
   const q = (id: string) => h.querySelector<HTMLButtonElement>(`#${id}`);
   const cont = q('hm-continue');
   if (cont)
@@ -1379,15 +1380,69 @@ function showHome() {
 
 // ---------------------------------------------------------------- panneaux
 
-/** Objectif de la partie : patrimoine final en multiple de la mise de départ. */
-function objectiveStat(worth: number): string {
-  const goal = state.config.goalMultiple;
-  if (!goal) return '';
-  const start = state.config.startCash;
-  const have = worth / start;
-  const pctDone = Math.max(0, Math.min(100, (have / goal) * 100));
-  const reached = have >= goal;
-  return `<div class="stat" title="Objectif : finir à ${eur(start * goal)} de patrimoine (×${goal.toFixed(1).replace('.', ',')} votre mise de départ)"><small>Objectif ×${goal.toFixed(1).replace('.', ',')}</small><b class="${reached ? 'good' : ''}">×${have.toFixed(2).replace('.', ',')}</b><span class="goalbar"><i style="width:${pctDone}%" class="${reached ? 'ok' : ''}"></i></span></div>`;
+// ---------------------------------------------------------------- classement
+
+/** Classement au début du trimestre en cours et du précédent (pour les flèches ▲▼ et faire glisser les lignes). */
+const rankMem: { round: number; start: Record<string, { pos: number; worth: number }>; prev: Record<string, { pos: number; worth: number }> | null } = { round: -1, start: {}, prev: null };
+
+/** Classement actuel ; mémorise celui du début de chaque trimestre. */
+function currentRanking() {
+  const r = ranking(state);
+  if (rankMem.round !== state.round) {
+    rankMem.prev = rankMem.round >= 0 ? rankMem.start : null;
+    rankMem.start = Object.fromEntries(r.map((x, i) => [x.player, { pos: i, worth: x.netWorth }]));
+    rankMem.round = state.round;
+  }
+  return r;
+}
+
+const podiumRows = (r = currentRanking()): PodiumRow[] =>
+  r.map((x) => ({ id: x.player, name: x.name, color: colorOf(x.player), monogram: monogram(x.name), worth: x.netWorth, me: x.player === ME, ...(x.player === ME ? {} : { tag: PROFILE_LABEL[x.player] ?? '' }), bankrupt: !!state.players.find((p) => p.id === x.player)?.bankrupt }));
+
+const podiumOptions = (animate: boolean) => ({
+  format: (n: number) => eur(n),
+  reduceMotion: reducedMotion || !animate,
+  ...(animate && rankMem.prev ? { prevPos: Object.fromEntries(Object.entries(rankMem.prev).map(([k, v]) => [k, v.pos])), prevWorth: Object.fromEntries(Object.entries(rankMem.prev).map(([k, v]) => [k, v.worth])) } : {}),
+});
+
+/** Phrase sous le classement : l'avance du premier ou le retard sur lui (« à égalité » sous 1 000 €). */
+function rankGapText(r: { name: string; netWorth: number }[], k: number): string {
+  const diff = k === 0 ? r[0].netWorth - (r[1]?.netWorth ?? 0) : r[0].netWorth - r[k].netWorth;
+  if (diff < 1000) return k === 0 ? `Vous êtes à égalité avec ${esc(r[1]?.name ?? 'les autres')}.` : `Vous êtes à égalité avec ${esc(r[0].name)}.`;
+  return k === 0 ? `Vous êtes en tête, avec ${eur(diff)} d’avance.` : `Il vous manque ${eur(diff)} pour passer devant ${esc(r[0].name)}.`;
+}
+
+const ordinal = (k: number) => (k === 0 ? '1<span class="sup">er</span>' : `${k + 1}<span class="sup">e</span>`);
+
+/** Place du joueur dans l'en-tête : « 2e / 4 », un clic ouvre le classement. */
+function rankStat(): string {
+  const r = currentRanking();
+  const k = r.findIndex((x) => x.player === ME);
+  const leader = r[0];
+  const gap = k === 0 ? `Vous menez de ${eur(r[0].netWorth - (r[1]?.netWorth ?? 0))} sur ${r[1]?.name ?? 'les autres'}` : `${eur(leader.netWorth - r[k].netWorth)} derrière ${leader.name}`;
+  return `<div class="stat rank-stat" id="stat-rank" role="button" tabindex="0" title="${esc(gap)} · cliquez pour voir le classement"><small>Classement</small><b class="${k === 0 ? 'good' : ''}">${ordinal(k)} <span class="muted">/ ${r.length}</span></b></div>`;
+}
+
+/** Le classement des sociétés, à la verticale : bilan annuel (automatique) ou consultation à la demande. */
+function openRanking(auto = false) {
+  const r = currentRanking();
+  const k = r.findIndex((x) => x.player === ME);
+  const year = 2027 + Math.floor(state.round / 4);
+  const gap = rankGapText(r, k);
+  openModal(
+    `<div class="muted" style="font-size:12px">${auto ? `Bilan de l’année ${year - 1}` : `${quarterLabel(state.round)} · trimestre ${state.round}/${state.config.rounds}`}</div>
+     <h2 class="mh">Classement</h2>
+     <div id="rk-podium"></div>
+     <p class="rank-gap">${gap}</p>
+     <p class="muted" style="font-size:12px;text-align:center;margin:4px 0 0">Patrimoine = trésorerie + terrains + fonds propres engagés, moins les dettes. Départ : ${eurFull(state.config.startCash)}.</p>
+     <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="rk-ok" type="button" class="primary">${auto ? 'Continuer' : 'Fermer'}</button></div>`,
+    (root) => {
+      mountPodium(root.querySelector<HTMLElement>('#rk-podium')!, podiumRows(r), podiumOptions(true));
+      const ok = root.querySelector<HTMLButtonElement>('#rk-ok')!;
+      ok.onclick = closeModal;
+      ok.focus();
+    },
+  );
 }
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1426,7 +1481,7 @@ function renderTop() {
     <div class="stat" id="stat-round" title="Avancement de la partie"><small>Trimestre</small><b>${quarterLabel(state.round)} <span class="muted">${state.round}/${state.config.rounds}</span></b><span class="goalbar"><i style="width:${Math.min(100, (state.round / state.config.rounds) * 100)}%"></i></span></div>
     <div class="stat"><small>Trésorerie</small><b id="stat-cash">${eur(me().cash)}</b></div>
     <div class="stat" title="Trésorerie + terrains (au prix de reprise) + fonds propres engagés dans les opérations, moins les dettes"><small>Patrimoine</small><b id="stat-worth">${eur(w)}</b></div>
-    ${objectiveStat(w)}
+    ${rankStat()}
     ${me().bankrupt ? '<div class="stat"><small>Situation</small><b class="bad">FAILLITE</b></div>' : me().debt > 0 ? `<div class="stat" title="Charges impayées : elles portent intérêt et la banque ne finance plus rien tant qu'elles ne sont pas remboursées"><small>Découvert</small><b class="bad">−${eur(me().debt)}</b></div>` : ''}
     <div class="stat" title="Indice des prix de vente (100 = prix de départ) · taux du crédit promoteur · logements que les ménages achètent par trimestre dans le quartier, et logements en vente en ce moment (tous promoteurs)">
       <small>Marché</small><b><span class="${state.marketIndex >= 1 ? 'good' : 'bad'}">prix ${(state.marketIndex * 100).toFixed(0)}</span> · ${pct(state.interestRate)} · ${marketDemand(state).toFixed(0)}<span class="muted">/trim.</span> <span class="muted">(${unitsOnOffer(state)} en vente)</span></b>
@@ -1445,6 +1500,11 @@ function renderTop() {
   $('ff').onclick = fastForward;
   $('bell').onclick = openNotif;
   $('ver').onclick = openVersion;
+  const rs = document.getElementById('stat-rank');
+  if (rs) {
+    rs.onclick = () => openRanking();
+    rs.onkeydown = (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), openRanking());
+  }
   $('home-btn').onclick = () => (closeMenu(), showHome());
   const ib = document.getElementById('install-btn');
   if (ib) ib.onclick = () => (closeMenu(), installApp());
@@ -1494,6 +1554,8 @@ function renderSide() {
   $('side').innerHTML = tabs() + `<div class="pane${changed ? ' enter' : ''}">${body}</div>`;
   $('side').querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => (b.onclick = () => ((tab = b.dataset.tab as typeof tab), renderAll())));
   bindSelection();
+  const tp = document.getElementById('tab-podium');
+  if (tp) mountPodium(tp, podiumRows(), podiumOptions(changed));
   if (tab === 'commune') bindTenders();
   bindRefs($('side'));
 }
@@ -2515,10 +2577,12 @@ function renderJournal(): string {
 
 function renderRanking(): string {
   drawOverlay(null);
-  const r = ranking(state);
+  const r = currentRanking();
+  const k = r.findIndex((x) => x.player === ME);
   return `<h2>${state.over ? 'Classement final' : 'Classement'}</h2>
-    <table>${r.map((x, k) => `<tr><td>${k + 1}. <span class="mono sm" style="background:${colorOf(x.player)}">${esc(monogram(x.name))}</span> ${esc(x.name)}${x.player === ME ? '' : ` <span class="muted">${PROFILE_LABEL[x.player] ?? ''}</span>`}</td><td>${eurFull(x.netWorth)} <span class="muted">(×${(x.netWorth / state.config.startCash).toFixed(2).replace('.', ',')})</span></td></tr>`).join('')}</table>
-    <p class="muted">Patrimoine = trésorerie + terrains (au prix de reprise) + fonds propres engagés. Départ : ${eurFull(state.config.startCash)}.</p>`;
+    <div id="tab-podium"></div>
+    <p class="rank-gap">${rankGapText(r, k)}</p>
+    <p class="muted">Patrimoine = trésorerie + terrains (au prix de reprise) + fonds propres engagés, moins les dettes. Départ : ${eurFull(state.config.startCash)}.</p>`;
 }
 
 function bindSelection() {
