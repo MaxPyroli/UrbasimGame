@@ -17,7 +17,7 @@ for (const p of sample) {
   for (const housing of housingTypesFor(rule)) for (let lv = 0; lv <= (housing === 'maison' ? 1 : 5); lv++) for (const attic of [false, true]) {
     const proj = computeProject({ ring: p.ring, streetEdges: p.streetEdges }, applyRule({ ...promoterCriteria(market), levels: lv, attic, housing }, rule));
     if (!proj.footprint || proj.checks.some((c) => c.status === 'error')) continue;
-    const b = computeBilan({ project: proj, market: marketAt(market, p.locationFactor), landPrice: p.basePrice / 1.075, existingSdp: p.existingSdp, params: { ...DEFAULT_CONFIG.bilanParams } });
+    const b = computeBilan({ project: proj, market: marketAt(market, p.locationFactor), landPrice: (p.basePrice ?? 0) / 1.075, existingSdp: p.existingSdp, params: { ...DEFAULT_CONFIG.bilanParams } });
     best = Math.max(best, b.marginRate);
   }
   (rows[p.zone!] ??= []).push(best);

@@ -32,8 +32,8 @@ export const DIFFICULTIES: Record<Difficulty, DifficultyPreset> = {
   },
   normal: {
     label: 'Normal',
-    summary: 'Marché et aléas réalistes. Objectif : ×1,7 votre mise.',
-    config: { ...BASE, difficulty: 'normal', goalMultiple: 1.7, startCashFactor: 1, structureCostRate: 0.004, reserveSpread: 0.2 },
+    summary: 'Marché et aléas réalistes. Objectif : ×2 votre mise.',
+    config: { ...BASE, difficulty: 'normal', goalMultiple: 2, startCashFactor: 1, structureCostRate: 0.004, reserveSpread: 0.2 },
   },
   difficile: {
     label: 'Difficile',

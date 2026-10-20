@@ -877,7 +877,8 @@ function openIdentity(mode: 'new' | 'edit') {
   const current: Identity =
     mode === 'edit' ? { name: me().name, slogan: me().slogan ?? '', color: me().color ?? PALETTE[0] } : randomIdentity(Date.now() % 100000);
   let color = current.color;
-  let difficulty: Difficulty = state.config.difficulty ?? 'normal';
+  // Un seul mode de jeu pour l'instant (d'autres modes viendront plus tard).
+  const difficulty: Difficulty = 'normal';
   const dismissable = mode === 'edit' || !$('home').hidden || saved !== null || !!localStorage_get(SAVE_KEY);
   openModal(
     `<h2 class="mh">${mode === 'edit' ? 'Ma société' : 'Votre société de promotion'}</h2>
@@ -885,7 +886,7 @@ function openIdentity(mode: 'new' | 'edit') {
      <div class="preview"><span id="pv-mono"></span><div><b id="pv-name"></b><div id="pv-slogan" class="muted"></div></div></div>
      <label class="f col">Nom de la société<input id="co-name" maxlength="28" autocomplete="off" value="${esc(current.name)}"></label>
      <label class="f col">Slogan (facultatif)<input id="co-slogan" maxlength="60" autocomplete="off" value="${esc(current.slogan)}"></label>
-     ${mode === 'new' ? `<div class="f col"><span>Difficulté</span><div class="levels" role="radiogroup" aria-label="Difficulté">${(['facile', 'normal', 'difficile'] as Difficulty[]).map((d) => `<button type="button" class="lvl" role="radio" data-diff="${d}" aria-checked="${d === difficulty}"><b>${DIFFICULTIES[d].label}</b><span class="muted">${DIFFICULTIES[d].summary}</span></button>`).join('')}</div></div>` : ''}
+
      <div class="f col"><span>Couleur</span><div class="swatches" role="radiogroup" aria-label="Couleur">${PALETTE.map((c) => `<button type="button" class="sw" role="radio" data-color="${c}" aria-checked="${c === color}" style="background:${c}" title="${c}"></button>`).join('')}</div></div>
      <div class="row" style="margin-top:14px"><button id="co-random" type="button" title="Un nom de société parodique tiré au hasard">Au hasard</button><span class="spacer"></span>${dismissable ? '<button id="co-cancel" type="button">Annuler</button>' : ''}<button id="co-go" type="button" class="primary">${mode === 'edit' ? 'Enregistrer' : 'Commencer'}</button></div>`,
     (root) => {
@@ -898,11 +899,9 @@ function openIdentity(mode: 'new' | 'edit') {
         q('pv-name').textContent = n;
         q('pv-slogan').textContent = sanitizeSlogan(slogan.value);
         root.querySelectorAll<HTMLElement>('.sw').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.color === color)));
-        root.querySelectorAll<HTMLElement>('.lvl').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.diff === difficulty)));
       };
       name.oninput = slogan.oninput = preview;
       root.querySelectorAll<HTMLButtonElement>('.sw').forEach((b) => (b.onclick = () => ((color = b.dataset.color!), preview())));
-      root.querySelectorAll<HTMLButtonElement>('.lvl').forEach((b) => (b.onclick = () => ((difficulty = b.dataset.diff as Difficulty), preview())));
       let k = 0;
       q('co-random').onclick = () => {
         const r = randomIdentity((Date.now() + 977 * ++k) % 1000003);
@@ -1106,7 +1105,7 @@ function openEndScreen() {
       root.querySelector<HTMLButtonElement>('#en-map')!.onclick = closeModal;
       root.querySelector<HTMLButtonElement>('#en-other')!.onclick = () => (closeModal(), openIdentity('new'));
       root.querySelector<HTMLButtonElement>('#en-again')!.onclick = () => {
-        state = newGame({ name: me().name, slogan: me().slogan ?? '', color: me().color ?? PALETTE[0] }, state.config.difficulty);
+        state = newGame({ name: me().name, slogan: me().slogan ?? '', color: me().color ?? PALETTE[0] });
         gameStarted = true;
         selected.clear();
         tab = 'terrain';
@@ -1301,7 +1300,7 @@ function showHome() {
   const diff = DIFFICULTIES[state.config.difficulty ?? 'normal'];
   const saveCard = resume
     ? `<div class="home-save">
-        <div class="home-save-head"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><div><b>${esc(me().name)}</b><div class="muted">${state.over ? 'Partie terminée' : `${quarterLabel(state.round)} · trimestre ${state.round}/${state.config.rounds}`} · ${esc(diff.label)}</div></div></div>
+        <div class="home-save-head"><span class="mono" style="background:${colorOf(ME)}">${esc(monogram(me().name))}</span><div><b>${esc(me().name)}</b><div class="muted">${state.over ? 'Partie terminée' : `${quarterLabel(state.round)} · trimestre ${state.round}/${state.config.rounds}`}${state.config.difficulty && state.config.difficulty !== 'normal' ? ` · ${esc(diff.label)}` : ''}</div></div></div>
         <div class="home-stats"><div><small>Patrimoine</small><b>${eur(worth)}</b></div><div><small>Objectif</small><b>${goal ? `×${(worth / state.config.startCash).toFixed(2).replace('.', ',')} / ×${goal.toFixed(1).replace('.', ',')}` : '—'}</b></div><div><small>Opérations</small><b>${state.projects.filter((p) => p.owner === ME).length}</b></div></div>
         ${pbar(state.round, state.config.rounds, `${state.config.rounds - state.round} trimestres restants`)}
       </div>`
