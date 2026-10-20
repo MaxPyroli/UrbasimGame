@@ -222,7 +222,7 @@ function syncMultiBox() {
   if (box) box.checked = multi;
 }
 let tab: 'trimestre' | 'terrain' | 'marche' | 'commune' | 'operations' | 'journal' | 'classement' = 'trimestre';
-let view: 'hauteur' | 'prix' | 'lieu' | 'zonage' = 'hauteur';
+let view: 'terrains' | 'hauteur' | 'prix' | 'lieu' | 'zonage' = 'terrains';
 /** Terrains libres mis en avant sur la carte : tous, seulement ceux à ma portée, ou ceux à assembler. */
 let plotFilter: 'tous' | 'vente' | 'abordables' | 'assembler' = 'tous';
 /** Prix saisis pour les offres (par terrain), conservés pendant la navigation. */
@@ -449,7 +449,7 @@ function plotStyle(p: Plot): L.PathOptions {
   // Terrains libres : plus le prix au m² est élevé, plus la teinte est foncée (échelle = 10e–90e centile des terrains libres).
   const [lo, hi] = ppmRange;
   const t = Math.min(1, Math.max(0, (ppm - lo) / Math.max(1, hi - lo)));
-  const free = `hsl(${40 - 30 * t} 80% ${78 - 28 * t}%)`;
+  const free = view === 'terrains' ? '#cfc7b2' : `hsl(${40 - 30 * t} 80% ${78 - 28 * t}%)`;
   const lieu = view === 'lieu';
   const freePlot = !p.owner;
   const waste = p.issue === 'delaisse';
@@ -465,7 +465,7 @@ function plotStyle(p: Plot): L.PathOptions {
     opacity: small && freePlot ? 0.75 : 1,
     fillColor: col ?? (listed && view !== 'prix' && view !== 'lieu' ? '#f6d27a' : zoneBlocked ? (waste ? '#d9d3c7' : '#bdbdbd') : small ? '#cdb6e6' : lieu ? lieuColor(p.locationFactor) : free),
     // Vue « hauteur » : les parcelles libres restent transparentes pour laisser voir le bâti.
-    fillOpacity: col ? (p.projectId ? 0.16 : view === 'hauteur' || view === 'zonage' ? 0.35 : 0.55) : listed ? 0.45 : zoneBlocked ? 0.35 : small ? 0.5 : view === 'hauteur' || view === 'zonage' ? 0 : lieu ? 0.8 : 0.45,
+    fillOpacity: col ? (p.projectId ? 0.16 : view === 'hauteur' || view === 'zonage' ? 0.35 : 0.55) : listed ? 0.45 : zoneBlocked ? 0.35 : small ? 0.5 : view === 'hauteur' || view === 'zonage' ? 0 : lieu ? 0.8 : view === 'terrains' ? 0.2 : 0.45,
     dashArray: p.projectId ? '4 3' : small ? '2 4' : waste && freePlot ? '1 4' : undefined,
   };
   if (dim) return { ...base, opacity: 0.2, fillOpacity: (base.fillOpacity ?? 0) * 0.2 };
@@ -732,7 +732,7 @@ function drawDeveloped(developed: Plot[]) {
 
 const mapLegend = new L.Control({ position: 'bottomleft' });
 mapLegend.onAdd = () => L.DomUtil.create('div', 'map-legend');
-let legendOpen = window.innerWidth > 800;
+let legendOpen = false;
 function updateMapLegend() {
   const el = mapLegend.getContainer();
   if (!el) return;
@@ -749,8 +749,10 @@ function updateMapLegend() {
     const ramp = [0.95, 0.98, 1, 1.03, 1.06, 1.09].map((f) => `<i class="swatch" style="background:${lieuColor(f)};width:18px"></i>`).join('');
     const kinds = ['metro', 'tram', 'mairie', 'ecole', 'parc', 'sante'].map((k) => `<span><i class="swatch" style="background:${POI_COLORS[k]}"></i>${k === 'ecole' ? 'école' : k === 'sante' ? 'hôpital' : k === 'parc' ? 'espace public' : k === 'mairie' ? 'mairie' : k === 'tram' ? 'tramway' : 'métro'}</span>`).join(' ');
     el.innerHTML = `<b>Valeur du lieu (prix de vente)</b><div>${ramp}</div><div class="muted">moins cher ← quartier médian → plus cher</div><div style="margin-top:3px">${kinds}</div>`;
-  } else {
+  } else if (view === 'prix') {
     el.innerHTML = `<b>Prix des terrains libres</b><div>plus foncé = plus cher au m²</div>`;
+  } else {
+    el.innerHTML = '<b>Légende</b>';
   }
   // Repères communs à toutes les vues : propriétaires et symboles.
   const owners = [`<span><i class="swatch" style="background:${colorOf(ME)}"></i>vous</span>`, ...state.players.filter((p) => p.bot).map((p) => `<span><i class="swatch" style="background:${colorOf(p.id)}"></i>${esc(shortName(p.name))}</span>`)].join(' ');
@@ -764,20 +766,40 @@ function updateMapLegend() {
   L.DomEvent.disableClickPropagation(el);
 }
 
-/** Barre d'outils de la carte : vue, filtre des terrains libres, sélection multiple. */
+/** Barre d'outils de la carte : une vue à choisir d'un clic, et un bouton « Filtres » qui déplie le reste. */
+const VIEWS = [['terrains', 'Terrains'], ['hauteur', 'Hauteur'], ['zonage', 'Zonage'], ['lieu', 'Lieu'], ['prix', 'Prix']] as const;
+const FILTERS_FREE = [['tous', 'Tous'], ['vente', 'En vente'], ['abordables', 'À ma portée'], ['assembler', 'À assembler']] as const;
 const mapTools = new L.Control({ position: 'topright' });
+function syncToolbar() {
+  const el = mapTools.getContainer();
+  if (!el) return;
+  el.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.view === view)));
+  el.querySelectorAll<HTMLButtonElement>('[data-pf]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.pf === plotFilter)));
+  const dot = el.querySelector<HTMLElement>('.mt-dot');
+  if (dot) dot.hidden = plotFilter === 'tous' && showPois && !multi;
+}
 mapTools.onAdd = () => {
-  const el = L.DomUtil.create('div', 'maptools');
-  el.innerHTML = `<details class="mt" ${window.innerWidth > 800 ? 'open' : ''}><summary>Carte et filtres</summary><label>Vue <select id="view"><option value="hauteur">Hauteur du bâti</option><option value="zonage">Règles d’urbanisme</option><option value="lieu">Valeur du lieu</option><option value="prix">Prix des terrains</option></select></label>
-    <label>Terrains libres <select id="pfilter"><option value="tous">tous</option><option value="vente">en vente</option><option value="abordables">à ma portée</option><option value="assembler">à assembler</option></select></label>
-    <label title="Ou Maj+clic sur la carte"><input type="checkbox" id="multi"/> sélection multiple</label>
-    <label title="Stations, écoles, parcs, hôpital, mairie"><input type="checkbox" id="pois" checked/> équipements</label></details>`;
+  const el = L.DomUtil.create('div', 'maptools2');
+  el.innerHTML = `<div class="mt-seg" role="radiogroup" aria-label="Vue de la carte">${VIEWS.map(([v, l]) => `<button type="button" role="radio" data-view="${v}" aria-checked="${v === view}">${l}</button>`).join('')}</div>
+    <div class="mt-filter"><button type="button" id="mt-fbtn" class="mt-fbtn" aria-expanded="false" aria-controls="mt-pop">Filtres<i class="mt-dot" hidden></i></button>
+      <div class="mt-pop" id="mt-pop" hidden>
+        <div class="mt-title">Terrains libres</div>
+        <div class="mt-seg sm" role="radiogroup" aria-label="Terrains libres">${FILTERS_FREE.map(([v, l]) => `<button type="button" role="radio" data-pf="${v}" aria-checked="${v === plotFilter}">${l}</button>`).join('')}</div>
+        <label title="Stations, écoles, parcs, hôpital, mairie"><input type="checkbox" id="pois" ${showPois ? 'checked' : ''}/> Équipements</label>
+        <label title="Ou Maj+clic sur la carte"><input type="checkbox" id="multi" ${multi ? 'checked' : ''}/> Sélection multiple</label>
+      </div></div>`;
   L.DomEvent.disableClickPropagation(el);
-  const q = <T extends HTMLElement>(id: string) => el.querySelector<T>(`#${id}`)!;
-  q<HTMLSelectElement>('view').onchange = (e) => ((view = (e.target as HTMLSelectElement).value as typeof view), applyView(), renderAll());
-  q<HTMLSelectElement>('pfilter').onchange = (e) => ((plotFilter = (e.target as HTMLSelectElement).value as typeof plotFilter), renderAll());
-  q<HTMLInputElement>('pois').onchange = (e) => ((showPois = (e.target as HTMLInputElement).checked), syncPois());
-  q<HTMLInputElement>('multi').onchange = (e) => (multi = (e.target as HTMLInputElement).checked);
+  const q = <T extends HTMLElement>(sel: string) => el.querySelector<T>(sel)!;
+  el.querySelectorAll<HTMLButtonElement>('[data-view]').forEach((b) => (b.onclick = () => ((view = b.dataset.view as typeof view), syncToolbar(), applyView(), renderAll())));
+  el.querySelectorAll<HTMLButtonElement>('[data-pf]').forEach((b) => (b.onclick = () => ((plotFilter = b.dataset.pf as typeof plotFilter), syncToolbar(), renderAll())));
+  const pop = q<HTMLElement>('#mt-pop');
+  const btn = q<HTMLButtonElement>('#mt-fbtn');
+  const toggle = (open: boolean) => ((pop.hidden = !open), btn.setAttribute('aria-expanded', String(open)));
+  btn.onclick = () => toggle(pop.hidden);
+  document.addEventListener('click', (e) => !el.contains(e.target as Node) && toggle(false));
+  document.addEventListener('keydown', (e) => e.key === 'Escape' && toggle(false));
+  q<HTMLInputElement>('#pois').onchange = (e) => ((showPois = (e.target as HTMLInputElement).checked), syncToolbar(), syncPois());
+  q<HTMLInputElement>('#multi').onchange = (e) => ((multi = (e.target as HTMLInputElement).checked), syncToolbar());
   return el;
 };
 
@@ -3020,7 +3042,7 @@ mapLegend.addTo(map);
 mapTools.addTo(map);
 fitDistrict();
 applyView();
-(document.getElementById('view') as HTMLSelectElement).value = view;
+syncToolbar();
 renderAll();
 showHome();
 try {

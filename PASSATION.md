@@ -694,3 +694,8 @@ bien accès au nouveau dépôt.
 ### Marge attendue en direct (version 0.17.5)
 - `expectedMargin(state, run)` (`moteur/src/game/sales.ts`, testé) : marge du lancement − surcoûts + (prix du lot aujourd'hui − prix au lancement) × lots restants ; le curseur « Prix de vente » d'une opération (carte d'opération) met à jour la marge et son pourcentage à chaque déplacement (`data-margin`, `data-margin-rate`). Ne compte pas les intérêts supplémentaires d'une vente plus lente.
 - Règle de version : une nouvelle version (0.17.x) à chaque ajout visible, pas de modification d'une version déjà publiée.
+
+### Carte et filtres réorganisés (version 0.17.6)
+- Nouvelle vue **Terrains** (par défaut) : pas de bâti coloré, terrains libres en gris discret, seuls les propriétaires et statuts (en vente, à assembler, communal…) ressortent. Les anciennes vues restent : Hauteur, Zonage, Lieu, Prix.
+- Barre d'outils en haut à droite (`mapTools`, `VIEWS`) : un sélecteur segmenté pour la vue, et un bouton « Filtres » (point bleu quand un filtre est actif) qui déplie : terrains libres (tous / en vente / à ma portée / à assembler), équipements, sélection multiple ; se ferme au clic ailleurs ou Échap. Légende repliée par défaut (« Légende ▸ »), propre à la vue choisie.
+- Idées : palette plus sobre pour les hauteurs et le zonage ; infos au survol seulement ; légende réduite aux seuls éléments visibles.
