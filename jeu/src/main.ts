@@ -90,6 +90,7 @@ import {
 import { pointInRing } from '../../moteur/src/game/district';
 import { CHANGELOG } from './changelog';
 import { mountCommuneSearch } from './communeSearch';
+import { homeScene } from './homeScene';
 import { deleteCustomMap, listCustomMaps, type CustomMap } from './customMaps';
 import logoSvg from './assets/logo.svg?raw';
 import { DISTRICTS, DEFAULT_DISTRICT, chooseDistrict, chosenDistrictId, deleteMap, downloadMap, downloadedMaps, listMaps, loadDistrict, type MapEntry } from './districts';
@@ -1189,15 +1190,55 @@ function hideHome() {
 const fmtMB = (bytes: number) => `${(bytes / 1048576).toFixed(bytes < 1.5e7 ? 1 : 0).replace('.', ',')} Mo`;
 
 /** Page des cartes : on choisit une ville, on la télécharge une fois (progression), puis on y joue, même hors ligne. */
-async function openMaps() {
+const NEW_KEY = 'urbasim-start-new';
+/** Joue sur une carte : si c'est déjà la carte chargée, on passe à la création de la société ; sinon on la charge, puis on y enchaîne. */
+function playOn(id: string) {
+  if (id === districtId) {
+    closeModal();
+    openIdentity('new');
+    return;
+  }
+  chooseDistrict(id);
+  try {
+    sessionStorage.setItem(NEW_KEY, '1');
+  } catch {
+    /* stockage indisponible : l'écran d'accueil s'ouvrira simplement sur la nouvelle carte */
+  }
+  location.reload();
+}
+
+/** Première étape d'une nouvelle partie : où jouer ? Villes préparées d'avance, ou n'importe quelle commune de France (bêta). */
+function openPlaceChooser() {
   openModal(
-    `<h2 class="mh">Cartes</h2>
-     <p class="muted" style="margin-top:0">Chaque carte se télécharge une fois, puis reste sur votre appareil (jeu possible hors ligne). Chaque carte a sa propre partie enregistrée.</p>
-     <div id="maps-search" style="margin-bottom:8px"></div>
+    `<h2 class="mh">Où voulez-vous jouer ?</h2>
+     <div class="place-choice">
+       <button type="button" class="place-card" id="pc-predef"><span class="big-ico" aria-hidden="true">🏙️</span><h3>Villes prédéfinies</h3><p>${DISTRICTS.length} villes choisies pour leurs contrastes (centre dense, banlieue, littoral, campagne…). Prêtes à jouer, données vérifiées.</p></button>
+       <button type="button" class="place-card" id="pc-custom"><span class="big-ico" aria-hidden="true">🔎</span><h3>Ville de votre choix <span class="beta-badge">bêta</span></h3><p>N’importe quelle commune de France, préparée à la demande (1 à 4 minutes, une seule fois). Plus expérimental.</p></button>
+     </div>
+     <div class="row"><button id="pc-here" type="button" class="primary">Jouer à ${esc(DISTRICTS.find((d) => d.id === districtId)?.title ?? district.name)} →</button><span class="spacer"></span><button id="pc-close" type="button">Annuler</button></div>`,
+    (root) => {
+      root.querySelector<HTMLButtonElement>('#pc-predef')!.onclick = () => void openMaps('predefined');
+      root.querySelector<HTMLButtonElement>('#pc-custom')!.onclick = () => void openMaps('custom');
+      root.querySelector<HTMLButtonElement>('#pc-here')!.onclick = () => (closeModal(), openIdentity('new'));
+      root.querySelector<HTMLButtonElement>('#pc-close')!.onclick = closeModal;
+    },
+  );
+}
+
+/** Liste des villes (prédéfinies : téléchargées une fois, puis jouables hors ligne) ou recherche d'une commune (bêta). */
+async function openMaps(view: 'predefined' | 'custom' = 'predefined') {
+  const custom = view === 'custom';
+  openModal(
+    `<h2 class="mh">${custom ? 'Ville de votre choix <span class="beta-badge">bêta</span>' : 'Villes prédéfinies'}</h2>
+     <p class="muted" style="margin-top:0">${custom ? 'Cherchez une commune : elle est préparée une seule fois (téléchargement des données publiques puis calcul), puis reste sur votre appareil.' : 'Chaque ville se télécharge une fois, puis reste sur votre appareil (jeu possible hors ligne). Chaque carte a sa propre partie enregistrée.'}</p>
+     ${custom ? '<div id="maps-search" style="margin-bottom:8px"></div>' : ''}
      <div id="maps-mine" class="maps" style="margin-bottom:8px"></div>
-     <div id="maps-body" class="maps"><p class="muted">Chargement de la liste…</p></div>
-     <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="mp-close" type="button">Fermer</button></div>`,
-    (root) => (root.querySelector<HTMLButtonElement>('#mp-close')!.onclick = closeModal),
+     ${custom ? '' : '<div id="maps-body" class="maps"><p class="muted">Chargement de la liste…</p></div>'}
+     <div class="row" style="margin-top:12px"><button id="mp-back" type="button">← Où jouer ?</button><span class="spacer"></span><button id="mp-close" type="button">Fermer</button></div>`,
+    (root) => {
+      root.querySelector<HTMLButtonElement>('#mp-close')!.onclick = closeModal;
+      root.querySelector<HTMLButtonElement>('#mp-back')!.onclick = openPlaceChooser;
+    },
   );
   const search = document.getElementById('maps-search');
   const mine = document.getElementById('maps-mine');
@@ -1210,15 +1251,18 @@ async function openMaps() {
         customs
           .map((m) => {
             const current = m.id === districtId;
-            return `<div class="mapcard2${current ? ' on' : ''}"><div class="place-head"><b>${esc(m.name)}</b><i>${esc(m.createdAt)}</i></div><div class="place-facts">${[`${m.parcels.toLocaleString('fr-FR')} parcelles`, m.pricePerM2 ? `appartements ${m.pricePerM2.toLocaleString('fr-FR')} €/m²` : 'marché par défaut', m.zones > 0 ? 'PLU numérisé' : 'sans PLU numérisé', fmtMB(m.bytes)].join(' · ')}</div><div class="row">${current ? '<span class="pill" style="--pc:#1f6feb">Carte actuelle</span>' : `<button type="button" class="primary" data-cplay="${m.id}">Jouer ici</button>`}<button type="button" data-cdel="${m.id}">Supprimer</button></div></div>`;
+            return `<div class="mapcard2${current ? ' on' : ''}"><div class="place-head"><b>${esc(m.name)}</b><i>${esc(m.createdAt)}</i></div><div class="place-facts">${[`${m.parcels.toLocaleString('fr-FR')} parcelles`, m.pricePerM2 ? `appartements ${m.pricePerM2.toLocaleString('fr-FR')} €/m²` : 'marché par défaut', m.zones > 0 ? 'PLU numérisé' : 'sans PLU numérisé', fmtMB(m.bytes)].join(' · ')}</div><div class="row">${current ? '<span class="pill" style="--pc:#1f6feb">Carte actuelle</span>' : ''}<button type="button" class="primary" data-cplay="${m.id}">Jouer ici</button><button type="button" data-cdel="${m.id}">Supprimer</button></div></div>`;
           })
           .join('')
       : '';
-    mine.querySelectorAll<HTMLButtonElement>('[data-cplay]').forEach((b) => (b.onclick = () => (chooseDistrict(b.dataset.cplay!), (b.textContent = 'Chargement…'), location.reload())));
+    mine.querySelectorAll<HTMLButtonElement>('[data-cplay]').forEach((b) => (b.onclick = () => playOn(b.dataset.cplay!)));
     mine.querySelectorAll<HTMLButtonElement>('[data-cdel]').forEach((b) => (b.onclick = async () => (await deleteCustomMap(b.dataset.cdel!), renderMine())));
   };
   if (search) mountCommuneSearch(search, () => void renderMine()); // carte libre : recherche et préparation de n'importe quelle commune
-  void renderMine();
+  if (custom) {
+    void renderMine();
+    return;
+  }
   const body = document.getElementById('maps-body')!;
   let maps: MapEntry[] = [];
   try {
@@ -1243,7 +1287,7 @@ async function openMaps() {
         : 'Non disponible dans cette version : voir le site publié';
       const p = progress.get(d.id);
       const action = current
-        ? '<span class="pill" style="--pc:#1f6feb">Carte actuelle</span>'
+        ? '<span class="pill" style="--pc:#1f6feb">Carte actuelle</span><button type="button" class="primary" data-play="' + d.id + '">Jouer ici</button>'
         : !m
           ? ''
           : p !== undefined
@@ -1254,11 +1298,7 @@ async function openMaps() {
       return `<div class="mapcard2${current ? ' on' : ''}"><div class="place-head"><b>${esc(d.title)}</b><i>${esc(d.tag)}</i></div><div class="place-blurb">${esc(d.blurb)}</div><div class="place-facts">${esc(facts)}</div><div class="row" style="margin-top:8px;align-items:center">${action}</div></div>`;
     }).join('');
     body.querySelectorAll<HTMLButtonElement>('[data-play]').forEach((b) => {
-      b.onclick = () => {
-        chooseDistrict(b.dataset.play!);
-        b.textContent = 'Chargement…';
-        location.reload();
-      };
+      b.onclick = () => ((b.textContent = 'Chargement…'), playOn(b.dataset.play!));
     });
     body.querySelectorAll<HTMLButtonElement>('[data-del]').forEach((b) => {
       b.onclick = async () => {
@@ -1305,24 +1345,18 @@ function showHome() {
         ${pbar(state.round, state.config.rounds, `${state.config.rounds - state.round} trimestres restants`)}
       </div>`
     : '';
-  h.innerHTML = `<div class="home-inner">
-      <div class="home-brand"><div class="home-logo" aria-hidden="true">${logoSvg}</div><h1>Urbasim <span class="beta">bêta ${esc(VERSION)}</span></h1><p class="home-tag">Le Monopoly de l’immobilier réel.<br>Achetez des terrains sur la vraie carte de ${esc(district.name.split('–')[0].trim())}, construisez, vendez, et battez vos concurrents promoteurs.</p></div>
+  const placeName = DISTRICTS.find((d) => d.id === districtId)?.title ?? district.name;
+  h.innerHTML = `<div class="home-scene">${homeScene()}</div><div class="home-inner">
+      <div class="home-brand"><div class="home-logo" aria-hidden="true">${logoSvg}</div><h1>Urbasim <span class="beta-badge" title="Version ${esc(VERSION)}">bêta</span></h1><p class="home-tag">Le Monopoly de l’immobilier réel.<br>Achetez de vrais terrains, construisez, vendez, et battez vos concurrents promoteurs.</p></div>
       ${saveCard}
       <div class="home-actions">
-        ${resume ? `<button id="hm-continue" class="primary big">${state.over ? 'Voir les résultats' : 'Continuer la partie'}</button>` : ''}
-        <button id="hm-new" class="${resume ? '' : 'primary '}big">Nouvelle partie</button>
+        ${resume ? `<button id="hm-continue" class="primary big home-cta">${state.over ? 'Voir les résultats' : 'Continuer la partie'}</button>` : ''}
+        <button id="hm-new" class="${resume ? '' : 'primary '}big home-cta">${resume ? 'Nouvelle partie' : 'Jouer'}</button>
         <button id="hm-howto" class="big">Mode d’emploi</button>
         ${canInstall() ? '<button id="hm-install" class="big install">📲 Installer l’application</button>' : ''}
       </div>
-      <div class="home-place"><div><small>Lieu de la partie</small><b>${esc(DISTRICTS.find((d) => d.id === districtId)?.title ?? district.name)}</b></div><button id="hm-maps" type="button">Choisir une carte</button></div>
-      <div class="home-beta"><b>Version bêta</b> : le jeu évolue vite, des choses bougent ou cassent, et les prix, coûts et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.
-        <div class="home-soon"><b>À venir</b><ul><li>Plus de lieux : d’autres villes et quartiers de France</li><li>Mode multijoueur : jouer contre vos amis, sans serveur</li><li>Programmes et dispositifs (TVA 5,5 %, ZAC propres à un territoire)</li><li>Une carte plus belle et plus lisible, puis une vue 3D</li></ul></div></div>
-      <ul class="home-points">
-        <li><b>Vraies parcelles</b> du cadastre, PLU simplifié, bâti existant</li>
-        <li><b>Enchères</b> et <b>appels d’offres</b> de la commune (ZAC, PUP)</li>
-        <li><b>Concurrents</b> ordinateur, aléas, dettes et faillite</li>
-      </ul>
-      <div class="home-credits">Bêta ${esc(VERSION)} · build ${esc(BUILD)} · <a href="#" id="hm-version">Nouveautés</a> · <a href="#" id="hm-credits">Crédits et données</a></div>
+      <div class="home-place"><div><small>Lieu de la partie</small><b>${esc(placeName)}</b></div><button id="hm-maps" type="button">Changer de lieu</button></div>
+      <div class="home-foot">Version bêta : le jeu évolue vite, les prix et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.<br>Bêta ${esc(VERSION)} · build ${esc(BUILD)} · <a href="#" id="hm-version">Nouveautés</a> · <a href="#" id="hm-credits">Crédits et données</a></div>
     </div>`;
   h.hidden = false;
   const q = (id: string) => h.querySelector<HTMLButtonElement>(`#${id}`);
@@ -1333,13 +1367,13 @@ function showHome() {
       if (state.over) openEndScreen();
       else if (!localStorage_get(TUTO_KEY) && state.round === 0 && !state.log.length) openTutorial();
     };
-  q('hm-new')!.onclick = () => openIdentity('new');
+  q('hm-new')!.onclick = () => openPlaceChooser();
   q('hm-howto')!.onclick = () => openTutorial();
   h.querySelector<HTMLAnchorElement>('#hm-credits')!.onclick = (e) => (e.preventDefault(), openCredits());
   h.querySelector<HTMLAnchorElement>('#hm-version')!.onclick = (e) => (e.preventDefault(), openVersion());
   const inst = q('hm-install');
   if (inst) inst.onclick = installApp;
-  q('hm-maps')!.onclick = () => void openMaps();
+  q('hm-maps')!.onclick = () => openPlaceChooser();
   (cont ?? q('hm-new'))!.focus();
 }
 
@@ -2742,6 +2776,15 @@ applyView();
 (document.getElementById('view') as HTMLSelectElement).value = view;
 renderAll();
 showHome();
+try {
+  // On vient de choisir une autre carte : on enchaîne sur la création de la société.
+  if (sessionStorage.getItem(NEW_KEY)) {
+    sessionStorage.removeItem(NEW_KEY);
+    openIdentity('new');
+  }
+} catch {
+  /* stockage indisponible */
+}
 announceUpdate();
 document.getElementById('boot')?.setAttribute('hidden', '');
 

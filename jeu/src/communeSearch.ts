@@ -8,7 +8,7 @@ const fmtTime = (s: number) => (s < 90 ? `environ ${Math.max(10, Math.round(s / 
 
 /** Recherche d'une commune de France : suggestions, fiche (marché, nombre de parcelles, durée de préparation). */
 export function mountCommuneSearch(host: HTMLElement, onPrepared: () => void = () => {}) {
-  host.innerHTML = `<div class="mapcard2"><div class="place-head"><b>Une autre commune</b><i>Carte libre</i></div>
+  host.innerHTML = `<div class="mapcard2"><div class="place-head"><b>Rechercher une commune</b></div>
     <input id="cs-q" type="search" placeholder="Nom de commune ou code postal" autocomplete="off" style="width:100%">
     <div id="cs-list" class="muted"></div><div id="cs-card"></div></div>`;
   const q = host.querySelector<HTMLInputElement>('#cs-q')!;

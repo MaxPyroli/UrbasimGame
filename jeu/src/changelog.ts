@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.16.0', title: 'Nouvel écran d’accueil', notes: ['Accueil animé (quartier qui sort de terre, grue, nuages) ; nouvelle partie : villes prédéfinies ou ville de votre choix (bêta)'] },
   { version: '0.15.1', title: 'Recherche de commune plus fiable', notes: ['Si le service des communes ne répond pas, la recherche passe par le géocodeur de l’IGN'] },
   { version: '0.15.0', title: 'Un seul mode de jeu', notes: ['Plus de choix de difficulté : une partie, objectif ×2 la mise'] },
   { version: '0.14.2', title: 'Carte libre : communes lentes', notes: ['Communes dont le cadastre répondait trop lentement (Noisy, Bourges, Chamonix) : sélection par contour ; secteur seulement pour les grandes villes'] },
