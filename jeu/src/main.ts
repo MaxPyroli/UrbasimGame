@@ -89,6 +89,7 @@ import {
 } from '../../moteur/src/game';
 import { pointInRing } from '../../moteur/src/game/district';
 import { CHANGELOG } from './changelog';
+import { mountCommuneSearch } from './communeSearch';
 import logoSvg from './assets/logo.svg?raw';
 import { DISTRICTS, DEFAULT_DISTRICT, chooseDistrict, chosenDistrictId, deleteMap, downloadMap, downloadedMaps, listMaps, loadDistrict, type MapEntry } from './districts';
 
@@ -1192,10 +1193,13 @@ async function openMaps() {
   openModal(
     `<h2 class="mh">Cartes</h2>
      <p class="muted" style="margin-top:0">Chaque carte se télécharge une fois, puis reste sur votre appareil (jeu possible hors ligne). Chaque carte a sa propre partie enregistrée.</p>
+     ${new URLSearchParams(location.search).has('libre') ? '<div id="maps-search" style="margin-bottom:8px"></div>' : ''}
      <div id="maps-body" class="maps"><p class="muted">Chargement de la liste…</p></div>
      <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="mp-close" type="button">Fermer</button></div>`,
     (root) => (root.querySelector<HTMLButtonElement>('#mp-close')!.onclick = closeModal),
   );
+  const search = document.getElementById('maps-search');
+  if (search) mountCommuneSearch(search); // carte libre en cours de construction : visible avec ?libre
   const body = document.getElementById('maps-body')!;
   let maps: MapEntry[] = [];
   try {
