@@ -511,15 +511,17 @@ button.add { padding: 1px 9px; font-size: 12px; border-radius: 12px; border-colo
 @media (max-width: 560px) { .pd-val { min-width: 64px; } .pd-name { font-size: 13px; } }
 .home-place, .home-save { color: var(--ink); }
 
-/* ---------- Icône des nouveautés (accueil) ---------- */
-.hm-news { position: absolute; top: 16px; right: 16px; z-index: 2; display: flex; align-items: center; height: 44px; max-width: 44px; padding: 0; border-radius: 22px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16); overflow: hidden; cursor: pointer; transition: max-width 0.7s cubic-bezier(0.2, 0.8, 0.2, 1); }
-.hm-news .ico { position: relative; width: 42px; height: 42px; flex: none; display: grid; place-items: center; }
-.hm-news .dot { display: none; position: absolute; top: 8px; right: 8px; width: 11px; height: 11px; border-radius: 50%; background: #ff4d4f; border: 2px solid var(--panel); }
-.hm-news.new .dot { display: block; animation: pulse 1.6s ease-in-out infinite; }
-.hm-news .txt { white-space: nowrap; padding-right: 18px; font-weight: 700; font-size: 14px; opacity: 0; transition: opacity 0.3s; }
-.hm-news.open { max-width: 320px; }
-.hm-news.open .txt { opacity: 1; transition-delay: 0.25s; }
-.hm-news.open .ico svg { animation: unroll 0.7s ease-out; }
+/* ---------- Pastille de notification animée (notifyPill.ts) ---------- */
+.npill { display: flex; align-items: center; height: 44px; max-width: 44px; padding: 0; border-radius: 22px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16); overflow: hidden; cursor: pointer; transition: max-width 0.7s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.npill-corner { position: absolute; top: 16px; right: 16px; z-index: 2; }
+.npill .ico { position: relative; width: 42px; height: 42px; flex: none; display: grid; place-items: center; }
+.npill .dot { display: none; position: absolute; top: 8px; right: 8px; min-width: 11px; height: 11px; border-radius: 999px; background: #ff4d4f; border: 2px solid var(--panel); color: #fff; font-size: 9px; font-style: normal; font-weight: 700; line-height: 11px; text-align: center; box-sizing: content-box; }
+.npill .dot.count { min-width: 14px; height: 14px; line-height: 14px; top: 4px; right: 4px; padding: 0 2px; }
+.npill.new .dot { display: block; animation: pulse 1.6s ease-in-out infinite; }
+.npill .txt { white-space: nowrap; padding-right: 18px; font-weight: 700; font-size: 14px; opacity: 0; transition: opacity 0.3s; }
+.npill.open { max-width: 360px; }
+.npill.open .txt { opacity: 1; transition-delay: 0.25s; }
+.npill.open .ico svg { animation: unroll 0.7s ease-out; }
 @keyframes unroll { 0% { transform: rotate(-80deg) scale(0.6); } 60% { transform: rotate(12deg) scale(1.1); } 100% { transform: rotate(0) scale(1); } }
 button.ver.new { position: relative; }
 button.ver.new::after { content: ''; position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: #ff4d4f; border: 2px solid var(--panel); }

@@ -91,6 +91,7 @@ import { pointInRing } from '../../moteur/src/game/district';
 import { CHANGELOG } from './changelog';
 import { mountCommuneSearch } from './communeSearch';
 import { applySky, currentHour, homeScene } from './homeScene';
+import { mountPill, pillHTML, type Pill } from './notifyPill';
 import { mountPodium, type PodiumRow } from './podium';
 import { deleteCustomMap, listCustomMaps, type CustomMap } from './customMaps';
 import logoSvg from './assets/logo.svg?raw';
@@ -151,7 +152,9 @@ function markNotesSeen() {
   } catch {
     /* stockage indisponible */
   }
-  document.querySelectorAll('.hm-news, #ver').forEach((el) => el.classList.remove('new', 'open'));
+  newsPill?.setUnread(false);
+  newsPill?.collapse();
+  document.getElementById('ver')?.classList.remove('new');
 }
 
 // ---------------------------------------------------------------- état
@@ -1354,7 +1357,8 @@ async function openMaps(view: 'predefined' | 'custom' = 'predefined') {
 }
 
 let skyTimer = 0;
-let newsTimer = 0;
+let newsPill: Pill | null = null;
+const NEWS_ICON = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a2 2 0 0 1 2 2v13a1 1 0 0 0 1 1H7a2 2 0 0 1-2-2z"/><path d="M18 9h2a1 1 0 0 1 1 1v8a2 2 0 0 1-2 2"/><path d="M8.5 8.5h6M8.5 12h6M8.5 15.5h3.5"/></svg>';
 function showHome() {
   closeNotif();
   const h = $('home');
@@ -1371,7 +1375,7 @@ function showHome() {
   const placeName = DISTRICTS.find((d) => d.id === districtId)?.title ?? district.name;
   const isNew = hasNewNotes();
   h.innerHTML = `<div class="home-scene">${homeScene()}</div>
-    <button type="button" id="hm-news" class="hm-news${isNew ? ' new' : ''}" aria-label="${isNew ? 'Nouvelle version disponible : voir les nouveautés' : 'Nouveautés'}" title="Nouveautés"><span class="ico"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a2 2 0 0 1 2 2v13a1 1 0 0 0 1 1H7a2 2 0 0 1-2-2z"/><path d="M18 9h2a1 1 0 0 1 1 1v8a2 2 0 0 1-2 2"/><path d="M8.5 8.5h6M8.5 12h6M8.5 15.5h3.5"/></svg><i class="dot"></i></span><span class="txt">Nouvelle version disponible !</span></button>
+    ${pillHTML({ id: 'hm-news', icon: NEWS_ICON, label: 'Nouvelle version disponible !', title: isNew ? 'Nouvelle version disponible : voir les nouveautés' : 'Nouveautés', placement: 'corner' })}
     <div class="home-inner">
       <div class="home-brand"><div class="home-logo" aria-hidden="true">${logoSvg}</div><h1>Urbasim <span class="beta-badge" title="Version ${esc(VERSION)}">bêta</span></h1><p class="home-tag">Le Monopoly de l’immobilier réel.<br>Achetez de vrais terrains, construisez, vendez, et battez vos concurrents promoteurs.</p></div>
       ${saveCard}
@@ -1389,16 +1393,10 @@ function showHome() {
   applySky(h, currentHour());
   window.clearInterval(skyTimer);
   skyTimer = window.setInterval(() => (h.hidden ? window.clearInterval(skyTimer) : applySky(h, currentHour())), 60_000);
-  const news = h.querySelector<HTMLButtonElement>('#hm-news')!;
-  news.onclick = openVersion;
-  window.clearTimeout(newsTimer);
-  if (isNew) {
-    // L'icône se déroule pour annoncer la nouveauté, puis se replie en gardant son point.
-    newsTimer = window.setTimeout(() => {
-      news.classList.add('open');
-      newsTimer = window.setTimeout(() => news.classList.remove('open'), 7000);
-    }, 900);
-  }
+  newsPill?.dispose();
+  newsPill = mountPill(h, { id: 'hm-news', icon: NEWS_ICON, label: 'Nouvelle version disponible !', title: 'Nouveautés', placement: 'corner', onClick: openVersion });
+  newsPill.setUnread(isNew);
+  if (isNew) newsPill.announce(); // l'icône se déroule pour annoncer la nouveauté, puis se replie en gardant son point
   const q = (id: string) => h.querySelector<HTMLButtonElement>(`#${id}`);
   const cont = q('hm-continue');
   if (cont)
