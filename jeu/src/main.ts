@@ -220,7 +220,7 @@ function syncMultiBox() {
   const box = document.getElementById('multi') as HTMLInputElement | null;
   if (box) box.checked = multi;
 }
-let tab: 'terrain' | 'marche' | 'commune' | 'operations' | 'journal' | 'classement' = 'terrain';
+let tab: 'trimestre' | 'terrain' | 'marche' | 'commune' | 'operations' | 'journal' | 'classement' = 'trimestre';
 let view: 'hauteur' | 'prix' | 'lieu' | 'zonage' = 'hauteur';
 /** Terrains libres mis en avant sur la carte : tous, seulement ceux à ma portée, ou ceux à assembler. */
 let plotFilter: 'tous' | 'vente' | 'abordables' | 'assembler' = 'tous';
@@ -292,7 +292,10 @@ const myPhases = () => state.projects.filter((p) => p.owner === ME).map((p) => `
 function afterAdvance(message: string, before = state.log.length) {
   selected = new Set([...selected].filter((id) => plotById(id)));
   if (state.over) tab = 'classement';
-  else toast(message);
+  else {
+    toast(message);
+    if (selected.size === 0) tab = 'trimestre'; // nouveau trimestre : on repart de la liste de ce qu'on peut faire
+  }
   renderAll();
   if (state.over) return openEndScreen();
   // Les aléas et verdicts importants s'affichent dans une fenêtre, un par un.
@@ -955,7 +958,7 @@ function openIdentity(mode: 'new' | 'edit') {
         state = newGame(id, difficulty);
         gameStarted = true;
         selected.clear();
-        tab = 'terrain';
+        tab = 'trimestre';
         save();
         closeModal();
         hideHome();
@@ -1134,7 +1137,7 @@ function openEndScreen() {
         state = newGame({ name: me().name, slogan: me().slogan ?? '', color: me().color ?? PALETTE[0] });
         gameStarted = true;
         selected.clear();
-        tab = 'terrain';
+        tab = 'trimestre';
         save();
         closeModal();
         renderAll();
@@ -1525,7 +1528,7 @@ function renderTop() {
     </div>
     </div>
     <span class="spacer"></span>
-    <button id="end" class="primary">${state.over ? 'Résultats' : me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
+    <button id="end" class="primary${!state.over && !me().ready && quarterPlan().todo === 0 ? ' ready' : ''}" title="${state.over ? '' : quarterPlan().todo === 0 ? 'Vous avez fait le tour : vous pouvez passer au trimestre suivant.' : `Il reste ${quarterPlan().todo} chose${quarterPlan().todo > 1 ? 's' : ''} à voir avant de passer (facultatif).`}">${state.over ? 'Résultats' : me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
     <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">▶▶</button>
     <button id="bell" class="bell" title="Notifications et échéances" aria-label="Notifications">🔔${unreadCount() ? `<span class="badge hot">${unreadCount()}</span>` : urgentWatch() ? '<span class="badge hot">!</span>' : ''}</button>
     <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button>${canInstall() ? '<button id="install-btn">Installer l’application</button>' : ''}<button id="howto">Mode d’emploi</button><button id="version-btn">Version ${esc(VERSION)} · build ${esc(BUILD)}</button><button id="credits-btn">Crédits et données</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
@@ -1566,6 +1569,81 @@ function renderTop() {
   };
 }
 
+// ---------------------------------------------------------------- fil du trimestre
+
+interface QuarterTask {
+  id: string;
+  icon: string;
+  title: string;
+  detail: string;
+  /** « todo » = à faire avant de passer, « info » = possible mais facultatif, « done » = rien à faire. */
+  status: 'todo' | 'info' | 'done';
+  action?: { label: string; go: () => void };
+}
+
+/** Ce que le joueur peut ou doit faire pendant ce trimestre, d'après l'état du jeu. */
+function quarterPlan(): { tasks: QuarterTask[]; todo: number; urgent: ReturnType<typeof watchList>; offers: number; holds: number; ops: number } {
+  const urgent = watchList(state, ME).filter((w) => w.tone === 'bad' || w.tone === 'warn');
+  const offers = state.offers.filter((o) => o.player === ME);
+  const holds = state.plots.filter((p) => p.owner === ME && !p.projectId);
+  const ops = state.projects.filter((r) => r.owner === ME);
+  const listed = state.plots.filter((p) => p.owner === null && isListed(p));
+  const tenders = openTenders(state).filter((t) => !tenderBidOf(t, ME));
+  const tasks: QuarterTask[] = [];
+  if (holds.length)
+    tasks.push({ id: 'launch', icon: '🏗️', title: `${holds.length} terrain${holds.length > 1 ? 's' : ''} à vous sans projet`, detail: `Chaque trimestre vous coûte du portage (${eur(holds.reduce((t, p) => t + p.paid * state.config.holdingCostRate, 0))}). Lancez l’opération, ou revendez.`, status: 'todo', action: { label: 'Lancer', go: () => gotoRef({ plot: holds[0].id }) } });
+  if (tenders.length)
+    tasks.push({ id: 'tender', icon: '📣', title: `${tenders.length} appel${tenders.length > 1 ? 's' : ''} d’offres de la commune`, detail: tenders.some((t) => t.closesAt - 1 === state.round) ? 'Dernier trimestre pour répondre à l’un d’eux : après, la commune attribue le terrain.' : 'La commune attribue des terrains à prix réduit contre des engagements : vous avez encore du temps.', status: tenders.some((t) => t.closesAt - 1 === state.round) ? 'todo' : 'info', action: { label: 'Voir', go: () => ((tab = 'commune'), renderAll()) } });
+  if (state.config.landMarket === 'auction')
+    tasks.push({
+      id: 'market',
+      icon: '🏷️',
+      title: listed.length ? `${listed.length} terrain${listed.length > 1 ? 's' : ''} en vente ce trimestre` : 'Aucun terrain mis en vente ce trimestre',
+      detail: offers.length ? `Vous avez ${offers.length} offre${offers.length > 1 ? 's' : ''} en cours : réponse à la fin du trimestre.` : listed.length ? 'Faites une offre : le plus offrant l’emporte à la fin du trimestre.' : 'Vous pouvez quand même prospecter un propriétaire directement sur la carte.',
+      status: offers.length ? 'done' : 'info',
+      ...(listed.length ? { action: { label: 'Voir', go: () => ((tab = 'marche'), renderAll()) } } : {}),
+    });
+  if (ops.length)
+    tasks.push({ id: 'ops', icon: '🏢', title: `${ops.length} opération${ops.length > 1 ? 's' : ''} en cours`, detail: ops.map((r) => `${r.id} : ${PHASE_LABEL[r.phase].toLowerCase()}`).slice(0, 3).join(' · ') + (ops.length > 3 ? '…' : '') + '. Elles avancent toutes seules.', status: 'done', action: { label: 'Suivre', go: () => ((tab = 'operations'), renderAll()) } });
+  if (!ops.length && !holds.length && !offers.length)
+    tasks.push({ id: 'explore', icon: '🗺️', title: 'Rien en cours', detail: 'Cliquez sur un terrain de la carte : son verdict dit s’il est rentable. Sans achat, ce trimestre passera pour rien.', status: 'info' });
+  const todo = tasks.filter((t) => t.status === 'todo').length + urgent.filter((w) => !/^(launch|delivery|presales)/.test(w.id)).length;
+  return { tasks, todo, urgent, offers: offers.length, holds: holds.length, ops: ops.length };
+}
+
+/** Onglet « Trimestre » : ce qu'on peut faire pendant son tour, ce qui se passe quand on passe, et quand il est temps de passer. */
+function renderQuarter(): string {
+  drawOverlay(null);
+  const q = quarterPlan();
+  const left = state.config.rounds - state.round;
+  const r = currentRanking();
+  const k = r.findIndex((x) => x.player === ME);
+  const status = me().ready
+    ? { cls: 'wait', text: 'En attente des concurrents…' }
+    : q.todo > 0
+      ? { cls: 'todo', text: `Il vous reste ${q.todo} chose${q.todo > 1 ? 's' : ''} à voir avant de passer.` }
+      : { cls: 'go', text: 'Vous avez fait le tour : vous pouvez passer au trimestre suivant.' };
+  const ghost = [
+    q.offers ? `vos ${q.offers} offre${q.offers > 1 ? 's' : ''} sont départagées` : '',
+    q.ops ? `vos ${q.ops} opération${q.ops > 1 ? 's' : ''} avancent d’une étape` : '',
+    q.holds ? `le portage de vos terrains vous est facturé` : '',
+    'les concurrents jouent leur tour',
+    'les prix et les taux du marché évoluent',
+  ].filter(Boolean);
+  const icon = { todo: '●', info: '○', done: '✓' };
+  return `<div class="qhead"><h2>${quarterLabel(state.round)}</h2><span class="muted">trimestre ${state.round + 1}/${state.config.rounds} · ${left} restant${left > 1 ? 's' : ''} · vous êtes ${ordinal(k)}/${r.length}</span></div>
+    <div class="qstatus ${status.cls}">${status.text}</div>
+    ${q.urgent.length ? `<h3 class="qh">À ne pas rater</h3>${renderWatch(q.urgent)}` : ''}
+    <h3 class="qh">Pendant ce trimestre vous pouvez…</h3>
+    <ul class="qtasks">${q.tasks
+      .map((t) => `<li class="qt ${t.status}"><span class="qi" aria-hidden="true">${t.icon}</span><div class="qb"><b>${t.title}</b><div class="muted">${t.detail}</div></div><span class="qs" title="${t.status === 'todo' ? 'À faire' : t.status === 'done' ? 'Rien à faire' : 'Facultatif'}">${icon[t.status]}</span>${t.action ? `<button type="button" data-qgo="${t.id}">${t.action.label}</button>` : ''}</li>`)
+      .join('')}</ul>
+    <h3 class="qh">Quand vous passez au trimestre suivant…</h3>
+    <ul class="qnext">${ghost.map((g) => `<li>${g}</li>`).join('')}</ul>
+    <div class="row"><button type="button" id="q-next" class="primary big" ${state.over || me().ready ? 'disabled' : ''}>Fin du trimestre ▶</button></div>
+    <p class="muted" style="font-size:12px">Vous n’avez rien d’obligatoire à faire : le trimestre peut passer à tout moment. Les points « à faire » sont ceux qui vous coûtent de l’argent ou une occasion si vous les laissez.</p>`;
+}
+
 function tabs(): string {
   const nOps = state.projects.filter((p) => p.owner === ME).length;
   const nListed = state.plots.filter((p) => p.owner === null && isListed(p)).length;
@@ -1573,24 +1651,29 @@ function tabs(): string {
   const market = state.config.landMarket === 'auction' ? t('marche', `Marché${nListed ? ` <span class="badge">${nListed}</span>` : ''}`) : '';
   const nTenders = openTenders(state).length;
   const commune = state.config.communeTenders ? t('commune', `Commune${nTenders ? ` <span class="badge">${nTenders}</span>` : ''}`) : '';
-  return `<div class="tabs">${t('terrain', 'Terrain')}${market}${commune}${t('operations', `Opérations${nOps ? ` <span class="badge">${nOps}</span>` : ''}`)}${t('journal', 'Journal')}${t('classement', 'Classement')}</div>`;
+  const nTodo = quarterPlan().todo;
+  return `<div class="tabs">${t('trimestre', `Trimestre${nTodo ? ` <span class="badge">${nTodo}</span>` : ''}`)}${t('terrain', 'Terrain')}${market}${commune}${t('operations', `Opérations${nOps ? ` <span class="badge">${nOps}</span>` : ''}`)}${t('journal', 'Journal')}${t('classement', 'Classement')}</div>`;
 }
 
 let lastPaneKey = '';
 function renderSide() {
   let body = '';
-  if (tab === 'terrain') body = renderSelection();
+  if (tab === 'trimestre') body = renderQuarter();
+  else if (tab === 'terrain') body = renderSelection();
   else if (tab === 'marche') body = renderMarche();
   else if (tab === 'commune') body = renderCommune();
   else if (tab === 'operations') body = renderOperations();
   else if (tab === 'journal') body = renderJournal();
   else body = renderRanking();
-  const key = `${tab}|${[...selected].join(',')}`;
+  const key = `${tab}|${[...selected].join(',')}|${state.round}`;
   const changed = key !== lastPaneKey;
   lastPaneKey = key;
   $('side').innerHTML = tabs() + `<div class="pane${changed ? ' enter' : ''}">${body}</div>`;
   $('side').querySelectorAll<HTMLButtonElement>('[data-tab]').forEach((b) => (b.onclick = () => ((tab = b.dataset.tab as typeof tab), renderAll())));
   bindSelection();
+  $('side').querySelectorAll<HTMLButtonElement>('[data-qgo]').forEach((b) => (b.onclick = () => quarterPlan().tasks.find((t) => t.id === b.dataset.qgo)?.action?.go()));
+  const qn = document.getElementById('q-next');
+  if (qn) qn.onclick = () => endTurn();
   const tp = document.getElementById('tab-podium');
   if (tp) mountPodium(tp, podiumRows(), podiumOptions(changed));
   if (tab === 'commune') bindTenders();

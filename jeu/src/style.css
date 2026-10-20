@@ -548,3 +548,25 @@ button.ver.new::after { content: ''; position: absolute; top: -3px; right: -3px;
 .vd-scale span:first-child { transform: none; } .vd-scale span:last-child { transform: translateX(-100%); }
 .vd-note, .vd-next { margin: 6px 0 0; font-size: 12.5px; }
 .vd-next { color: var(--muted); }
+
+/* ---------- Fil du trimestre ---------- */
+.qhead { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.qhead h2 { margin: 0; }
+.qstatus { border-radius: 12px; padding: 10px 12px; font-weight: 700; font-size: 14px; border: 2px solid var(--line); margin-bottom: 6px; }
+.qstatus.go { border-color: var(--good); background: color-mix(in srgb, var(--good) 10%, var(--panel)); color: var(--good); }
+.qstatus.todo { border-color: #e08a1e; background: color-mix(in srgb, #e08a1e 10%, var(--panel)); color: #b86c0a; }
+.qstatus.wait { color: var(--muted); }
+.qh { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.qtasks, .qnext { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.qt { display: flex; align-items: center; gap: 10px; border: 1.5px solid var(--line); border-radius: 12px; padding: 10px; background: var(--panel); }
+.qt.todo { border-color: #e08a1e; }
+.qt.done { opacity: 0.85; }
+.qi { font-size: 22px; flex: none; }
+.qb { flex: 1; min-width: 0; font-size: 13px; }
+.qb b { display: block; font-size: 14px; }
+.qs { flex: none; font-weight: 700; width: 18px; text-align: center; }
+.qt.todo .qs { color: #e08a1e; } .qt.done .qs { color: var(--good); } .qt.info .qs { color: var(--muted); }
+.qnext li { position: relative; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.qnext li::before { content: '→'; position: absolute; left: 0; color: var(--accent); }
+#end.ready { animation: readyGlow 1.8s ease-in-out infinite; }
+@keyframes readyGlow { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent); } }
