@@ -236,6 +236,9 @@ const SEEN_KEY = 'urbasim-seen-v1';
 let seenLog = Math.max(0, Math.round(+(localStorage_get(SEEN_KEY) ?? 0)) || 0);
 type NotifFilter = 'tout' | 'alea' | 'commune' | 'operation' | 'terrain';
 let notifFilter: NotifFilter = 'tout';
+/** Pastilles de notification affichées (par type) ; `pillsReady` passe à vrai une fois l'écran prêt : avant, les nouveautés déjà là sont montrées sans animation. */
+const livePills = new Map<string, { pill: Pill; count: number }>();
+let pillsReady = false;
 let form: { levels: number; attic: boolean; parking: ParkingStrategy; depth: number; placement: Placement; shape: FootprintShape; second: boolean; secondLevels: number | null; mix: Record<Typology, number> | null; housing: HousingType } = { levels: 3, attic: false, parking: 'auto', depth: 12, placement: 'auto', shape: 'adapte', second: true, secondLevels: null, mix: null, housing: 'collectif' };
 
 function save() {
@@ -979,6 +982,7 @@ function openIdentity(mode: 'new' | 'edit') {
           return;
         }
         state = newGame(id, difficulty);
+        resetNotifications();
         gameStarted = true;
         selected.clear();
         tab = 'trimestre';
@@ -1158,6 +1162,7 @@ function openEndScreen() {
       root.querySelector<HTMLButtonElement>('#en-other')!.onclick = () => (closeModal(), openIdentity('new'));
       root.querySelector<HTMLButtonElement>('#en-again')!.onclick = () => {
         state = newGame({ name: me().name, slogan: me().slogan ?? '', color: me().color ?? PALETTE[0] });
+        resetNotifications();
         gameStarted = true;
         selected.clear();
         tab = 'trimestre';
@@ -2053,6 +2058,68 @@ const relevant = (e: GameEvent) => isRelevant(e, ME);
 const unreadCount = () => state.log.slice(Math.min(seenLog, state.log.length)).filter((e) => relevant(e) && !e.popup).length;
 const urgentWatch = () => watchList(state, ME).some((w) => w.tone === 'bad');
 
+// ---------------------------------------------------------------- pastilles de notification en jeu
+
+/** Nouvelle partie : rien n'est lu, et les pastilles de l'ancienne partie disparaissent. */
+function resetNotifications() {
+  seenLog = 0;
+  try {
+    localStorage.setItem(SEEN_KEY, '0');
+  } catch {
+    /* stockage indisponible */
+  }
+  for (const live of livePills.values()) (live.pill.dispose(), live.pill.el.remove());
+  livePills.clear();
+}
+
+/** Une pastille par type d'événement non lu : elle se déroule à l'arrivée d'une nouveauté, puis se replie en gardant son point (ou son compteur). */
+const PILL_KINDS: Record<string, { icon: string; title: string; filter: NotifFilter }> = {
+  terrain: { icon: '🏷️', title: 'Terrains', filter: 'terrain' },
+  commune: { icon: '📣', title: 'Commune', filter: 'commune' },
+  operation: { icon: '🏢', title: 'Opérations', filter: 'operation' },
+  alea: { icon: '⚡', title: 'Aléas', filter: 'alea' },
+};
+const pillStack = new L.Control({ position: 'bottomright' });
+pillStack.onAdd = () => {
+  const el = L.DomUtil.create('div', 'npills');
+  L.DomEvent.disableClickPropagation(el);
+  return el;
+};
+
+/** Met les pastilles à jour d'après les événements non lus (appelé à chaque rendu) : crée, compte, annonce les nouveautés, retire celles qui ont été lues. */
+function renderPills() {
+  const host = pillStack.getContainer();
+  if (!host) return;
+  const groups = new Map<string, GameEvent[]>();
+  for (const e of state.log.slice(Math.min(seenLog, state.log.length))) {
+    if (!relevant(e) || e.popup) continue;
+    const kind = e.kind === 'finance' || !e.kind ? 'operation' : e.kind;
+    if (PILL_KINDS[kind]) (groups.get(kind) ?? groups.set(kind, []).get(kind)!).push(e);
+  }
+  for (const [kind, live] of livePills) {
+    if (!groups.has(kind)) {
+      live.pill.dispose();
+      live.pill.el.remove();
+      livePills.delete(kind);
+    }
+  }
+  for (const [kind, events] of groups) {
+    const conf = PILL_KINDS[kind];
+    const latest = events[events.length - 1].text;
+    const label = `${events.length > 1 ? `${events.length} nouveautés · ` : ''}${latest.length > 46 ? `${latest.slice(0, 44)}…` : latest}`;
+    let live = livePills.get(kind);
+    if (!live) {
+      host.insertAdjacentHTML('beforeend', pillHTML({ id: `np-${kind}`, icon: `<span class="emo">${conf.icon}</span>`, label, title: `${conf.title} : voir les notifications` }));
+      const pill = mountPill(host, { id: `np-${kind}`, icon: '', label, title: conf.title, onClick: () => ((notifFilter = conf.filter), openNotif()) });
+      live = { pill, count: pillsReady ? 0 : events.length };
+      livePills.set(kind, live);
+    }
+    live.pill.setUnread(events.length);
+    if (events.length > live.count) live.pill.announce(label, 6500);
+    live.count = events.length;
+  }
+}
+
 const KIND_LABEL: Record<string, string> = { alea: 'Aléa', commune: 'Commune', operation: 'Opération', terrain: 'Terrain', finance: 'Finances' };
 const FILTERS: [NotifFilter, string][] = [['tout', 'Tout'], ['alea', 'Aléas'], ['commune', 'Commune'], ['operation', 'Opérations'], ['terrain', 'Terrains']];
 
@@ -2071,6 +2138,7 @@ function openNotif() {
     /* stockage indisponible */
   }
   renderTop();
+  renderPills();
   const render = () => {
     const n = $('notif');
     const watches = watchList(state, ME);
@@ -2961,6 +3029,7 @@ function bindSelection() {
 
 function renderAll() {
   renderTop();
+  renderPills();
   drawPlots();
   renderSide();
   updateMapCard();
@@ -3043,11 +3112,13 @@ function updateMapCard() {
 mapFull.addTo(map);
 mapLegend.addTo(map);
 mapTools.addTo(map);
+pillStack.addTo(map);
 fitDistrict();
 applyView();
 syncToolbar();
 renderAll();
 showHome();
+pillsReady = true; // à partir d'ici, toute nouveauté non lue est annoncée par sa pastille
 try {
   // On vient de choisir une autre carte : on enchaîne sur la création de la société.
   if (sessionStorage.getItem(NEW_KEY)) {

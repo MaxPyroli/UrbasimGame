@@ -703,3 +703,6 @@ bien accès au nouveau dépôt.
 ### Panneau de droite remis en ordre (version 0.17.7)
 - Onglet Terrain d'un terrain libre : en-tête et chiffres clés → **verdict** (avec le prix de terrain maximal pour la marge visée et ce qu'on compte payer) → **Acquérir ce terrain** (offre / achat) → **Projet** (niveaux, attique, type, indicateurs) → repliés : Options, Répartition des logements, Détail du bilan, **Analyse du terrain** (règles en pastilles, « meilleur projet », voisines à assembler ; ouverte d'office pour un terrain « à assembler »), Règles d'urbanisme, Situation. Avant, l'analyse et les pastilles précédaient l'achat.
 - À faire : alléger le texte des encadrés bleus (« Pas en vente »), regrouper les trois indicateurs sous le verdict, curseur plutôt que menus pour les niveaux.
+
+### Notifications en jeu (version 0.17.8)
+- Moteur `notifyPill.ts` réutilisé : `renderPills()` (main.ts) affiche en bas à droite de la carte une pastille par type de notification non lue (`PILL_KINDS`) ; elle se déroule à l'arrivée (texte tronqué à 46 caractères), se replie en icône + compteur, un clic ouvre le panneau filtré et la retire. `resetNotifications()` au début de chaque partie ; pas d'annonce au chargement d'une sauvegarde (`pillsReady`).
