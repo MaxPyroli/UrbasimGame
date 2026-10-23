@@ -2096,27 +2096,37 @@ function renderPills() {
     const kind = e.kind === 'finance' || !e.kind ? 'operation' : e.kind;
     if (PILL_KINDS[kind]) (groups.get(kind) ?? groups.set(kind, []).get(kind)!).push(e);
   }
-  for (const [kind, live] of livePills) {
-    if (!groups.has(kind)) {
-      live.pill.dispose();
-      live.pill.el.remove();
-      livePills.delete(kind);
-    }
-  }
+  type PillItem = { icon: string; title: string; label: string; count: number; go: () => void };
+  const items = new Map<string, PillItem>();
+  const clip = (t: string) => (t.length > 46 ? `${t.slice(0, 44)}…` : t);
   for (const [kind, events] of groups) {
     const conf = PILL_KINDS[kind];
-    const latest = events[events.length - 1].text;
-    const label = `${events.length > 1 ? `${events.length} nouveautés · ` : ''}${latest.length > 46 ? `${latest.slice(0, 44)}…` : latest}`;
-    let live = livePills.get(kind);
-    if (!live) {
-      host.insertAdjacentHTML('beforeend', pillHTML({ id: `np-${kind}`, icon: `<span class="emo">${conf.icon}</span>`, label, title: `${conf.title} : voir les notifications` }));
-      const pill = mountPill(host, { id: `np-${kind}`, icon: '', label, title: conf.title, onClick: () => ((notifFilter = conf.filter), openNotif()) });
-      live = { pill, count: pillsReady ? 0 : events.length };
-      livePills.set(kind, live);
+    items.set(kind, { icon: conf.icon, title: conf.title, label: `${events.length > 1 ? `${events.length} nouveautés · ` : ''}${clip(events[events.length - 1].text)}`, count: events.length, go: () => ((notifFilter = conf.filter), openNotif()) });
+  }
+  // Alertes du trimestre (découvert, délais qui approchent…) : une pastille par alerte tant qu'elle dure.
+  if (!state.over)
+    for (const w of watchList(state, ME))
+      if (w.tone === 'bad' || w.tone === 'warn')
+        items.set(`w:${w.id}`, { icon: w.tone === 'bad' ? '🚨' : '⏳', title: 'Alerte du trimestre', label: clip(w.title), count: 1, go: () => ((tab = 'trimestre'), renderAll()) });
+  for (const [key, live] of livePills) {
+    if (!items.has(key)) {
+      live.pill.dispose();
+      live.pill.el.remove();
+      livePills.delete(key);
     }
-    live.pill.setUnread(events.length);
-    if (events.length > live.count) live.pill.announce(label, 6500);
-    live.count = events.length;
+  }
+  for (const [key, it] of items) {
+    let live = livePills.get(key);
+    if (!live) {
+      const id = `np-${key.replace(/[^\w-]/g, '_')}`;
+      host.insertAdjacentHTML('beforeend', pillHTML({ id, icon: `<span class="emo">${it.icon}</span>`, label: it.label, title: `${it.title} : voir` }));
+      const pill = mountPill(host, { id, icon: '', label: it.label, title: it.title, onClick: it.go });
+      live = { pill, count: pillsReady ? 0 : it.count };
+      livePills.set(key, live);
+    }
+    live.pill.setUnread(it.count);
+    if (it.count > live.count) live.pill.announce(it.label, 6500);
+    live.count = it.count;
   }
 }
 

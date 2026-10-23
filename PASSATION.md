@@ -706,3 +706,6 @@ bien accès au nouveau dépôt.
 
 ### Notifications en jeu (version 0.17.8)
 - Moteur `notifyPill.ts` réutilisé : `renderPills()` (main.ts) affiche en bas à droite de la carte une pastille par type de notification non lue (`PILL_KINDS`) ; elle se déroule à l'arrivée (texte tronqué à 46 caractères), se replie en icône + compteur, un clic ouvre le panneau filtré et la retire. `resetNotifications()` au début de chaque partie ; pas d'annonce au chargement d'une sauvegarde (`pillsReady`).
+
+### Alertes du trimestre en pastilles (version 0.17.9)
+- `renderPills()` ajoute une pastille par alerte `watchList` de ton `bad`/`warn` (clé `w:<id>`) ; elle reste tant que l'alerte dure, annonce à l'apparition, clic = onglet Trimestre.
