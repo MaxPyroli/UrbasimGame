@@ -1417,7 +1417,7 @@ function showHome() {
         ${canInstall() ? '<button id="hm-install" class="big install">📲 Installer l’application</button>' : ''}
       </div>
       <div class="home-place"><div><small>Lieu de la partie</small><b>${esc(placeName)}</b></div><button id="hm-maps" type="button">Changer de lieu</button></div>
-      <div class="home-foot">Version bêta : le jeu évolue vite, les prix et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.<br>Bêta ${esc(VERSION)} · build ${esc(BUILD)} · <a href="#" id="hm-version">Nouveautés</a> · <a href="#" id="hm-credits">Crédits et données</a><br>© 2026 Paname Dev · Codé par Claude · sans pub, sans pistage · <a href="mailto:contact@panamedev.fr">contact@panamedev.fr</a></div>
+      <div class="home-foot">Version bêta : le jeu évolue vite, les prix et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.<br>Bêta ${esc(VERSION)} · build ${esc(BUILD)} · <a href="#" id="hm-version">Nouveautés</a> · <a href="#" id="hm-credits">Crédits et données</a> · <a href="#" id="hm-privacy">Confidentialité</a><br>© 2026 Paname Dev · Codé par Claude · sans pub, sans pistage · <a href="mailto:contact@panamedev.fr">contact@panamedev.fr</a></div>
     </div>`;
   h.hidden = false;
   // Le ciel suit l'heure de la journée ; on le remet à jour chaque minute tant que l'accueil est visible.
@@ -1439,6 +1439,7 @@ function showHome() {
   q('hm-new')!.onclick = () => openPlaceChooser();
   q('hm-howto')!.onclick = () => openTutorial();
   h.querySelector<HTMLAnchorElement>('#hm-credits')!.onclick = (e) => (e.preventDefault(), openCredits());
+  h.querySelector<HTMLAnchorElement>('#hm-privacy')!.onclick = (e) => (e.preventDefault(), openPrivacy());
   h.querySelector<HTMLAnchorElement>('#hm-version')!.onclick = (e) => (e.preventDefault(), openVersion());
   const inst = q('hm-install');
   if (inst) inst.onclick = installApp;
@@ -1559,7 +1560,7 @@ function renderTop() {
     <button id="end" class="primary${!state.over && !me().ready && quarterPlan().todo === 0 ? ' ready' : ''}" title="${state.over ? '' : quarterPlan().todo === 0 ? 'Vous avez fait le tour : vous pouvez passer au trimestre suivant.' : `Il reste ${quarterPlan().todo} chose${quarterPlan().todo > 1 ? 's' : ''} à voir avant de passer (facultatif).`}">${state.over ? 'Résultats' : me().ready ? 'En attente…' : 'Fin du trimestre ▶'}</button>
     <button id="ff" ${state.over ? 'disabled' : ''} title="Avance jusqu'à la prochaine étape d'une de vos opérations ou jusqu'à un aléa (8 trimestres au plus)">▶▶</button>
     <button id="bell" class="bell" title="Notifications et échéances" aria-label="Notifications">🔔${unreadCount() ? `<span class="badge hot">${unreadCount()}</span>` : urgentWatch() ? '<span class="badge hot">!</span>' : ''}</button>
-    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button>${canInstall() ? '<button id="install-btn">Installer l’application</button>' : ''}<button id="howto">Mode d’emploi</button><button id="version-btn">Version ${esc(VERSION)} · build ${esc(BUILD)}</button><button id="credits-btn">Crédits et données</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
+    <details class="menu"><summary title="Menu">⋯</summary><div><div class="muted" style="margin-bottom:6px">${esc(district.name)}</div><div class="menulist"><button id="home-btn">Écran d’accueil</button>${canInstall() ? '<button id="install-btn">Installer l’application</button>' : ''}<button id="howto">Mode d’emploi</button><button id="version-btn">Version ${esc(VERSION)} · build ${esc(BUILD)}</button><button id="credits-btn">Crédits et données</button><button id="privacy-btn">Confidentialité</button><button id="company">Ma société</button><button id="new">Nouvelle partie</button></div></div></details>`;
   tweenStat('cash', document.getElementById('stat-cash'), me().cash);
   tweenStat('worth', document.getElementById('stat-worth'), w);
   if (prevStat.round !== undefined && prevStat.round !== state.round) pulse(document.getElementById('stat-round'));
@@ -1578,6 +1579,7 @@ function renderTop() {
   if (ib) ib.onclick = () => (closeMenu(), installApp());
   $('howto').onclick = () => (closeMenu(), openTutorial());
   $('credits-btn').onclick = () => (closeMenu(), openCredits());
+  $('privacy-btn').onclick = () => (closeMenu(), openPrivacy());
   $('version-btn').onclick = () => (closeMenu(), openVersion());
   $('company').onclick = () => (closeMenu(), openIdentity('edit'));
   const nb = $('new');
@@ -3076,6 +3078,19 @@ function openCredits() {
      <p class="muted">Urbasim est un jeu en version bêta : les prix, les coûts et les règles d’urbanisme sont des ordres de grandeur, pas une expertise.</p></div>
      <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="cr-ok" type="button" class="primary">Fermer</button></div>`,
     (root) => (root.querySelector<HTMLButtonElement>('#cr-ok')!.onclick = closeModal),
+  );
+}
+function openPrivacy() {
+  openModal(
+    `<h2 class="mh">Confidentialité</h2>
+     <div class="tuto"><p><b>Sans pub, sans pistage.</b> Urbasim ne contient aucune publicité, aucun traceur, aucun outil de statistiques.</p>
+     <p>Vos parties, votre société et les cartes préparées sont enregistrées <b>dans ce navigateur</b> (stockage local) : elles ne quittent pas votre appareil, et les effacer revient à vider les données du site.</p>
+     <p>Pour fonctionner, le jeu interroge des services publics, qui voient l’adresse IP de votre appareil comme pour toute page web :</p>
+     <ul><li>Fond de carte : OpenStreetMap (tile.openstreetmap.org)</li><li>Parcelles, bâtiments, équipements, zonage : IGN (apicarto.ign.fr, data.geopf.fr)</li><li>Recherche d’une commune : geo.api.gouv.fr</li><li>Prix des ventes : data.gouv.fr (DVF) et Cerema</li></ul>
+     <p>La police est hébergée avec le jeu. Une question : <a href="mailto:contact@panamedev.fr">contact@panamedev.fr</a></p>
+     <p class="muted">© 2026 Paname Dev · Pensé par Paname Dev et codé par Claude</p></div>
+     <div class="row" style="margin-top:12px"><span class="spacer"></span><button id="pv-ok" type="button" class="primary">Fermer</button></div>`,
+    (root) => (root.querySelector<HTMLButtonElement>('#pv-ok')!.onclick = closeModal),
   );
 }
 /** Carte agrandie : le panneau latéral se masque, une fiche flottante résume le terrain choisi. */
