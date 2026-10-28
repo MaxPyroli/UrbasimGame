@@ -4,43 +4,43 @@
 import { readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
-const BG = '#14171c';
-const C = { blue: '#1f6feb', magenta: '#c2185b', yellow: '#e6ab02', green: '#1b9e77' };
-const LIT = '#ffe08a';
+// Charte Paname Dev : fond bleu UrbaSim, encre bleu foncé, objets pastel, trait épais, tout plat (ni dégradé ni ombre).
+const BG = '#3f80ca';
+const INK = '#285a93';
+const C = { blue: '#cdbcff', magenta: '#ff9ec3', yellow: '#ffe66d', green: '#a8e6a1', peach: '#ffb27a' };
+const LIT = '#fff4d6';
 const f = (n) => Math.round(n * 10) / 10;
 
 /** Skyline sans fond : renvoie le dessin pour un carré de 512 (baseline à 398). */
 function skyline() {
   const w = 46, gap = 8, base = 398;
   const heights = [92, 148, 118, 200, 168, 262, 214];
-  const colors = [C.blue, C.magenta, C.yellow, C.green, C.blue, C.magenta, C.yellow];
+  const colors = [C.blue, C.magenta, C.yellow, C.green, C.peach, C.magenta, C.yellow];
   const x0 = (512 - (heights.length * w + (heights.length - 1) * gap)) / 2;
   let out = '';
-  // soleil levant derrière la skyline : deux cercles concentriques, discrets
-  out += `<circle cx="372" cy="190" r="112" fill="${C.yellow}" opacity=".13"/><circle cx="372" cy="190" r="66" fill="${C.yellow}" opacity=".2"/>`;
   heights.forEach((h, i) => {
     const x = x0 + i * (w + gap);
     const top = base - h;
-    out += `<rect x="${f(x)}" y="${top}" width="${w}" height="${h}" rx="7" fill="${colors[i]}"/>`;
+    out += `<rect x="${f(x)}" y="${top}" width="${w}" height="${h}" rx="7" fill="${colors[i]}" stroke="${INK}" stroke-width="12"/>`;
     // fenêtres : deux colonnes, quelques-unes allumées
     let r = 0;
     for (let y = top + 18; y < base - 26; y += 24, r++) {
       for (let c = 0; c < 2; c++) {
         const lit = (i * 7 + r * 3 + c * 2) % 5 === 0;
-        out += `<rect x="${f(x + 9 + c * 18)}" y="${y}" width="11" height="11" rx="2.5" fill="${lit ? LIT : '#fff'}" opacity="${lit ? 0.95 : 0.26}"/>`;
+        out += `<rect x="${f(x + 9 + c * 18)}" y="${y}" width="11" height="11" rx="2.5" fill="${lit ? LIT : INK}" opacity="${lit ? 1 : 0.2}"/>`;
       }
     }
     // couronnements : retraits sur deux immeubles
-    if (i === 3) out += `<rect x="${f(x + 9)}" y="${top - 20}" width="28" height="24" rx="5" fill="${colors[i]}"/>`;
+    if (i === 3) out += `<rect x="${f(x + 9)}" y="${top - 20}" width="28" height="24" rx="5" fill="${colors[i]}" stroke="${INK}" stroke-width="12"/>`;
   });
   // le plus haut : un retrait, une flèche et une balise allumée
   const tx = x0 + 5 * (w + gap) + w / 2;
   const ttop = base - heights[5];
-  out += `<rect x="${f(tx - 14)}" y="${ttop - 30}" width="28" height="34" rx="5" fill="${colors[5]}"/>`;
-  out += `<rect x="${f(tx - 2)}" y="${ttop - 74}" width="4" height="46" rx="2" fill="#eceef2"/>`;
-  out += `<circle cx="${f(tx)}" cy="${ttop - 80}" r="17" fill="${LIT}" opacity=".28"/><circle cx="${f(tx)}" cy="${ttop - 80}" r="8" fill="${LIT}"/>`;
+  out += `<rect x="${f(tx - 14)}" y="${ttop - 30}" width="28" height="34" rx="5" fill="${colors[5]}" stroke="${INK}" stroke-width="12"/>`;
+  out += `<rect x="${f(tx - 2)}" y="${ttop - 74}" width="4" height="46" rx="2" fill="${INK}"/>`;
+  out += `<circle cx="${f(tx)}" cy="${ttop - 80}" r="12" fill="${LIT}" stroke="${INK}" stroke-width="8"/>`;
   // sol
-  out += `<rect x="54" y="406" width="404" height="12" rx="6" fill="#eceef2" opacity=".92"/>`;
+  out += `<rect x="54" y="406" width="404" height="12" rx="8" fill="${INK}"/>`;
   return out;
 }
 
@@ -48,13 +48,13 @@ function skyline() {
 function skylineSmall() {
   const w = 8, gap = 2, base = 50;
   const heights = [14, 22, 17, 36, 26];
-  const colors = [C.blue, C.yellow, C.green, C.magenta, C.blue];
+  const colors = [C.blue, C.yellow, C.green, C.magenta, C.peach];
   const x0 = (64 - (heights.length * w + (heights.length - 1) * gap)) / 2;
   let out = '';
-  heights.forEach((h, i) => (out += `<rect x="${f(x0 + i * (w + gap))}" y="${base - h}" width="${w}" height="${h}" rx="1.5" fill="${colors[i]}"/>`));
+  heights.forEach((h, i) => (out += `<rect x="${f(x0 + i * (w + gap))}" y="${base - h}" width="${w}" height="${h}" rx="1.5" fill="${colors[i]}" stroke="${INK}" stroke-width="2.4"/>`));
   const tx = x0 + 3 * (w + gap) + w / 2;
-  out += `<rect x="${f(tx - 0.7)}" y="${base - 36 - 9}" width="1.4" height="10" rx=".7" fill="#eceef2"/><circle cx="${f(tx)}" cy="${base - 36 - 10}" r="2.6" fill="${LIT}"/>`;
-  out += `<rect x="6" y="52.5" width="52" height="3" rx="1.5" fill="#eceef2" opacity=".92"/>`;
+  out += `<rect x="${f(tx - 0.7)}" y="${base - 36 - 9}" width="1.4" height="10" rx=".7" fill="${INK}"/><circle cx="${f(tx)}" cy="${base - 36 - 10}" r="2.2" fill="${LIT}" stroke="${INK}" stroke-width="1.6"/>`;
+  out += `<rect x="6" y="52.5" width="52" height="3" rx="1.5" fill="${INK}"/>`;
   return out;
 }
 

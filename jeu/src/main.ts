@@ -1307,7 +1307,7 @@ async function openMaps(view: 'predefined' | 'custom' = 'predefined') {
         customs
           .map((m) => {
             const current = m.id === districtId;
-            return `<div class="mapcard2${current ? ' on' : ''}"><div class="place-head"><b>${esc(m.name)}</b><i>${esc(m.createdAt)}</i></div><div class="place-facts">${[`${m.parcels.toLocaleString('fr-FR')} parcelles`, m.pricePerM2 ? `appartements ${m.pricePerM2.toLocaleString('fr-FR')} €/m²` : 'marché par défaut', m.zones > 0 ? 'PLU numérisé' : 'sans PLU numérisé', fmtMB(m.bytes)].join(' · ')}</div><div class="row">${current ? '<span class="pill" style="--pc:#1f6feb">Carte actuelle</span>' : ''}<button type="button" class="primary" data-cplay="${m.id}">Jouer ici</button><button type="button" data-cdel="${m.id}">Supprimer</button></div></div>`;
+            return `<div class="mapcard2${current ? ' on' : ''}"><div class="place-head"><b>${esc(m.name)}</b><i>${esc(m.createdAt)}</i></div><div class="place-facts">${[`${m.parcels.toLocaleString('fr-FR')} parcelles`, m.pricePerM2 ? `appartements ${m.pricePerM2.toLocaleString('fr-FR')} €/m²` : 'marché par défaut', m.zones > 0 ? 'PLU numérisé' : 'sans PLU numérisé', fmtMB(m.bytes)].join(' · ')}</div><div class="row">${current ? '<span class="pill" style="--pc:#3f80ca">Carte actuelle</span>' : ''}<button type="button" class="primary" data-cplay="${m.id}">Jouer ici</button><button type="button" data-cdel="${m.id}">Supprimer</button></div></div>`;
           })
           .join('')
       : '';
@@ -1343,7 +1343,7 @@ async function openMaps(view: 'predefined' | 'custom' = 'predefined') {
         : 'Non disponible dans cette version : voir le site publié';
       const p = progress.get(d.id);
       const action = current
-        ? '<span class="pill" style="--pc:#1f6feb">Carte actuelle</span><button type="button" class="primary" data-play="' + d.id + '">Jouer ici</button>'
+        ? '<span class="pill" style="--pc:#3f80ca">Carte actuelle</span><button type="button" class="primary" data-play="' + d.id + '">Jouer ici</button>'
         : !m
           ? ''
           : p !== undefined
@@ -1417,7 +1417,7 @@ function showHome() {
         ${canInstall() ? '<button id="hm-install" class="big install">📲 Installer l’application</button>' : ''}
       </div>
       <div class="home-place"><div><small>Lieu de la partie</small><b>${esc(placeName)}</b></div><button id="hm-maps" type="button">Changer de lieu</button></div>
-      <div class="home-foot">Version bêta : le jeu évolue vite, les prix et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.<br>Bêta ${esc(VERSION)} · build ${esc(BUILD)} · <a href="#" id="hm-version">Nouveautés</a> · <a href="#" id="hm-credits">Crédits et données</a></div>
+      <div class="home-foot">Version bêta : le jeu évolue vite, les prix et règles d’urbanisme sont des ordres de grandeur. Votre partie est enregistrée dans ce navigateur.<br>Bêta ${esc(VERSION)} · build ${esc(BUILD)} · <a href="#" id="hm-version">Nouveautés</a> · <a href="#" id="hm-credits">Crédits et données</a><br>© 2026 Paname Dev · Codé par Claude · sans pub, sans pistage · <a href="mailto:contact@panamedev.fr">contact@panamedev.fr</a></div>
     </div>`;
   h.hidden = false;
   // Le ciel suit l'heure de la journée ; on le remet à jour chaque minute tant que l'accueil est visible.

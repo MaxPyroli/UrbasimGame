@@ -4,12 +4,12 @@
 
 :root {
   --font: 'Alte Haas Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --bg: #f6f5f1;
+  --bg: #f6f3ee;
   --panel: #ffffff;
-  --ink: #1d2433;
-  --muted: #667085;
-  --line: #e2e0d8;
-  --accent: #1f6feb;
+  --ink: #2b2623;
+  --muted: #776c63;
+  --line: #e6dfd6;
+  --accent: #3f80ca;
   --good: #1a7f4b;
   --bad: #c0392b;
   --warn: #b7791f;
@@ -18,12 +18,12 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #14171c;
-    --panel: #1d222a;
-    --ink: #e8eaee;
-    --muted: #9aa3b2;
-    --line: #2d343f;
-    --accent: #5b9dff;
+    --bg: #16141a;
+    --panel: #211e27;
+    --ink: #f3ede6;
+    --muted: #a59fae;
+    --line: #35303d;
+    --accent: #6ea2e0;
     --good: #4cc38a;
     --bad: #ff7b6b;
     --warn: #e0b04c;
@@ -33,12 +33,12 @@
   }
 }
 :root[data-theme='dark'] {
-  --bg: #14171c;
-  --panel: #1d222a;
-  --ink: #e8eaee;
-  --muted: #9aa3b2;
-  --line: #2d343f;
-  --accent: #5b9dff;
+  --bg: #16141a;
+  --panel: #211e27;
+  --ink: #f3ede6;
+  --muted: #a59fae;
+  --line: #35303d;
+  --accent: #6ea2e0;
   --good: #4cc38a;
   --bad: #ff7b6b;
   --warn: #e0b04c;
@@ -70,7 +70,7 @@ main { display: grid; grid-template-columns: 1fr 390px; min-height: 0; }
 }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 18px 0 6px; }
 h2:first-child { margin-top: 0; }
-button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+button { font: inherit; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -90,8 +90,8 @@ label.f select, label.f input[type=number] { font: inherit; padding: 3px 6px; ba
 .log li { margin: 0 0 4px; font-size: 12.5px; }
 .log { padding-left: 16px; margin: 0; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
-.card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
-#toast { position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%); max-width: 80vw; padding: 8px 14px; border-radius: 8px; background: #1d2433; color: #fff; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 2000; }
+.card { border: 1px solid var(--line); border-radius: 14px; padding: 8px 10px; margin: 6px 0; }
+#toast { position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%); max-width: 80vw; padding: 8px 14px; border-radius: 8px; background: #2b2623; color: #fff; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 2000; }
 #toast.show { opacity: 1; }
 #toast.err { background: var(--bad); }
 .legend { font-size: 12px; color: var(--muted); }
@@ -256,7 +256,7 @@ table.score td { padding: 2px 4px; }
 .home-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 6px; }
 .home-stats small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
 .home-actions { display: flex; flex-direction: column; gap: 8px; }
-button.big { padding: 12px 16px; font-size: 16px; border-radius: 10px; }
+button.big { padding: 12px 20px; font-size: 16px; border-radius: 999px; }
 .home-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); text-align: center; }
 .home-points b { color: var(--ink); }
 .home-credits { font-size: 11px; color: var(--muted); text-align: center; line-height: 1.4; }
@@ -390,7 +390,7 @@ button.add { padding: 1px 9px; font-size: 12px; border-radius: 12px; border-colo
 #top h1 { white-space: nowrap; }
 
 /* Chargement de la carte au démarrage (Sucy-en-Brie : plusieurs milliers de parcelles) */
-.boot { position: fixed; inset: 0; z-index: 5000; display: grid; place-content: center; gap: 12px; text-align: center; background: var(--bg, #14171c); color: var(--ink, #e8eaed); font-size: 16px; padding: 24px; }
+.boot { position: fixed; inset: 0; z-index: 5000; display: grid; place-content: center; gap: 12px; text-align: center; background: var(--bg, #16141a); color: var(--ink, #f3ede6); font-size: 16px; padding: 24px; }
 .boot[hidden] { display: none; }
 
 /* Choix de la carte sur l'écran d'accueil */
@@ -441,7 +441,7 @@ button.add { padding: 1px 9px; font-size: 12px; border-radius: 12px; border-colo
 }
 
 /* ---------- Écran d'accueil animé (le ciel suit l'heure : voir homeScene.ts) ---------- */
-.home { --sky-top: #7db7f0; --sky-bottom: #ffe9c4; --dark: 0; --home-ink: #1d2433; background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bottom) 72%); backdrop-filter: none; color: var(--home-ink); transition: background 1s; padding-bottom: clamp(150px, 26vh, 300px); }
+.home { --sky-top: #7db7f0; --sky-bottom: #ffe9c4; --dark: 0; --home-ink: #2b2623; background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bottom) 72%); backdrop-filter: none; color: var(--home-ink); transition: background 1s; padding-bottom: clamp(150px, 26vh, 300px); }
 .home-scene { position: absolute; inset: 0; pointer-events: none; color: #0f1320; overflow: hidden; }
 .home-scene .scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .scene .layer { filter: brightness(calc(1 - var(--dark) * 0.5)); }

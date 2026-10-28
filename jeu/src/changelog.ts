@@ -6,6 +6,7 @@ export interface Release {
 }
 
 export const CHANGELOG: Release[] = [
+  { version: '0.17.10', title: 'Charte Paname Dev', notes: ['Nouvelle icône (bleu UrbaSim, pastels), couleurs, boutons en pilule et mention Paname Dev'] },
   { version: '0.17.9', title: 'Alertes en pastilles', notes: ['Découvert et délais qui approchent s’annoncent aussi par une pastille, jusqu’à ce qu’ils soient réglés'] },
   { version: '0.17.8', title: 'Notifications en jeu', notes: ['Une pastille animée annonce chaque nouvelle notification, puis se replie en point ; un clic ouvre la liste'] },
   { version: '0.17.7', title: 'Panneau de droite remis en ordre', notes: ['Verdict, puis « Acquérir », puis « Projet » ; le reste (analyse, règles, bilan) est replié dessous'] },

@@ -1,7 +1,7 @@
 // Décor animé de l'écran d'accueil : un quartier qui sort de terre, des grues sur plusieurs plans, des nuages, et un ciel qui suit
 // l'heure de la journée (soleil ou lune sur son arc, couleurs du ciel, fenêtres qui s'allument la nuit, étoiles).
 // Tout est généré (aucune image) ; les animations se figent si l'animation est réduite. `?heure=22` force l'heure (essais).
-const COLORS = ['#1f6feb', '#c2185b', '#e6ab02', '#1b9e77'];
+const COLORS = ['#8fd3ff', '#ff9ec3', '#ffe66d', '#a8e6a1'];
 const W = 1200;
 const H = 800;
 const GROUND = H - 16;
@@ -142,7 +142,7 @@ export function applySky(home: HTMLElement, hour: number) {
   home.style.setProperty('--sky-top', css(top));
   home.style.setProperty('--sky-bottom', css(bottom));
   home.style.setProperty('--dark', dark.toFixed(2));
-  home.style.setProperty('--home-ink', dark > 0.5 ? '#eef1ff' : '#1d2433');
+  home.style.setProperty('--home-ink', dark > 0.5 ? '#eef1ff' : '#2b2623');
   home.dataset.dark = String(level);
   const layer = home.querySelector('#sky-layer');
   if (!layer) return;
