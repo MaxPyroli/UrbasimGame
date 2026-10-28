@@ -709,3 +709,6 @@ bien accès au nouveau dépôt.
 
 ### Alertes du trimestre en pastilles (version 0.17.9)
 - `renderPills()` ajoute une pastille par alerte `watchList` de ton `bad`/`warn` (clé `w:<id>`) ; elle reste tant que l'alerte dure, annonce à l'apparition, clic = onglet Trimestre.
+
+### Nom de domaine (urbasim.panamedev.fr)
+- `jeu/public/CNAME` (recopié dans `dist`, donc dans `gh-pages`) déclare le domaine à GitHub Pages ; l'app utilise des chemins relatifs (`base: './'`), aucun autre changement de code. DNS chez OVH : enregistrement CNAME `urbasim` → `maxpyroli.github.io.` ; puis Settings → Pages → Custom domain + « Enforce HTTPS ». Les parties sauvegardées (localStorage) sont liées à l'ancienne adresse et ne suivent pas.

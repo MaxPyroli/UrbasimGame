@@ -1,7 +1,7 @@
 name: Publier le jeu (GitHub Pages)
 
 # À chaque push sur la branche de développement (ou sur main), le jeu est reconstruit et publié
-# sur la branche `gh-pages`, que GitHub Pages sert à https://maxpyroli.github.io/UrbasimGame/
+# sur la branche `gh-pages`, que GitHub Pages sert à https://urbasim.panamedev.fr/ (ancien : maxpyroli.github.io/UrbasimGame)
 on:
   push:
     branches: [claude/blissful-lovelace-0tlrkm, main]
