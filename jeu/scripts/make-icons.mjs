@@ -4,7 +4,7 @@
 import { readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
-const BG = '#14171c';
+const BG = '#041b3b'; // bleu nuit de Grand Paname
 const C = { blue: '#1f6feb', magenta: '#c2185b', yellow: '#e6ab02', green: '#1b9e77' };
 const LIT = '#ffe08a';
 const f = (n) => Math.round(n * 10) / 10;
@@ -58,14 +58,15 @@ function skylineSmall() {
   return out;
 }
 
-const tile = (inner, size, rx) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="Urbasim"><title>Urbasim</title><rect width="${size}" height="${size}" rx="${rx}" fill="${BG}"/>${inner}</svg>\n`;
+/** Marge de la charte (12 %) : le grand dessin est réduit à 90 % et recentré ; la petite version du favicon garde toute sa place. */
+const tile = (inner, size, rx, margin = false) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" role="img" aria-label="Urbasim"><title>Urbasim</title><rect width="${size}" height="${size}" rx="${rx}" fill="${BG}"/>${margin ? `<g transform="translate(25.6 29) scale(.9)">${inner}</g>` : inner}</svg>\n`;
 /** Fond plein écran, dessin réduit pour rester dans la zone de sécurité des icônes « maskable » / iOS. */
 const full = (scale) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="${BG}"/><g transform="translate(${f(256 - 256 * scale)} ${f(256 - 256 * scale)}) scale(${scale})">${skyline()}</g></svg>`;
 
 const dir = new URL('../public/icons/', import.meta.url);
-writeFileSync(new URL('logo.svg', dir), tile(skyline(), 512, 112));
+writeFileSync(new URL('logo.svg', dir), tile(skyline(), 512, 112, true));
 // Le même dessin est importé par le jeu (écran d'accueil, en-tête) : une seule source pour tous les logos.
-writeFileSync(new URL('../src/assets/logo.svg', import.meta.url), tile(skyline(), 512, 112));
+writeFileSync(new URL('../src/assets/logo.svg', import.meta.url), tile(skyline(), 512, 112, true));
 writeFileSync(new URL('favicon.svg', dir), tile(skylineSmall(), 64, 14));
 console.log('logo.svg et favicon.svg écrits');
 
@@ -88,8 +89,8 @@ const png = async (svg, size, file) => {
 await png(tile(skylineSmall(), 64, 14), 32, 'favicon-32.png');
 await png(tile(skylineSmall(), 64, 14), 48, 'favicon-48.png');
 await png(full(0.9), 180, 'apple-touch-icon.png');
-await png(tile(skyline(), 512, 112), 192, 'icon-192.png');
-await png(tile(skyline(), 512, 112), 512, 'icon-512.png');
+await png(tile(skyline(), 512, 112, true), 192, 'icon-192.png');
+await png(tile(skyline(), 512, 112, true), 512, 'icon-512.png');
 await png(full(0.78), 512, 'maskable-512.png');
 await browser.close();
 console.log('PNG écrits : favicon-32, favicon-48, apple-touch-icon, icon-192, icon-512, maskable-512');
